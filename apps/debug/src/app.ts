@@ -1349,6 +1349,14 @@ function bindInput(canvas: HTMLCanvasElement): void {
 		rendererMain?.usePressed();
 	});
 
+	// G 键：打开/关闭准星所指可交互实体的关联浮层（连锁信息不随 F 弹出）。
+	window.addEventListener('keydown', (event) => {
+		if (event.code !== 'KeyG' || event.repeat || !pointerLock.isLocked()) return;
+		const target = event.target as Element | null;
+		if (target && typeof target.closest === 'function' && target.closest('input, textarea, select')) return;
+		rendererMain?.chainPressed();
+	});
+
 	// 鼠标移动：主线程渲染物理输入（灵敏度在此乘入；渲染 tick 同写 SAB 权威端）
 	window.addEventListener('mousemove', (e) => {
 		if (!pointerLock.isLocked()) return;
@@ -1394,8 +1402,10 @@ function bindInput(canvas: HTMLCanvasElement): void {
 		wheelJumpPending = false;
 		// 清主线程渲染物理残留输入（防 ESC 前最后输入/按住键残留）
 		rendererMain?.clearPendingInput();
+		// 准星 F/G 提示只在锁定时显示（未锁定状态下 F/G 也不响应）。
+		rendererMain?.setInteractHintsEnabled(locked);
 		if (locked) {
-			setStatus('Pointer Lock 已锁定。WASD 移动，鼠标视角，F 使用，ESC 退出。', '');
+			setStatus('Pointer Lock 已锁定。WASD 移动，鼠标视角，F 使用，G 关联，ESC 退出。', '');
 		} else {
 			setStatus('Pointer Lock 已解锁。点击画布重新锁定。', '');
 		}

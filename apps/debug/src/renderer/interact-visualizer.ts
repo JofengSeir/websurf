@@ -12,24 +12,20 @@
  *
  * 显示规则：
  * 1. 玩家 NEAR_RANGE 内、类链实现了 `use` 的实体 → 青色脉冲线框；
- * 2. 视线命中的那个（与 F 键同一选靶结果）→ 黄色线框；
- * 3. 按 F 后：从被按实体沿 outputs 展开 2 层目标 → 绿色线框 + 连线，保持 6.5 秒淡出。
+ * 2. 视线命中的那个（与 F/G 键同一选靶结果）→ 黄色线框；
+ * 3. 按 G 打开关联浮层后：从浮层根实体沿 outputs 展开 2 层目标 → 绿色线框 + 连线，
+ *    常驻到浮层关闭（F 只负责使用，不再触发连锁显示）。
  */
 import * as THREE from 'three';
 import type { Entity } from '../../../../src/ts-shared/entity/base-entity.js';
 import type { EntitySystem } from '../../../../src/ts-shared/entity/entity-system.js';
 import type { EntityBrushVolume } from '../../../../src/ts-shared/entity/types.js';
+import { collectEntityChain } from './entity-chain.js';
 
 /** 附近可交互实体的显示半径（HU）。 */
 const NEAR_RANGE = 900;
 /** 最多同时画多少个附近实体（防止大图刷屏/掉帧）。 */
 const MAX_NEAR = 48;
-/** 连锁连线的保持时间（毫秒）。 */
-const CHAIN_HOLD_MS = 6500;
-/** 连锁展开深度（按钮 → counter → 碎墙/门 恰好 2 层）。 */
-const CHAIN_DEPTH = 2;
-/** 同时最多画多少条连线。 */
-const MAX_CHAIN_LINES = 96;
 /** 内部重算间隔（毫秒）：高亮不需要每帧重算，减少实体遍历与几何重建。 */
 const UPDATE_INTERVAL_MS = 90;
 
@@ -165,57 +161,20 @@ export class InteractVisualizer {
     this.active = false;
   }
 
-  /** 按 F 触发后调用：记录被按实体并展开 outputs 连锁（2 层）。 */
-  showChain(entityIndex: number, system: EntitySystem | null): void {
-    if (!system || entityIndex < 0) return;
-    const rootEntity = system.getEntity(entityIndex);
-    if (!rootEntity) return;
+  /** 按 G 打开关联浮层后调用：记录根实体并展开 outputs 连锁（2 层，常驻直到 `hideChain()`）。 */
+  showChainPersistent(entityIndex: number, system: EntitySystem | null): void {
+    const chain = collectEntityChain(system, entityIndex);
+    if (!chain) return;
     this.chainRootIndex = entityIndex;
-    this.chainEdges = this.collectChainEdges(rootEntity, system);
-    this.chainUntil = performance.now() + CHAIN_HOLD_MS;
+    this.chainEdges = chain.edges.map((e) => ({ from: e.from, to: e.to, depth: e.depth }));
+    this.chainUntil = Number.POSITIVE_INFINITY;
   }
 
-  /** 连锁展开：按 targetname 解析 outputs 目标（与实体 I/O 同一份 EntityList 解析规则）。 */
-  private collectChainEdges(rootEntity: Entity, system: EntitySystem): ChainEdge[] {
-    const edges: ChainEdge[] = [];
-    const seen = new Set<number>([rootEntity.index]);
-    let frontier: Entity[] = [rootEntity];
-    for (let depth = 1; depth <= CHAIN_DEPTH && frontier.length > 0; depth++) {
-      const next: Entity[] = [];
-      for (const source of frontier) {
-        for (const output of source.outputs.values()) {
-          for (const action of output.getActionList()) {
-            const targetName = action.target;
-            if (!targetName || targetName.startsWith('!')) continue;
-            const matches = this.resolveTargets(system, targetName);
-            for (const target of matches) {
-              if (target.index === source.index || seen.has(target.index)) continue;
-              seen.add(target.index);
-              next.push(target);
-              edges.push({ from: source.index, to: target.index, depth });
-              if (edges.length >= MAX_CHAIN_LINES) return edges;
-            }
-          }
-        }
-      }
-      frontier = next;
-    }
-    return edges;
-  }
-
-  private resolveTargets(system: EntitySystem, name: string): Entity[] {
-    const out: Entity[] = [];
-    let cur: Entity | null = null;
-    for (let guard = 0; guard < 64; guard++) {
-      const found = system.entList.findEntityByName(cur, name, null, null, null);
-      if (!found) break;
-      // 不按 volumes 过滤：按钮的目标大多是 math_counter / prop_dynamic / env_entity_maker
-      // 这类没有 brush 体积的实体，过滤掉会让连线永远为空（实测按钮有 4 条 OnPressed 连接、
-      // 但 chainEdges 为 0）。
-      out.push(found);
-      cur = found;
-    }
-    return out;
+  /** 收起连锁连线（浮层关闭/换图时调用）。 */
+  hideChain(): void {
+    this.chainRootIndex = null;
+    this.chainEdges = [];
+    this.chainUntil = 0;
   }
 
   /**

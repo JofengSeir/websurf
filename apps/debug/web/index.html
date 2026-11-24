@@ -342,6 +342,102 @@
       line-height: 1.5;
     }
 
+    /* 可交互实体提示：准星下方的 F/G 操作说明（只读展示，不拦点击） */
+    #interactHints {
+      position: absolute; left: 50%; top: calc(50% + 26px);
+      transform: translateX(-50%);
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      pointer-events: none; z-index: 11;
+      padding: 5px 10px; border-radius: var(--r);
+      background: var(--panel-trans); border: 1px solid var(--border);
+      color: var(--text); font-size: 11px; line-height: 1.5;
+      white-space: nowrap;
+    }
+    #interactHints.hidden { display: none; }
+    #interactHintName { color: var(--accent); font-family: var(--mono); }
+    #interactHintKeys kbd {
+      display: inline-block; min-width: 14px; padding: 0 4px; margin: 0 1px;
+      border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 2px;
+      background: rgba(0, 0, 0, 0.35); color: var(--text);
+      font-family: var(--mono); font-size: 10px; text-align: center;
+    }
+    .ih-sep { color: var(--muted); margin: 0 5px; }
+
+    /* G 关联浮层：右侧常驻、可折叠、条目可删 */
+    #interactPanel {
+      position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+      width: 340px; max-width: 42vw; max-height: 64vh;
+      display: flex; flex-direction: column;
+      background: var(--panel-trans); border: 1px solid var(--border-strong);
+      border-left: 2px solid var(--accent); border-radius: var(--r);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35); z-index: 12;
+      font-size: 11px; color: var(--text);
+    }
+    #interactPanel.hidden { display: none; }
+    #interactPanel.collapsed #interactPanelBody { display: none; }
+    #interactPanel.collapsed { width: 240px; }
+    .ip-head {
+      display: flex; align-items: center; gap: 6px; padding: 7px 9px;
+      border-bottom: 1px solid var(--border); cursor: pointer; user-select: none;
+    }
+    .ip-title { font-weight: 600; font-family: var(--mono); color: var(--accent); }
+    .ip-sub { color: var(--muted); font-family: var(--mono); font-size: 10px; }
+    .ip-spacer { flex: 1; }
+    .ip-btn {
+      background: transparent; border: 1px solid var(--border-strong); color: var(--muted);
+      border-radius: 2px; font-size: 10px; line-height: 1.4; padding: 1px 6px; cursor: pointer;
+    }
+    .ip-btn:hover { border-color: var(--accent); color: var(--text); }
+    .ip-body { overflow-y: auto; padding: 4px 0; }
+    .ip-row {
+      display: flex; gap: 6px; padding: 4px 9px; align-items: flex-start;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    }
+    .ip-row:hover { background: rgba(255, 255, 255, 0.03); }
+    .ip-root { background: var(--accent-weak); }
+    .ip-depth { flex: 0 0 22px; color: var(--muted); font-family: var(--mono); font-size: 10px; padding-top: 1px; }
+    .ip-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .ip-name { font-family: var(--mono); color: var(--text); overflow-wrap: anywhere; }
+    .ip-name em { color: var(--muted); font-style: normal; }
+    .ip-tag { color: var(--accent); font-family: var(--mono); overflow-wrap: anywhere; }
+    .ip-link { color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+    .ip-link code { color: var(--warn); font-family: var(--mono); }
+    .ip-acts { flex: 0 0 auto; display: flex; gap: 4px; }
+    .ip-del:hover { border-color: var(--err); color: var(--err); }
+    .ip-empty { color: var(--muted); padding: 10px 12px; }
+    .ip-foot { padding: 7px 9px; border-top: 1px solid var(--border); }
+    .ip-wide { width: 100%; }
+
+    /* 完整信息抽屉（从右侧滑出，覆盖面板） */
+    #interactDrawer {
+      position: absolute; top: 0; right: 0; bottom: 0; width: min(480px, 52vw);
+      display: flex; flex-direction: column;
+      background: var(--panel); border-left: 1px solid var(--border-strong);
+      box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4); z-index: 13;
+      font-size: 11px; color: var(--text);
+    }
+    #interactDrawer.hidden { display: none; }
+    .idr-head { display: flex; align-items: center; gap: 6px; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+    .idr-body { flex: 1; overflow-y: auto; padding: 4px 12px 14px; }
+    .idr-sec { padding: 8px 0 10px; border-bottom: 1px solid var(--border); }
+    .idr-sec-head {
+      display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline;
+      font-weight: 600; color: var(--accent); font-family: var(--mono); margin-bottom: 4px;
+    }
+    .idr-sub { color: var(--muted); font-weight: 400; font-size: 10px; }
+    .idr-edge { color: var(--muted); margin-bottom: 4px; }
+    .idr-edge code { color: var(--warn); font-family: var(--mono); }
+    .idr-grid { color: var(--muted); font-family: var(--mono); font-size: 10px; margin-bottom: 5px; }
+    .idr-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 10px; }
+    .idr-table td { border-top: 1px solid rgba(255, 255, 255, 0.05); padding: 2px 4px; vertical-align: top; }
+    .idr-table td:first-child { color: var(--muted); width: 40%; overflow-wrap: anywhere; }
+    .idr-table td:last-child { color: var(--text); overflow-wrap: anywhere; }
+    .idr-out-title { margin: 7px 0 3px; color: var(--muted); }
+    .idr-out { margin: 0; padding-left: 16px; font-family: var(--mono); font-size: 10px; line-height: 1.8; }
+    .idr-out li { overflow-wrap: anywhere; }
+    .idr-out code { color: var(--warn); }
+    .idr-empty { color: var(--muted); font-size: 10px; }
+
     /* 缺失材质纹理确认弹窗（素色遮罩 + 实色卡） */
     .mt-modal {
       position: fixed; inset: 0; z-index: 100;
@@ -1056,7 +1152,34 @@
           <div id="planeInfo">准星 —</div>
         </div>
         <div id="hints">
-          点击画布锁定鼠标 / WASD 移动 / Space 跳跃 / Ctrl 蹲下 / F 使用 / Esc 退出
+          点击画布锁定鼠标 / WASD 移动 / Space 跳跃 / Ctrl 蹲下 / F 使用 / G 关联 / Esc 退出
+        </div>
+
+        <!-- 可交互实体 UI：准星 F/G 提示 + G 关联浮层 + 完整信息抽屉 -->
+        <div id="interactHints" class="hidden">
+          <div id="interactHintName"></div>
+          <div id="interactHintKeys"></div>
+        </div>
+        <div id="interactPanel" class="hidden" data-ui-block-lock>
+          <div class="ip-head" id="interactPanelHead" title="点击折叠/展开">
+            <span class="ip-title" id="interactPanelTitle">关联</span>
+            <span class="ip-sub" id="interactPanelSub"></span>
+            <span class="ip-spacer"></span>
+            <button class="ip-btn" id="interactPanelCollapse" title="折叠/展开">▾</button>
+            <button class="ip-btn" id="interactPanelClose" title="关闭">×</button>
+          </div>
+          <div class="ip-body" id="interactPanelBody"></div>
+          <div class="ip-foot">
+            <button class="ip-btn ip-wide" id="interactPanelFull">查看全部信息</button>
+          </div>
+        </div>
+        <div id="interactDrawer" class="hidden" data-ui-block-lock>
+          <div class="idr-head">
+            <span class="ip-title" id="interactDrawerTitle">全部信息</span>
+            <span class="ip-spacer"></span>
+            <button class="ip-btn" id="interactDrawerClose" title="关闭">×</button>
+          </div>
+          <div class="idr-body" id="interactDrawerBody"></div>
         </div>
       </div>
     </div>

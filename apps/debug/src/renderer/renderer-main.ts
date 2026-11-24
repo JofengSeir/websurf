@@ -67,6 +67,8 @@ import type { LightingMode } from '../../../../src/renderer-shared/shader/lightm
 import { RenderSession } from '../../../../src/renderer-shared/scene/render-session.js';
 import { BrushEntityVisibility } from '../../../../src/renderer-shared/scene/brush-entity-visibility.js';
 import { InteractVisualizer } from './interact-visualizer.js';
+import { InteractUi } from './interact-ui.js';
+import { collectEntityChain, entityDisplayName, entityHasOutputs } from './entity-chain.js';
 
 /**
  * 渲染采样传输（主线程 → Worker）：本文件把「本地物理每帧的脚底位置 + 该帧渲染时钟」
@@ -176,6 +178,8 @@ export class RendererMain {
   private brushVisibility: BrushEntityVisibility | null = null;
   /** 可交互机关高亮与按钮连锁连线（载图建、换图释放；只读实体数据，不改状态）。 */
   private interactVisualizer: InteractVisualizer | null = null;
+  /** 可交互实体 UI（准星 F/G 提示 + G 关联浮层 + 完整信息抽屉）；DOM 常驻，换图只 reset。 */
+  private interactUi: InteractUi | null = null;
   /**
    * 动态 brush 可见性是否由增强插件（brush-visibility）独占管理。
    * 插件启用时它自己隐藏/恢复几何；主渲染器同时做会让同一区间被两套实例各自
@@ -766,6 +770,7 @@ export class RendererMain {
     this.brushVisibility = null;
     this.interactVisualizer?.dispose();
     this.interactVisualizer = null;
+    this.interactUi?.reset();
     this.bspModelScene = null;
 
     // 子管理器与本地引用清零
@@ -879,7 +884,13 @@ export class RendererMain {
     this.brushVisibility?.dispose();
     this.brushVisibility = new BrushEntityVisibility();
     this.brushVisibility.build(this.getSceneRoot());
-    // 可交互机关高亮 / 按钮连锁连线：与 brush 可见性同一个「载图期建、换图释放」的生命周期。
+    // 可交互机关高亮 / 按钮连锁连线 / F/G 提示浮层：与 brush 可见性同一个「载图期建、换图释放」的生命周期。
+    this.interactUi?.reset();
+    if (!this.interactUi) {
+      this.interactUi = new InteractUi();
+      // G 浮层关闭时收起连锁连线（浮层与连线都由 G 触发，同开同关）。
+      this.interactUi.onPanelClosed = () => this.interactVisualizer?.hideChain();
+    }
     this.interactVisualizer?.dispose();
     this.interactVisualizer = new InteractVisualizer();
     this.interactVisualizer.attach(this.getSceneRoot() as THREE.Object3D);
@@ -1061,6 +1072,7 @@ export class RendererMain {
       if (this.interactVisualizer.update(this.camera, this.gameplay.system, picked, now)) {
         this.needsRender = true;
       }
+      this.updateInteractAim(picked);
     }
 
     // ④ 准星射线：计数器满自适应间距才检测一次；开关关闭时清掉上次结果
@@ -1132,12 +1144,58 @@ export class RendererMain {
     const dir: [number, number, number] = [this._fwdDir.x, this._fwdDir.y, this._fwdDir.z];
     const picked = this.gameplay.pickUseFromView(eye, dir, reach);
     if (picked < 0) return 0;
-    // 先展开连锁再触发：按钮自己的 OnPressed 常带 `!self Kill`，触发后实体被移除，
-    // 再从它读 outputs 就只剩空表（实测连线为空）。
-    this.interactVisualizer?.showChain(picked, this.gameplay.system);
     this.gameplay.useEntity(picked);
     this.needsRender = true;
     return 1;
+  }
+
+  /**
+   * 玩家按 G（关联）：对视线命中的可交互实体展开右侧关联浮层（常驻、可折叠/删除条目），
+   * 连锁连线同时常驻；对同一实体再按 G 关闭（连线一起收起）。
+   *
+   * 与 F 分开：F 只负责 `Use`，关联信息由 G 显式打开（owner 2026-11-24 要求）。
+   * 返回 1 = 命中并已打开/关闭，0 = 视线内没有可交互实体 / 实体系统未就绪。
+   */
+  chainPressed(reach = 80): number {
+    if (!this.camera || !this.gameplay) return 0;
+    this._fwdDir.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    const eye: [number, number, number] = [this.camera.position.x, this.camera.position.y, this.camera.position.z];
+    const dir: [number, number, number] = [this._fwdDir.x, this._fwdDir.y, this._fwdDir.z];
+    const picked = this.gameplay.pickUseFromView(eye, dir, reach);
+    if (picked < 0) return 0;
+    if (this.interactUi?.isOpenFor(picked)) {
+      this.interactUi.closePanel();
+      this.needsRender = true;
+      return 1;
+    }
+    const chain = collectEntityChain(this.gameplay.system, picked);
+    if (!chain) return 0;
+    this.interactUi?.openPanel(chain);
+    this.interactVisualizer?.showChainPersistent(picked, this.gameplay.system);
+    this.needsRender = true;
+    return 1;
+  }
+
+  /** 指针锁定状态变化：未锁定时不显示准星 F/G 提示（该状态下 F/G 也不会响应）。 */
+  setInteractHintsEnabled(on: boolean): void {
+    this.interactUi?.setEnabled(on);
+  }
+
+  /** 准星 F/G 提示：与 F/G 同一选靶结果（`pickUseFromView`），无命中时隐藏。 */
+  private updateInteractAim(picked: number): void {
+    if (!this.interactUi) return;
+    const system = this.gameplay?.system ?? null;
+    const entity = picked >= 0 ? (system?.getEntity(picked) ?? null) : null;
+    if (!entity) {
+      this.interactUi.setAim(null);
+      return;
+    }
+    this.interactUi.setAim({
+      entityIndex: entity.index,
+      title: entityDisplayName(entity),
+      subtitle: `${entity.classname || '?'} #${entity.index}`,
+      hasChain: entityHasOutputs(entity),
+    });
   }
 
   /** 面板实时调整近平面参数：转发共享控制器（判据见 `src/renderer-shared/camera/near-plane.ts`）；
