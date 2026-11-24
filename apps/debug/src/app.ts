@@ -1357,6 +1357,15 @@ function bindInput(canvas: HTMLCanvasElement): void {
 		rendererMain?.chainPressed();
 	});
 
+	// ESC：解锁态下先关关联抽屉、再关关联浮层（锁定时 ESC 由 Pointer Lock 自己处理）。
+	// 关联浮层在指针锁定时不能点按钮，所以「解锁 → ESC 同时收起 UI」是主要键盘出口。
+	window.addEventListener('keydown', (event) => {
+		if (event.code !== 'Escape' || event.repeat || pointerLock.isLocked()) return;
+		const target = event.target as Element | null;
+		if (target && typeof target.closest === 'function' && target.closest('input, textarea, select')) return;
+		if (rendererMain?.dismissInteractUi()) event.preventDefault();
+	});
+
 	// 鼠标移动：主线程渲染物理输入（灵敏度在此乘入；渲染 tick 同写 SAB 权威端）
 	window.addEventListener('mousemove', (e) => {
 		if (!pointerLock.isLocked()) return;
@@ -1402,12 +1411,13 @@ function bindInput(canvas: HTMLCanvasElement): void {
 		wheelJumpPending = false;
 		// 清主线程渲染物理残留输入（防 ESC 前最后输入/按住键残留）
 		rendererMain?.clearPendingInput();
-		// 准星 F/G 提示只在锁定时显示（未锁定状态下 F/G 也不响应）。
+		// 准星 F/G 提示只在锁定时显示（未锁定状态下 F/G 也不响应）；
+		// 关联浮层在解锁后保留，并允许鼠标操作列表（浮层底部有状态提示）。
 		rendererMain?.setInteractHintsEnabled(locked);
 		if (locked) {
 			setStatus('Pointer Lock 已锁定。WASD 移动，鼠标视角，F 使用，G 关联，ESC 退出。', '');
 		} else {
-			setStatus('Pointer Lock 已解锁。点击画布重新锁定。', '');
+			setStatus('Pointer Lock 已解锁。关联浮层可用鼠标操作，ESC 逐层收起；点击画布重新锁定。', '');
 		}
 	});
 

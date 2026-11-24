@@ -342,101 +342,264 @@
       line-height: 1.5;
     }
 
-    /* 可交互实体提示：准星下方的 F/G 操作说明（只读展示，不拦点击） */
+    /* 可交互实体提示：瞄准 use 实体时显示名称 + F/G 作用；只读、不拦点击 */
     #interactHints {
       position: absolute; left: 50%; top: calc(50% + 26px);
-      transform: translateX(-50%);
-      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      transform: translateX(-50%) translateY(-2px);
+      display: flex; flex-direction: column; align-items: center; gap: 1px;
       pointer-events: none; z-index: 11;
-      padding: 5px 10px; border-radius: var(--r);
+      padding: 4px 10px 5px; border-radius: var(--r);
       background: var(--panel-trans); border: 1px solid var(--border);
-      color: var(--text); font-size: 11px; line-height: 1.5;
-      white-space: nowrap;
+      color: var(--text); font-size: 11px; line-height: 1.45; white-space: nowrap;
+      opacity: 0; visibility: hidden;
+      transition: opacity 0.12s ease, transform 0.12s ease, visibility 0s linear 0.12s;
     }
-    #interactHints.hidden { display: none; }
-    #interactHintName { color: var(--accent); font-family: var(--mono); }
+    #interactHints:not(.hidden) {
+      opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0);
+      transition: opacity 0.12s ease, transform 0.12s ease, visibility 0s linear 0s;
+    }
+    #interactHints.is-live { animation: ih-in 0.16s ease-out; }
+    @keyframes ih-in {
+      from { opacity: 0.25; transform: translateX(-50%) translateY(3px); }
+      to { opacity: 1; transform: translateX(-50%) translateY(0); }
+    }
+    .ih-head { display: flex; align-items: baseline; gap: 6px; max-width: 52vw; min-width: 0; }
+    #interactHintName {
+      color: var(--accent); font-family: var(--mono); font-size: 12px;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    #interactHintMeta { flex: 0 0 auto; color: var(--muted); font-family: var(--mono); font-size: 10px; }
+    #interactHintKeys { display: flex; align-items: center; margin-top: 1px; }
+    .ih-key { display: inline-flex; align-items: center; gap: 4px; }
+    .ih-key > span { color: var(--muted); font-size: 10px; }
     #interactHintKeys kbd {
-      display: inline-block; min-width: 14px; padding: 0 4px; margin: 0 1px;
+      display: inline-block; min-width: 15px; padding: 0 4px;
       border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 2px;
       background: rgba(0, 0, 0, 0.35); color: var(--text);
-      font-family: var(--mono); font-size: 10px; text-align: center;
+      font-family: var(--mono); font-size: 10px; text-align: center; line-height: 1.5;
     }
-    .ih-sep { color: var(--muted); margin: 0 5px; }
+    .ih-sep { color: var(--border-strong); margin: 0 8px; }
 
-    /* G 关联浮层：右侧常驻、可折叠、条目可删 */
+    /* G 关联浮层：右侧常驻、可折叠、可滚动；删除只影响本列表 */
     #interactPanel {
-      position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
-      width: 340px; max-width: 42vw; max-height: 64vh;
+      position: absolute; right: 14px; top: 50%;
+      width: 372px; max-width: 40vw; max-height: 68vh;
       display: flex; flex-direction: column;
       background: var(--panel-trans); border: 1px solid var(--border-strong);
       border-left: 2px solid var(--accent); border-radius: var(--r);
-      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35); z-index: 12;
-      font-size: 11px; color: var(--text);
+      box-shadow: 0 8px 26px rgba(0, 0, 0, 0.42); z-index: 12;
+      font-size: 11px; color: var(--text); overflow: hidden;
+      opacity: 1; visibility: visible; transform: translateY(-50%) translateX(0);
+      transition: opacity 0.14s ease, transform 0.14s ease, visibility 0s linear 0s;
     }
-    #interactPanel.hidden { display: none; }
+    #interactPanel.hidden {
+      opacity: 0; visibility: hidden; pointer-events: none;
+      transform: translateY(-50%) translateX(14px);
+      transition: opacity 0.14s ease, transform 0.14s ease, visibility 0s linear 0.14s;
+    }
+    #interactPanel.collapsed { width: 268px; }
     #interactPanel.collapsed #interactPanelBody { display: none; }
-    #interactPanel.collapsed { width: 240px; }
     .ip-head {
-      display: flex; align-items: center; gap: 6px; padding: 7px 9px;
+      display: flex; align-items: center; gap: 8px; padding: 8px 10px;
       border-bottom: 1px solid var(--border); cursor: pointer; user-select: none;
     }
-    .ip-title { font-weight: 600; font-family: var(--mono); color: var(--accent); }
-    .ip-sub { color: var(--muted); font-family: var(--mono); font-size: 10px; }
+    .ip-head-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .ip-head-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+    .ip-title {
+      font-weight: 600; font-family: var(--mono); color: var(--accent); font-size: 12px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .ip-sub {
+      color: var(--muted); font-family: var(--mono); font-size: 10px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .ip-count {
+      flex: 0 0 auto; color: var(--muted); font-family: var(--mono); font-size: 9px;
+      border: 1px solid var(--border); border-radius: 2px; padding: 0 4px; line-height: 1.5;
+    }
     .ip-spacer { flex: 1; }
+    .ip-head-acts { flex: 0 0 auto; display: flex; gap: 4px; }
     .ip-btn {
       background: transparent; border: 1px solid var(--border-strong); color: var(--muted);
       border-radius: 2px; font-size: 10px; line-height: 1.4; padding: 1px 6px; cursor: pointer;
+      font-family: inherit; white-space: nowrap;
     }
-    .ip-btn:hover { border-color: var(--accent); color: var(--text); }
-    .ip-body { overflow-y: auto; padding: 4px 0; }
+    .ip-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+    .ip-btn:disabled { opacity: 0.4; cursor: default; }
+    .ip-btn.hidden { display: none; }
+    .ip-primary { border-color: var(--accent); color: var(--accent); }
+    .ip-primary:hover:not(:disabled) { background: var(--accent-weak); }
+    .ip-body {
+      flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 3px 0 5px;
+      scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
+    }
+    #interactPanelBody::-webkit-scrollbar, .idr-body::-webkit-scrollbar { width: 8px; }
+    #interactPanelBody::-webkit-scrollbar-track, .idr-body::-webkit-scrollbar-track { background: transparent; }
+    #interactPanelBody::-webkit-scrollbar-thumb, .idr-body::-webkit-scrollbar-thumb {
+      background: var(--border-strong); border-radius: 4px; border: 2px solid transparent; background-clip: content-box;
+    }
+    #interactPanelBody::-webkit-scrollbar-thumb:hover, .idr-body::-webkit-scrollbar-thumb:hover { background: var(--accent); background-clip: content-box; }
     .ip-row {
-      display: flex; gap: 6px; padding: 4px 9px; align-items: flex-start;
+      display: flex; gap: 7px; padding: 5px 10px 6px; align-items: flex-start;
       border-bottom: 1px solid rgba(255, 255, 255, 0.04);
     }
     .ip-row:hover { background: rgba(255, 255, 255, 0.03); }
-    .ip-root { background: var(--accent-weak); }
-    .ip-depth { flex: 0 0 22px; color: var(--muted); font-family: var(--mono); font-size: 10px; padding-top: 1px; }
-    .ip-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-    .ip-name { font-family: var(--mono); color: var(--text); overflow-wrap: anywhere; }
-    .ip-name em { color: var(--muted); font-style: normal; }
-    .ip-tag { color: var(--accent); font-family: var(--mono); overflow-wrap: anywhere; }
-    .ip-link { color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
-    .ip-link code { color: var(--warn); font-family: var(--mono); }
-    .ip-acts { flex: 0 0 auto; display: flex; gap: 4px; }
-    .ip-del:hover { border-color: var(--err); color: var(--err); }
-    .ip-empty { color: var(--muted); padding: 10px 12px; }
-    .ip-foot { padding: 7px 9px; border-top: 1px solid var(--border); }
-    .ip-wide { width: 100%; }
+    .ip-root { background: var(--accent-weak); border-bottom-color: var(--border); }
+    .ip-depth {
+      flex: 0 0 20px; color: var(--muted); font-family: var(--mono); font-size: 9px;
+      padding-top: 2px; letter-spacing: 0.02em;
+    }
+    .ip-depth-root { color: var(--accent); }
+    .ip-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .ip-line { display: flex; align-items: baseline; gap: 5px; min-width: 0; flex-wrap: wrap; }
+    .ip-class { font-family: var(--mono); color: var(--text); overflow-wrap: anywhere; }
+    .ip-idx { font-family: var(--mono); color: var(--muted); font-size: 10px; }
+    .ip-name {
+      font-family: var(--mono); color: var(--accent); font-size: 10px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+    }
+    .ip-meta { color: var(--muted); font-size: 10px; }
+    .ip-state {
+      font-size: 9px; line-height: 1.4; padding: 0 4px; border-radius: 2px;
+      border: 1px solid var(--border-strong); color: var(--muted);
+    }
+    .ip-state-disabled { color: var(--warn); border-color: rgba(212, 178, 106, 0.5); }
+    .ip-state-removed { color: var(--err); border-color: rgba(224, 133, 123, 0.5); }
+    .ip-link {
+      display: flex; flex-wrap: wrap; align-items: baseline; gap: 1px 5px;
+      color: var(--muted); font-size: 10px; line-height: 1.5; min-width: 0;
+    }
+    .ip-link.ip-warn { color: var(--warn); }
+    .ip-io {
+      font-family: var(--mono); font-size: 10px; color: var(--warn);
+      background: rgba(212, 178, 106, 0.09); border-radius: 2px; padding: 0 3px;
+    }
+    .ip-io.ip-in { color: var(--text); background: rgba(255, 255, 255, 0.06); }
+    .ip-from {
+      color: var(--muted); max-width: 34%; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap;
+    }
+    .ip-arrow { color: var(--border-strong); }
+    .ip-param { color: var(--muted); }
+    .ip-times { color: var(--warn); }
+    .ip-more { color: var(--muted); font-size: 10px; }
+    .ip-acts { flex: 0 0 auto; display: flex; gap: 4px; opacity: 0.6; transition: opacity 0.12s ease; }
+    .ip-row:hover .ip-acts, #interactPanel:not(.is-locked) .ip-acts { opacity: 1; }
+    #interactPanel.is-locked .ip-acts { opacity: 0.3; pointer-events: none; }
+    .ip-del:hover:not(:disabled) { border-color: var(--err); color: var(--err); }
+    .ip-empty { display: flex; flex-direction: column; gap: 3px; padding: 11px 12px 9px; color: var(--muted); }
+    .ip-empty-title { color: var(--text); font-size: 11px; }
+    .ip-empty-sub { font-size: 10px; line-height: 1.5; }
+    .ip-empty-note { font-size: 10px; line-height: 1.5; color: var(--muted); }
+    .ip-empty-note code, .ip-note code { color: var(--warn); font-family: var(--mono); }
+    .ip-frozen .ip-empty-title { color: var(--err); }
+    .ip-note {
+      padding: 5px 12px 4px; color: var(--muted); font-size: 10px; line-height: 1.5;
+      border-top: 1px dashed rgba(255, 255, 255, 0.06);
+    }
+    .ip-group-head {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 6px;
+      padding: 7px 10px 2px; color: var(--muted); font-family: var(--mono); font-size: 9px;
+      letter-spacing: 0.05em;
+    }
+    .ip-group-count { color: var(--border-strong); }
+    .ip-group .ip-row { padding-left: 10px; }
+    .ip-foot { border-top: 1px solid var(--border); padding: 7px 10px 6px; display: flex; flex-direction: column; gap: 4px; }
+    .ip-foot-row { display: flex; align-items: center; gap: 6px; }
+    .ip-foot-state { color: var(--muted); font-size: 10px; line-height: 1.45; }
+    .ip-foot-state kbd {
+      display: inline-block; padding: 0 3px; border: 1px solid var(--border-strong);
+      border-radius: 2px; background: rgba(0, 0, 0, 0.3); color: var(--text);
+      font-family: var(--mono); font-size: 9px; line-height: 1.5;
+    }
+    .ip-foot-state.is-unlocked { color: var(--muted); }
 
-    /* 完整信息抽屉（从右侧滑出，覆盖面板） */
+    /* 完整信息抽屉（从右侧滑出，覆盖浮层） */
     #interactDrawer {
-      position: absolute; top: 0; right: 0; bottom: 0; width: min(480px, 52vw);
+      position: absolute; top: 0; right: 0; bottom: 0; width: min(520px, 48vw);
       display: flex; flex-direction: column;
       background: var(--panel); border-left: 1px solid var(--border-strong);
-      box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4); z-index: 13;
+      box-shadow: -10px 0 28px rgba(0, 0, 0, 0.45); z-index: 13;
       font-size: 11px; color: var(--text);
+      opacity: 1; visibility: visible; transform: translateX(0);
+      transition: opacity 0.16s ease, transform 0.16s ease, visibility 0s linear 0s;
     }
-    #interactDrawer.hidden { display: none; }
-    .idr-head { display: flex; align-items: center; gap: 6px; padding: 9px 12px; border-bottom: 1px solid var(--border); }
-    .idr-body { flex: 1; overflow-y: auto; padding: 4px 12px 14px; }
-    .idr-sec { padding: 8px 0 10px; border-bottom: 1px solid var(--border); }
+    #interactDrawer.hidden {
+      opacity: 0; visibility: hidden; pointer-events: none; transform: translateX(24px);
+      transition: opacity 0.16s ease, transform 0.16s ease, visibility 0s linear 0.16s;
+    }
+    .idr-head {
+      display: flex; align-items: center; gap: 8px; padding: 9px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .idr-head-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .idr-subhead {
+      color: var(--muted); font-family: var(--mono); font-size: 10px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .idr-body {
+      flex: 1; overflow-y: auto; padding: 5px 12px 18px;
+      scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
+    }
+    .idr-sec { padding: 10px 0 12px; border-bottom: 1px solid var(--border); }
+    .idr-sec:last-child { border-bottom: none; }
     .idr-sec-head {
       display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline;
-      font-weight: 600; color: var(--accent); font-family: var(--mono); margin-bottom: 4px;
+      margin-bottom: 5px; font-family: var(--mono);
     }
-    .idr-sub { color: var(--muted); font-weight: 400; font-size: 10px; }
-    .idr-edge { color: var(--muted); margin-bottom: 4px; }
-    .idr-edge code { color: var(--warn); font-family: var(--mono); }
-    .idr-grid { color: var(--muted); font-family: var(--mono); font-size: 10px; margin-bottom: 5px; }
+    .idr-badge {
+      color: var(--bg); background: var(--accent); font-size: 9px; line-height: 1.5;
+      padding: 0 5px; border-radius: 2px; font-family: var(--mono);
+    }
+    .idr-name { color: var(--accent); font-family: var(--mono); font-size: 11px; font-weight: 600; overflow-wrap: anywhere; }
+    .idr-class { color: var(--text); font-family: var(--mono); font-size: 10px; }
+    .idr-idx { color: var(--muted); font-family: var(--mono); font-size: 10px; }
+    .idr-incoming {
+      display: flex; flex-wrap: wrap; gap: 2px 6px; align-items: baseline;
+      padding: 4px 7px; margin-bottom: 6px; font-size: 10px; color: var(--muted);
+      background: rgba(0, 0, 0, 0.18); border-left: 2px solid var(--border-strong);
+    }
+    .idr-k { color: var(--muted); }
+    .idr-more { color: var(--warn); }
+    .idr-grid {
+      display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 2px 8px;
+      margin: 0 0 6px; font-family: var(--mono); font-size: 10px;
+    }
+    .idr-kv { display: contents; }
+    .idr-grid dt { color: var(--muted); font-weight: 400; }
+    .idr-grid dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+    .idr-sec-title {
+      display: flex; align-items: baseline; gap: 6px; margin: 8px 0 4px;
+      color: var(--muted); font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase;
+    }
+    .idr-count { color: var(--accent); font-family: var(--mono); }
+    .idr-sub { color: var(--muted); font-size: 10px; line-height: 1.5; }
     .idr-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 10px; }
     .idr-table td { border-top: 1px solid rgba(255, 255, 255, 0.05); padding: 2px 4px; vertical-align: top; }
     .idr-table td:first-child { color: var(--muted); width: 40%; overflow-wrap: anywhere; }
     .idr-table td:last-child { color: var(--text); overflow-wrap: anywhere; }
-    .idr-out-title { margin: 7px 0 3px; color: var(--muted); }
-    .idr-out { margin: 0; padding-left: 16px; font-family: var(--mono); font-size: 10px; line-height: 1.8; }
-    .idr-out li { overflow-wrap: anywhere; }
-    .idr-out code { color: var(--warn); }
-    .idr-empty { color: var(--muted); font-size: 10px; }
+    .idr-out-title { display: flex; align-items: baseline; gap: 6px; margin: 7px 0 2px; }
+    .idr-out-title code { color: var(--warn); font-family: var(--mono); font-size: 10px; }
+    .idr-out-count { color: var(--muted); font-size: 9px; }
+    .idr-out-list {
+      margin: 0; padding: 0; list-style: none;
+      font-family: var(--mono); font-size: 10px; line-height: 1.7;
+    }
+    .idr-out-list li { display: flex; flex-wrap: wrap; gap: 2px 5px; align-items: baseline; overflow-wrap: anywhere; }
+    .idr-arrow { color: var(--border-strong); }
+    .idr-target { color: var(--text); }
+    .idr-input { color: var(--accent); font-family: var(--mono); }
+    .idr-meta { color: var(--muted); }
+    .idr-warn { color: var(--warn); }
+    .idr-special { color: var(--err); }
+    .idr-note { margin-top: 9px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+    .idr-note code { color: var(--warn); font-family: var(--mono); }
+    .idr-empty { padding: 16px 0; color: var(--muted); font-size: 10px; }
+
+    @media (prefers-reduced-motion: reduce) {
+      #interactHints, #interactPanel, #interactDrawer, .ip-acts { transition: none !important; }
+      #interactHints.is-live { animation: none; }
+    }
 
     /* 缺失材质纹理确认弹窗（素色遮罩 + 实色卡） */
     .mt-modal {
@@ -1156,27 +1319,58 @@
         </div>
 
         <!-- 可交互实体 UI：准星 F/G 提示 + G 关联浮层 + 完整信息抽屉 -->
-        <div id="interactHints" class="hidden">
-          <div id="interactHintName"></div>
+        <div id="interactHints" class="hidden" aria-hidden="true">
+          <div class="ih-head">
+            <div id="interactHintName"></div>
+            <div id="interactHintMeta"></div>
+          </div>
           <div id="interactHintKeys"></div>
         </div>
-        <div id="interactPanel" class="hidden" data-ui-block-lock>
+        <div
+          id="interactPanel"
+          class="hidden"
+          data-ui-block-lock
+          role="dialog"
+          aria-label="关联信息"
+          aria-hidden="true"
+        >
           <div class="ip-head" id="interactPanelHead" title="点击折叠/展开">
-            <span class="ip-title" id="interactPanelTitle">关联</span>
-            <span class="ip-sub" id="interactPanelSub"></span>
-            <span class="ip-spacer"></span>
-            <button class="ip-btn" id="interactPanelCollapse" title="折叠/展开">▾</button>
-            <button class="ip-btn" id="interactPanelClose" title="关闭">×</button>
+            <div class="ip-head-main">
+              <div class="ip-head-line">
+                <span class="ip-title" id="interactPanelTitle">关联</span>
+                <span class="ip-count" id="interactPanelCount"></span>
+              </div>
+              <span class="ip-sub" id="interactPanelSub"></span>
+            </div>
+            <div class="ip-head-acts">
+              <button class="ip-btn" id="interactPanelCollapse" title="折叠/展开" aria-expanded="true">▾</button>
+              <button class="ip-btn" id="interactPanelClose" title="关闭（G）">×</button>
+            </div>
           </div>
           <div class="ip-body" id="interactPanelBody"></div>
           <div class="ip-foot">
-            <button class="ip-btn ip-wide" id="interactPanelFull">查看全部信息</button>
+            <div class="ip-foot-row">
+              <button class="ip-btn hidden" id="interactPanelUndo">恢复已删 (0)</button>
+              <span class="ip-spacer"></span>
+              <button class="ip-btn ip-primary" id="interactPanelFull">查看全部信息</button>
+            </div>
+            <div class="ip-foot-state" id="interactPanelState"></div>
           </div>
         </div>
-        <div id="interactDrawer" class="hidden" data-ui-block-lock>
+        <div
+          id="interactDrawer"
+          class="hidden"
+          data-ui-block-lock
+          role="dialog"
+          aria-label="全部信息"
+          aria-hidden="true"
+        >
           <div class="idr-head">
-            <span class="ip-title" id="interactDrawerTitle">全部信息</span>
-            <span class="ip-spacer"></span>
+            <div class="idr-head-main">
+              <span class="ip-title" id="interactDrawerTitle">全部信息</span>
+              <span class="idr-subhead" id="interactDrawerSub"></span>
+            </div>
+            <button class="ip-btn" id="interactDrawerCopy" title="复制为纯文本">复制</button>
             <button class="ip-btn" id="interactDrawerClose" title="关闭">×</button>
           </div>
           <div class="idr-body" id="interactDrawerBody"></div>

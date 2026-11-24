@@ -184,6 +184,11 @@ const NUMERIC_RENAME_ALLOW = new Set([
   // 移动 brush（func_movelinear 位移驱动）落地后 debug/game 顶层命名冲突变化，
   // esbuild 给局部标识符加数字后缀；语义同一份源码，非实现分叉。
   'src/ts-shared/entity/classes/brush.ts',
+  // G 键关联 UI 重做（interact-ui/entity-chain 等 debug 新模块）改变 debug bundle
+  // 顶层命名空间，esbuild 对这两个共享模块内的局部标识符也加了数字后缀；
+  // 归一化后 debug/game 文本逐字相同（同一份源码、同一套导出），非实现分叉。
+  'src/renderer-shared/config/render-panel-ui.ts',
+  'src/ts-shared/entity/variant.ts',
 ]);
 
 /**

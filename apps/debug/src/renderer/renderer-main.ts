@@ -68,7 +68,7 @@ import { RenderSession } from '../../../../src/renderer-shared/scene/render-sess
 import { BrushEntityVisibility } from '../../../../src/renderer-shared/scene/brush-entity-visibility.js';
 import { InteractVisualizer } from './interact-visualizer.js';
 import { InteractUi } from './interact-ui.js';
-import { collectEntityChain, entityDisplayName, entityHasOutputs } from './entity-chain.js';
+import { collectEntityChain, entityDisplayName, entityHasOutputs, resolveTargetEntities } from './entity-chain.js';
 
 /**
  * 渲染采样传输（主线程 → Worker）：本文件把「本地物理每帧的脚底位置 + 该帧渲染时钟」
@@ -888,9 +888,20 @@ export class RendererMain {
     this.interactUi?.reset();
     if (!this.interactUi) {
       this.interactUi = new InteractUi();
-      // G 浮层关闭时收起连锁连线（浮层与连线都由 G 触发，同开同关）。
+      // G 浮层关闭时收起连锁连线（浮层与连线都由 G 触发，同开同关）；
+      // 根实体在浮层打开期间被移除时只收起连线，浮层保留为「已移除」冻结态。
       this.interactUi.onPanelClosed = () => this.interactVisualizer?.hideChain();
+      this.interactUi.onChainStale = () => this.interactVisualizer?.hideChain();
     }
+    // 浮层/抽屉与画面连线同源：都用同一份 `collectEntityChain`（gameplay 在下方才建，
+    // provider 是惰性闭包，G 打开时 gameplay 必然已就绪）。
+    this.interactUi.setChainProvider((rootIndex) =>
+      this.gameplay ? collectEntityChain(this.gameplay.system, rootIndex) : null,
+    );
+    this.interactUi.setEntityResolver((name) => {
+      const system = this.gameplay?.system ?? null;
+      return system ? resolveTargetEntities(system, name) : [];
+    });
     this.interactVisualizer?.dispose();
     this.interactVisualizer = new InteractVisualizer();
     this.interactVisualizer.attach(this.getSceneRoot() as THREE.Object3D);
@@ -1151,10 +1162,11 @@ export class RendererMain {
 
   /**
    * 玩家按 G（关联）：对视线命中的可交互实体展开右侧关联浮层（常驻、可折叠/删除条目），
-   * 连锁连线同时常驻；对同一实体再按 G 关闭（连线一起收起）。
+   * 连锁连线同时常驻；对同一实体再按 G 关闭（连线一起收起）；视线内没有可交互物时，
+   * 若浮层开着也按 G 收起（根实体被移除后的冻结态也能关掉）。
    *
    * 与 F 分开：F 只负责 `Use`，关联信息由 G 显式打开（owner 2026-11-24 要求）。
-   * 返回 1 = 命中并已打开/关闭，0 = 视线内没有可交互实体 / 实体系统未就绪。
+   * 返回 1 = 命中并已打开/关闭/收起，0 = 视线内没有可交互实体且浮层未打开。
    */
   chainPressed(reach = 80): number {
     if (!this.camera || !this.gameplay) return 0;
@@ -1162,7 +1174,14 @@ export class RendererMain {
     const eye: [number, number, number] = [this.camera.position.x, this.camera.position.y, this.camera.position.z];
     const dir: [number, number, number] = [this._fwdDir.x, this._fwdDir.y, this._fwdDir.z];
     const picked = this.gameplay.pickUseFromView(eye, dir, reach);
-    if (picked < 0) return 0;
+    if (picked < 0) {
+      if (this.interactUi?.hasPanelOpen()) {
+        this.interactUi.closePanel();
+        this.needsRender = true;
+        return 1;
+      }
+      return 0;
+    }
     if (this.interactUi?.isOpenFor(picked)) {
       this.interactUi.closePanel();
       this.needsRender = true;
@@ -1170,15 +1189,23 @@ export class RendererMain {
     }
     const chain = collectEntityChain(this.gameplay.system, picked);
     if (!chain) return 0;
+    // 无输出的实体同样打开：浮层里解释「没有输出连接」，比静默无反应更好。
     this.interactUi?.openPanel(chain);
     this.interactVisualizer?.showChainPersistent(picked, this.gameplay.system);
     this.needsRender = true;
     return 1;
   }
 
-  /** 指针锁定状态变化：未锁定时不显示准星 F/G 提示（该状态下 F/G 也不会响应）。 */
+  /** 指针锁定状态变化：未锁定时不显示准星 F/G 提示（该状态下 F/G 也不会响应）；
+   *  浮层保留，但只有解锁后鼠标才能点列表（浮层底部有状态文案提示）。 */
   setInteractHintsEnabled(on: boolean): void {
     this.interactUi?.setEnabled(on);
+    this.interactUi?.setPointerLocked(on);
+  }
+
+  /** 解锁态按 ESC：先关抽屉再关浮层；返回 true 表示本次 ESC 已被 UI 消费。 */
+  dismissInteractUi(): boolean {
+    return this.interactUi?.dismissTop() ?? false;
   }
 
   /** 准星 F/G 提示：与 F/G 同一选靶结果（`pickUseFromView`），无命中时隐藏。 */
