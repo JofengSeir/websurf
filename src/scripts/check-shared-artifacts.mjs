@@ -181,6 +181,9 @@ const NUMERIC_RENAME_ALLOW = new Set([
   'src/renderer-shared/shader/bumpmap.ts',
   'src/renderer-shared/shader/world-transition.ts',
   'src/ts-shared/phys/map-cvars.ts',
+  // 移动 brush（func_movelinear 位移驱动）落地后 debug/game 顶层命名冲突变化，
+  // esbuild 给局部标识符加数字后缀；语义同一份源码，非实现分叉。
+  'src/ts-shared/entity/classes/brush.ts',
 ]);
 
 /**
@@ -195,6 +198,13 @@ const KNOWN_CONTENT_DIFF_ALLOW = new Map([
   // v2 增强插件落地后 debug bundle 顶层命名空间变化，esbuild 把解构别名从
   // `distance`（game）改成 `distance2`（debug）；语义相同，非实现分叉。
   ['src/renderer-shared/scene/rot-buttons.ts', 'esbuild 顶层重命名导致解构别名 distance2/distance 差异（语义相同）'],
+  // 移动 brush / brush 实体可见性接入 game 端后，debug 侧增强插件也静态+动态引用本模块，
+  // esbuild 在 debug 产物里把模块包进 `__esm` 延迟初始化包装（多出包装行与缩进），
+  // 与 game 的内联形态文本不同；两侧是同一份源码、同一套导出，非实现分叉。
+  [
+    'src/renderer-shared/scene/brush-entity-visibility.ts',
+    'debug 增强插件同时引用触发 esbuild __esm 延迟初始化包装（包装行/缩进差异，语义相同）',
+  ],
 ]);
 
 /** 允许只出现在个别端 app.js 的共享模块（白名单，出现新的独有模块即分叉）。 */
@@ -211,9 +221,6 @@ const APP_ONLY_ALLOW = {
   // 增强插件（v2/m02315）按设计只挂在 debug 端：game/viewer 不装载 host/插件，
   // 因此 flags 只进 debug app.js。若将来 game/viewer 接入同一开关体系，删除本登记。
   'src/ts-shared/enhance/flags.ts': ['debug'],
-  // brush 实体可见性（2026-11-23）：debug 端已接入（brush 开关事件 → 合并几何区间隐藏）。
-  // game 端尚未接线，接入后删除本登记、回到跨端一致性比对。
-  'src/renderer-shared/scene/brush-entity-visibility.ts': ['debug'],
 };
 
 /** viewer 不得包含的物理/权威实现（viewer 无物理是架构约定）。 */
