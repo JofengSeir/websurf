@@ -113,6 +113,10 @@ mod jump_height_tests;
 #[cfg(test)]
 mod brush_solid_tests;
 
+/// 移动 brush（`World::set_entity_offset` / `PhysWorld::set_brush_offset` + 载客）。
+#[cfg(test)]
+mod brush_offset_tests;
+
 #[cfg(test)]
 mod teleport_switch_tests;
 
@@ -368,6 +372,9 @@ impl PhysWorld {
 
         // 3. 空间索引
         self.world.build_index();
+        // 3.5 记下 brush 几何基准：运行期移动 brush（电梯/移动平台）按实体整体平移，
+        //     每次从这份快照重算，避免逐帧累加漂移（见 World::set_entity_offset）。
+        self.world.capture_base_solids();
 
         // 4. teleport
         self.teleport = TeleportManager::from_json(teleport_json)
@@ -1056,6 +1063,81 @@ impl PhysWorld {
             .get(entity as usize)
             .copied()
             .unwrap_or(true)
+    }
+
+    /// 运行期平移某个实体的全部 brush（电梯 / 移动平台 / 可移动门）。
+    ///
+    /// `entity` 是实体枚举下标；`x` / `y` / `z` 是相对**基准几何**的位移（绝对量）。
+    /// 世界几何（`entity < 0`）不可移动；世界未 `build_world` 时无效果。
+    ///
+    /// 只动该实体的 brush 并重建 brush 空间索引（`BrushGrid` 是按值副本），三角网格不变。
+    /// 返回命中的 brush 数（0 = 该实体没有实心 brush）。消费方：TS 移动 brush 驱动
+    /// （`EntityGameplay` → 主线程预测物理）每帧下发；权威 Worker 侧是否跟随见宿主接线。
+    pub fn set_brush_offset(&mut self, entity: i32, x: f64, y: f64, z: f64) -> usize {
+        if entity < 0 || !x.is_finite() || !y.is_finite() || !z.is_finite() {
+            return 0;
+        }
+        let previous = self
+            .world
+            .entity_offsets
+            .get(entity as usize)
+            .copied()
+            .unwrap_or([0.0; 3]);
+        let delta = [x - previous[0], y - previous[1], z - previous[2]];
+        let moved = self.world.set_entity_offset(entity, [x, y, z]);
+        if moved > 0 && (delta[0] != 0.0 || delta[1] != 0.0 || delta[2] != 0.0) {
+            self.carry_player_on_moved_brush(entity, previous, delta);
+        }
+        moved
+    }
+
+    /// 玩家站在本次被移动的 brush 上时，把玩家一起带走（Source 的 `CBaseEntity` 载客语义
+    /// 的等价近似）：只做平移，不改速度/视角；不在其上或悬空则不动。
+    ///
+    /// 判定用**移动前**的几何（`base_solids + previous`）：脚底 y 与 brush 顶面差 ≤ 2 HU、
+    /// 水平位置落在 brush AABB 外扩 2 HU 内即视为「站在上面」。命中第一个这样的 brush 就
+    /// 整段位移，不再重复叠加。
+    fn carry_player_on_moved_brush(&mut self, entity: i32, previous: [f64; 3], delta: [f64; 3]) {
+        if !self.player.on_ground {
+            return;
+        }
+        let feet = self.player.origin;
+        for base in &self.world.base_solids {
+            if base.entity != entity {
+                continue;
+            }
+            let min = [
+                base.min[0] + previous[0],
+                base.min[1] + previous[1],
+                base.min[2] + previous[2],
+            ];
+            let max = [
+                base.max[0] + previous[0],
+                base.max[1] + previous[1],
+                base.max[2] + previous[2],
+            ];
+            let on_top = (feet[1] - max[1]).abs() <= 2.0;
+            let inside_x = feet[0] >= min[0] - 2.0 && feet[0] <= max[0] + 2.0;
+            let inside_z = feet[2] >= min[2] - 2.0 && feet[2] <= max[2] + 2.0;
+            if on_top && inside_x && inside_z {
+                self.player.origin[0] += delta[0];
+                self.player.origin[1] += delta[1];
+                self.player.origin[2] += delta[2];
+                return;
+            }
+        }
+    }
+
+    /// 查询某个实体 brush 当前的位移（诊断 / 断言用；未登记返回 `[0,0,0]`）。
+    pub fn brush_offset(&self, entity: i32) -> Vec<f64> {
+        if entity < 0 {
+            return vec![0.0; 3];
+        }
+        self.world
+            .entity_offsets
+            .get(entity as usize)
+            .map(|offset| offset.to_vec())
+            .unwrap_or_else(|| vec![0.0; 3])
     }
 
     /// 设置起跳高度（HU）：下一步起跳的初速按 `sqrt(2·gravity·height)` 反推。

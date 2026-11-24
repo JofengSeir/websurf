@@ -117,9 +117,14 @@ interface Slot {
   readonly count: number;
   /** 每单位在 array 里的原始元素数：index=1，position=3。 */
   readonly width: 1 | 3;
-  /** vertex 模式：属于该实体区间的顶点下标（已去重）。 */
+  /** 该区间用到的顶点下标（去重；index 模式从 index 缓冲收集，position 模式连续区间）。 */
   readonly vertices?: readonly number[];
-  /** 隐藏前的原始元素备份（长度 = count * width）；null = 当前未隐藏。 */
+  /** 顶点位置属性/缓冲（位移写回用；index 模式下它和 `attribute` 不是同一个）。 */
+  readonly positionAttribute?: AttributeLike;
+  readonly positionArray?: NumericArray;
+  /** 顶点基准位置（与 `vertices` 同序，每顶点 3 个元素；位移 = base + offset）。 */
+  readonly basePositions?: number[];
+  /** 隐藏前的原始 index 元素备份（仅 index 模式；null = 当前未隐藏）。 */
   backup: number[] | null;
 }
 
@@ -133,6 +138,8 @@ interface EntityBinding {
   /** 其中靠顶点塌缩隐藏的区间数（非索引 / PVS 重排几何，如实暴露口径）。 */
   vertexSlots: number;
   hidden: boolean;
+  /** 当前位移（相对 BSP 出生位置，Y-up）；隐藏时仍记录，恢复时按它写回。 */
+  offset: [number, number, number];
 }
 
 /** `stats()` 的诊断口径（与应用层状态行/日志字段一一对应）。 */
@@ -170,6 +177,12 @@ export interface BrushEntityVisibilityStats {
 
 /** `setEntityHidden()` 的结果：调用方据此保持原有日志文案与顺序。 */
 export type BrushEntityHideResult =
+  | { readonly status: 'changed'; readonly rebuilt: boolean; readonly triangles: number; readonly slots: number }
+  | { readonly status: 'unchanged'; readonly rebuilt: boolean }
+  | { readonly status: 'unresolved'; readonly rebuilt: boolean };
+
+/** `setEntityOffset()` 的结果：位移与隐藏一样，定位不到时只计数、不误伤几何。 */
+export type BrushEntityOffsetResult =
   | { readonly status: 'changed'; readonly rebuilt: boolean; readonly triangles: number; readonly slots: number }
   | { readonly status: 'unchanged'; readonly rebuilt: boolean }
   | { readonly status: 'unresolved'; readonly rebuilt: boolean };
@@ -250,6 +263,34 @@ function copyVertices(array: NumericArray, vertices: readonly number[]): number[
   return backup;
 }
 
+/**
+ * 把一组顶点位置写成 `base + offset`（移动 brush 的逐帧位移）。
+ *
+ * 只写 position、不碰 index：几何是按来源合并的静态缓冲，没有「实体 → 节点变换」，
+ * 实体的出生位置已经烘进顶点（BSP 几何 + origin 平移），所以位移只能在顶点上做。
+ * 位移与隐藏互斥：隐藏时区间已被塌缩，调用方只在 `!binding.hidden` 时写。
+ */
+function writeVertexPositions(
+  array: NumericArray,
+  vertices: readonly number[],
+  base: readonly number[],
+  offset: readonly [number, number, number],
+): void {
+  for (let i = 0; i < vertices.length; i += 1) {
+    const target = vertices[i] * 3;
+    array[target] = base[i * 3] + offset[0];
+    array[target + 1] = base[i * 3 + 1] + offset[1];
+    array[target + 2] = base[i * 3 + 2] + offset[2];
+  }
+}
+
+/** 连续区间顶点下标（非索引几何：一个区间就是一串顶点）。 */
+function continuousVertices(start: number, count: number): number[] {
+  const vertices = new Array<number>(count);
+  for (let i = 0; i < count; i += 1) vertices[i] = start + i;
+  return vertices;
+}
+
 /** 把一组顶点位置塌到首顶点（退化三角形）；PVS 只重排 index，position 稳定。 */
 function collapseVertices(array: NumericArray, vertices: readonly number[]): void {
   const anchorOffset = vertices[0] * 3;
@@ -303,6 +344,8 @@ export class BrushEntityVisibility {
   private root: SceneRootLike | null = null;
   /** 事件与载图初态共同驱动的「应隐藏」集合；重建索引后按它重放。 */
   private readonly desiredHidden = new Set<number>();
+  /** 移动 brush 的位移镜像（事件驱动的绝对偏移；重建索引后按它重放）。 */
+  private readonly desiredOffsets = new Map<number, [number, number, number]>();
   private tablesAccepted = 0;
   private tablesRejected = 0;
   private bindingSlots = 0;
@@ -329,6 +372,7 @@ export class BrushEntityVisibility {
     this.restoreAll();
     this.reset();
     this.desiredHidden.clear();
+    this.desiredOffsets.clear();
     const root = sceneRoot as SceneRootLike | null | undefined;
     if (!root || typeof root.traverse !== 'function') {
       this.limitations.push('宿主未注入 sceneRoot：拿不到合并后的几何（面板状态行会显示未载图）');
@@ -394,6 +438,49 @@ export class BrushEntityVisibility {
     for (const binding of this.bindings.values()) {
       if (binding.hidden) this.setBindingHidden(binding, false);
     }
+    // 位移也还原到基准：换图后重建索引时会把当前 position 当成新基准，
+    // 若不先归零，位移会被「烘」进基准并在下一轮叠加。
+    for (const binding of this.bindings.values()) {
+      const offset = binding.offset;
+      if (offset[0] === 0 && offset[1] === 0 && offset[2] === 0) continue;
+      binding.offset = [0, 0, 0];
+      for (const slot of binding.slots) this.writeSlotOffset(slot, [0, 0, 0]);
+    }
+  }
+
+  /**
+   * 设置移动 brush 的绝对位移（相对 BSP 出生位置，Y-up，单位 HU）。
+   *
+   * 只写 position 顶点；index / 结构不重建（隐藏中的实体只记目标位移，恢复时按它写回）。
+   * 与 `setEntityHidden` 共用 PVS 换缓冲检测：位移依赖的顶点集合来自登记时的缓冲，
+   * 缓冲被换掉后必须重建索引再写。
+   */
+  setEntityOffset(
+    entityIndex: number,
+    offset: [number, number, number],
+  ): BrushEntityOffsetResult {
+    const previous = this.desiredOffsets.get(entityIndex);
+    this.desiredOffsets.set(entityIndex, offset);
+    let rebuilt = false;
+    if (this.hasStaleIndexBuffer()) {
+      this.refresh();
+      rebuilt = true;
+    }
+    const binding = this.bindings.get(entityIndex);
+    if (!binding) return { status: 'unresolved', rebuilt };
+    if (
+      previous
+      && previous[0] === offset[0]
+      && previous[1] === offset[1]
+      && previous[2] === offset[2]
+    ) {
+      return { status: 'unchanged', rebuilt };
+    }
+    binding.offset = [offset[0], offset[1], offset[2]];
+    if (!binding.hidden) {
+      for (const slot of binding.slots) this.writeSlotOffset(slot, binding.offset);
+    }
+    return { status: 'changed', rebuilt, triangles: binding.triangles, slots: binding.slots.length };
   }
 
   /** 诊断快照：实体/区间/隐藏计数与限制文本（字段口径与应用层状态行一致）。 */
@@ -424,6 +511,7 @@ export class BrushEntityVisibility {
     this.restoreAll();
     this.reset();
     this.desiredHidden.clear();
+    this.desiredOffsets.clear();
   }
 
   // ── 内部实现 ─────────────────────────────────────────────────────────────
@@ -462,6 +550,7 @@ export class BrushEntityVisibility {
       this.indexGeometry(geometry, object);
     });
     this.applyDesiredHidden();
+    this.applyDesiredOffsets();
     this.rebuilds += 1;
   }
 
@@ -549,10 +638,12 @@ export class BrushEntityVisibility {
           indexSlots: 0,
           vertexSlots: 0,
           hidden: false,
+          offset: [0, 0, 0],
         };
         this.bindings.set(entityIndex, binding);
       }
       if (mode === 'vertex' && origIndex) {
+        const vertices = collectRangeVertices(origIndex, range.start, range.count);
         binding.slots.push({
           attribute: positionAttribute,
           array: positionArray,
@@ -560,12 +651,19 @@ export class BrushEntityVisibility {
           start: 0,
           count: 0,
           width: 3,
-          vertices: collectRangeVertices(origIndex, range.start, range.count),
+          vertices,
+          positionAttribute,
+          positionArray,
+          // 登记时 position 处于基准位置（build/refresh 前都先 restoreAll 归零位移）。
+          basePositions: copyVertices(positionArray, vertices),
           backup: null,
         });
         binding.vertexSlots += 1;
         this.vertexSlots += 1;
       } else {
+        const vertices = mode === 'index'
+          ? collectRangeVertices(array, range.start, range.count)
+          : continuousVertices(range.start, range.count);
         binding.slots.push({
           attribute,
           array,
@@ -575,6 +673,10 @@ export class BrushEntityVisibility {
           start: range.start,
           count: range.count,
           width,
+          vertices,
+          positionAttribute,
+          positionArray,
+          basePositions: copyVertices(positionArray, vertices),
           backup: null,
         });
         if (mode === 'index') {
@@ -592,38 +694,40 @@ export class BrushEntityVisibility {
     this.tablesAccepted += 1;
   }
 
-  /** 隐藏/恢复单个实体的全部区间；写回备份或退化，并置 needsUpdate。 */
+  /**
+   * 隐藏/恢复单个实体的全部区间；写回备份或退化，并置 needsUpdate。
+   *
+   * 隐藏时：index 模式备份原 index 再写 0；position/vertex 模式靠顶点塌缩。
+   * 恢复时：index 模式先还原 index 备份，再把 position 按 `基准 + 当前位移` 写回
+   * （隐藏期间移动 brush 的位移事件只记数不写点，恢复时必须补写）。
+   */
   private setBindingHidden(binding: EntityBinding, hide: boolean): void {
     for (const slot of binding.slots) {
       if (hide) {
         if (slot.backup) continue;
-        if (slot.kind === 'vertex') {
-          const vertices = slot.vertices ?? [];
-          slot.backup = copyVertices(slot.array, vertices);
-          collapseVertices(slot.array, vertices);
-        } else {
+        if (slot.kind === 'index') {
           slot.backup = copyRange(slot.array, slot.start * slot.width, slot.count * slot.width);
-          if (slot.kind === 'index') degenerateIndexes(slot);
-          else collapsePositions(slot);
+          degenerateIndexes(slot);
+        } else if (slot.kind === 'vertex') {
+          collapseVertices(slot.positionArray ?? slot.array, slot.vertices ?? []);
+        } else {
+          collapsePositions(slot);
         }
       } else {
-        const backup = slot.backup;
-        if (!backup) continue;
-        if (slot.kind === 'vertex') {
-          const vertices = slot.vertices ?? [];
-          for (let i = 0; i < vertices.length; i += 1) {
-            const offset = vertices[i] * 3;
-            slot.array[offset] = backup[i * 3];
-            slot.array[offset + 1] = backup[i * 3 + 1];
-            slot.array[offset + 2] = backup[i * 3 + 2];
+        if (slot.kind === 'index') {
+          const backup = slot.backup;
+          if (backup) {
+            const rawStart = slot.start * slot.width;
+            for (let i = 0; i < backup.length; i += 1) slot.array[rawStart + i] = backup[i];
           }
+          this.writeSlotOffset(slot, binding.offset);
         } else {
-          const rawStart = slot.start * slot.width;
-          for (let i = 0; i < backup.length; i += 1) slot.array[rawStart + i] = backup[i];
+          this.writeSlotOffset(slot, binding.offset);
         }
         slot.backup = null;
       }
       slot.attribute.needsUpdate = true;
+      if (slot.positionAttribute) slot.positionAttribute.needsUpdate = true;
     }
     if (binding.hidden === hide) return;
     binding.hidden = hide;
@@ -633,6 +737,27 @@ export class BrushEntityVisibility {
     this.hiddenTriangles += sign * binding.triangles;
     this.hiddenIndexSlots += sign * binding.indexSlots;
     this.hiddenVertexSlots += sign * binding.vertexSlots;
+  }
+
+  /** 把一个区间的顶点写成 `基准 + offset`；隐藏中的位移不写点（恢复时补写）。 */
+  private writeSlotOffset(slot: Slot, offset: [number, number, number]): void {
+    const vertices = slot.vertices;
+    const base = slot.basePositions;
+    const positionArray = slot.positionArray;
+    if (!vertices || !base || !positionArray) return;
+    writeVertexPositions(positionArray, vertices, base, offset);
+    if (slot.positionAttribute) slot.positionAttribute.needsUpdate = true;
+  }
+
+  /** 把位移镜像应用到已建好的实体区间（PVS 重建索引后重放）。 */
+  private applyDesiredOffsets(): void {
+    for (const [entityIndex, offset] of this.desiredOffsets) {
+      const binding = this.bindings.get(entityIndex);
+      if (!binding) continue;
+      binding.offset = [offset[0], offset[1], offset[2]];
+      if (binding.hidden) continue;
+      for (const slot of binding.slots) this.writeSlotOffset(slot, binding.offset);
+    }
   }
 
   /** 把「应隐藏」集合应用到已建好的实体区间（已隐藏的跳过）。 */

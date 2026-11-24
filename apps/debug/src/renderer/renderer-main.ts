@@ -416,6 +416,20 @@ export class RendererMain {
   onPlayerNameChange: ((name: string) => void) | null = null;
 
   /**
+   * brush 实心状态「权威同步」回调：app 接到 `InputBridge.sendBrushSolid`。
+   *
+   * 与 `EntityGameplay` 的 `onBrushSolidChange` 不同：后者只落主线程预测物理与渲染，
+   * 而权威 Worker 的物理世界是独立的一份；不同步就会出现「预测里门关了、权威里还开着」，
+   * 玩家被权威帧拉回或穿门。缺省 null = 不同步（单机/测试桩）。
+   */
+  onBrushSolidForAuthority: ((entity: number, solid: boolean) => void) | null = null;
+
+  /** brush 位移「权威同步」回调（同 `onBrushSolidForAuthority`；电梯/移动平台每步都要发）。 */
+  onBrushOffsetForAuthority:
+    | ((entity: number, offset: readonly [number, number, number]) => void)
+    | null = null;
+
+  /**
    * 玩家速度冲量回调（地图脚本 `trigger_push` → `host.addPlayerVelocity` / `baseVelocity`）。
    *
    * 实体运行期是观测模式：push 只上报不上力，所以这里把冲量同时打到渲染物理线
@@ -908,8 +922,17 @@ export class RendererMain {
       // 同期生效）。只影响渲染，不改碰撞语义（碰撞已由 EntityGameplay 落到物理线）。
       // 插件启用时让位：两套 BrushEntityVisibility 同时改同一批顶点，恢复会互相覆盖。
       onBrushSolidChange: (entity, solid) => {
+        // 权威 Worker 侧必须同步（与渲染显隐/插件接管无关）。
+        this.onBrushSolidForAuthority?.(entity, solid);
         if (this.brushVisibilityDeferred) return;
         this.brushVisibility?.setEntityHidden(entity, !solid);
+      },
+      // 移动 brush 位移 → 合并几何顶点偏移（与物理侧 `set_brush_offset` 同期生效）。
+      // 插件接管可见性时同样让位：两套实例写同一批顶点会互相覆盖，插件不负责位移。
+      onBrushOffsetChange: (entity, offset) => {
+        this.onBrushOffsetForAuthority?.(entity, [offset[0], offset[1], offset[2]]);
+        if (this.brushVisibilityDeferred) return;
+        this.brushVisibility?.setEntityOffset(entity, offset);
       },
     });
     this.gameplay.load(entityIoJson);

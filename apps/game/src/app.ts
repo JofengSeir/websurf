@@ -168,6 +168,10 @@ async function main(): Promise<void> {
   renderer.onJumpHeightChange = (height) => bridge?.sendSetJumpHeight(height);
   renderer.onPlayerNameChange = (name) => bridge?.sendSetPlayerName(name);
   renderer.onMapPhysicsParam = (name, value) => bridge?.sendSetMapPhysicsParam(name, value);
+  // brush 实心状态/位移必须同步权威 Worker：不同步时预测里门关了、权威里还开着，
+  // 电梯/移动平台在权威侧不动，玩家会被权威帧拉回。
+  renderer.onBrushSolidForAuthority = (entity, solid) => bridge?.sendBrushSolid(entity, solid);
+  renderer.onBrushOffsetForAuthority = (entity, offset) => bridge?.sendBrushOffset(entity, offset);
 
   // 3.1 config 段同步实例（P5）：构造点=AppRuntime 就绪后；render 缺省（副作用全在 bridge.sendConfig 内）。
   //     applyPatch 用端 applyConfigPatch 保留旧守卫；send 直接走 bridge。

@@ -1114,6 +1114,16 @@ pub struct World {
     /// [`World::set_entity_solid`] 切换。`solids` 与空间索引始终保留全部 brush，
     /// 查询时按这张表过滤——切换不需要重建索引，也不移动砍掉的几何。
     pub entity_solid: Vec<bool>,
+    /// 每个实体 brush 的当前位移（下标 = 实体枚举下标；缺省 `[0.0, 0.0, 0.0]`）。
+    ///
+    /// 运行期移动 brush（`func_movelinear` / `func_door` 等）按**实体**整体平移，
+    /// 见 [`World::set_entity_offset`]；`solids` 里存的是「基准几何 + 当前位移」的副本。
+    pub entity_offsets: Vec<V3>,
+    /// `solids` 的基准快照（位移前）。`set_entity_offset` 每次从它重算，
+    /// 避免每帧累加产生浮点漂移；由 `PhysWorld::build_world` 装载完成后调用
+    /// [`World::capture_base_solids`] 落一次。`pub(crate)` 供 `PhysWorld` 做「站在
+    /// 移动 brush 上的玩家随平台带走」判定（见 `PhysWorld::set_brush_offset`）。
+    pub(crate) base_solids: Vec<Brush>,
     grid: BrushGrid,
     tri_grid: TriangleGrid,
 }
@@ -1169,6 +1179,8 @@ impl World {
             ladders: Vec::new(),
             tri_meshes: Vec::new(),
             entity_solid: Vec::new(),
+            entity_offsets: Vec::new(),
+            base_solids: Vec::new(),
             grid: BrushGrid::new(),
             tri_grid: TriangleGrid::new(),
         }
@@ -1204,6 +1216,66 @@ impl World {
         let previous = self.entity_solid[entity];
         self.entity_solid[entity] = solid;
         previous
+    }
+
+    /// 把当前 `solids` 记成「位移基准」。装载完成、`build_index` 之后调用一次；
+    /// 之后 [`World::set_entity_offset`] 都从这份快照重算，不依赖 `solids` 的现值。
+    pub fn capture_base_solids(&mut self) {
+        self.base_solids = self.solids.clone();
+    }
+
+    /// 运行期平移某个实体的全部 brush（电梯 / 移动平台 / 可移动门）。
+    ///
+    /// `offset` 是相对**基准几何**的位移（绝对量，不是增量）：每次按 `base_solids`
+    /// 重算，所以反复调用不会累积浮点误差。只动属于该实体的 brush（`Brush::entity`）；
+    /// 世界几何（`entity = -1`）与 ladder 不受影响。改完重建 brush 空间索引
+    /// （`BrushGrid` 是按值副本，必须重建才生效；三角网格不变，不重建）。
+    ///
+    /// 返回命中的 brush 数（0 = 该实体在本图没有实心 brush，调用方忽略即可）。
+    /// 消费方：`PhysWorld::set_brush_offset`（wasm 导出）← TS 移动 brush 驱动每帧下发。
+    pub fn set_entity_offset(&mut self, entity: i32, offset: V3) -> usize {
+        if entity < 0 {
+            return 0;
+        }
+        if self.base_solids.len() != self.solids.len() {
+            // 还没落基准（例如测试直接构造 World）：以当前几何为基准。
+            self.capture_base_solids();
+        }
+        let entity_index = entity as usize;
+        if self.entity_offsets.len() <= entity_index {
+            self.entity_offsets.resize(entity_index + 1, [0.0; 3]);
+        }
+        self.entity_offsets[entity_index] = offset;
+        let mut moved = 0usize;
+        for (index, base) in self.base_solids.iter().enumerate() {
+            if base.entity != entity {
+                continue;
+            }
+            moved += 1;
+            // 平移凸体：AABB 直接加 offset；平面 `dot(n, p) = dist` 平移后
+            // `dot(n, p - offset) = dist` ⇒ `dist += dot(n, offset)`。
+            let mut brush = base.clone();
+            brush.min = [
+                base.min[0] + offset[0],
+                base.min[1] + offset[1],
+                base.min[2] + offset[2],
+            ];
+            brush.max = [
+                base.max[0] + offset[0],
+                base.max[1] + offset[1],
+                base.max[2] + offset[2],
+            ];
+            for plane in &mut brush.planes {
+                plane.dist += plane.normal[0] * offset[0]
+                    + plane.normal[1] * offset[1]
+                    + plane.normal[2] * offset[2];
+            }
+            self.solids[index] = brush;
+        }
+        if moved > 0 {
+            self.grid.build(&self.solids, 512.0);
+        }
+        moved
     }
 
     /// 扫掠盒追踪：brush 与三角网格两条线各取候选，返回更早的那次命中。

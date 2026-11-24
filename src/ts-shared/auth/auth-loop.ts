@@ -133,6 +133,13 @@ export interface PhysWorldLike {
    * 语义由 `PhysWorld::set_jump_height` 定义：只改之后起跳的初速 `sqrt(2·g·h)`，
    * 不动当前速度/位置。可选：测试桩缺失时忽略。 */
   set_jump_height?(height: number): void;
+  /** 运行期切换实体 brush 的碰撞实心状态（对应 `PhysWorld::set_brush_solid`）。
+   * `solid=false` ⇒ 该实体名下 brush 不再挡人（门的开合放行 / wall_toggle 关闭）。
+   * 可选：测试桩缺失时忽略。 */
+  set_brush_solid?(entity: number, solid: boolean): boolean;
+  /** 运行期平移实体 brush 的几何（对应 `PhysWorld::set_brush_offset`）；偏移是相对 BSP
+   * 出生位置的绝对向量（HU，Y-up）。移动平台随实体同步，玩家由物理侧按着地状态带走。 */
+  set_brush_offset?(entity: number, x: number, y: number, z: number): number;
   /** 释放 wasm 实例（wasm-bindgen 的 free）。本文件从不调用它；world 重建时由
    * `src/ts-shared/auth/worker-dispatch.ts` 的 `createWorkerDispatch` 释放旧实例。声明为可选，
    * 使没有 free 的注入实现（node 内测试桩）也能满足接口。 */

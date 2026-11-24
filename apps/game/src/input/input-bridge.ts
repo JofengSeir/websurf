@@ -125,4 +125,14 @@ export class InputBridge {
   sendSetMapPhysicsParam(name: string, value: number | boolean): void {
     this.worker.postMessage({ type: 'set-map-physics-param', name, value });
   }
+
+  /** 实体 brush 运行期实心状态（门开合放行 / wall_toggle 开关）；权威物理与预测同语义。 */
+  sendBrushSolid(entity: number, solid: boolean): void {
+    this.worker.postMessage({ type: 'set-brush-solid', entity, solid });
+  }
+
+  /** 实体 brush 绝对位移（HU，Y-up；相对 BSP 出生位置）；电梯/移动平台的权威同步。 */
+  sendBrushOffset(entity: number, offset: readonly [number, number, number]): void {
+    this.worker.postMessage({ type: 'set-brush-offset', entity, x: offset[0], y: offset[1], z: offset[2] });
+  }
 }

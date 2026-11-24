@@ -38,6 +38,8 @@ export type WorkerInboundType =
   | 'set-speed-cap'
   | 'set-jump-height'
   | 'set-map-physics-param'
+  | 'set-brush-solid'
+  | 'set-brush-offset'
   | 'set-mode'
   | 'set-hold';
 
@@ -201,6 +203,28 @@ export interface SetMapPhysicsParamMessage {
   value: number | boolean;
 }
 
+/** `set-brush-solid`：运行期切换某个实体 brush 的碰撞实心状态（对应 `PhysWorld::set_brush_solid`）。
+ *  语义：只改该实体名下 brush 的实心标记，不动几何；世界几何（entity=-1）忽略。
+ *  地图脚本的 `func_wall_toggle` / `func_brush` 开关、门的开合放行都经这条消息
+ *  同步到权威 Worker（权威物理与主线程预测物理必须同语义，否则玩家会被拉回）。
+ *  值被记忆并在世界重建后重放。 */
+export interface SetBrushSolidMessage {
+  type: 'set-brush-solid';
+  entity: number;
+  solid: boolean;
+}
+
+/** `set-brush-offset`：运行期平移某个实体 brush 的几何（对应 `PhysWorld::set_brush_offset`）。
+ *  `x/y/z` 是相对 BSP 出生位置的**绝对**偏移（HU，Y-up；不是增量）；同一实体重复下发以最新值为准。
+ *  移动平台/电梯/推拉门经这条消息把位移同步到权威物理。值被记忆并在世界重建后重放。 */
+export interface SetBrushOffsetMessage {
+  type: 'set-brush-offset';
+  entity: number;
+  x: number;
+  y: number;
+  z: number;
+}
+
 /** `set-mode`：计算模式握手。值域白名单三值；同 mode 重复到达只回 `mode-ack`、不重复执行
  *  钩子；切换所需的状态载荷随消息透传给 `onSetMode`。当前三端均无发送方（coupled 之外的
  *  两模式尚未接线），分派分支保留。 */
@@ -237,5 +261,7 @@ export type WorkerInboundMessage =
   | SetSpeedCapMessage
   | SetJumpHeightMessage
   | SetMapPhysicsParamMessage
+  | SetBrushSolidMessage
+  | SetBrushOffsetMessage
   | SetModeMessage
   | SetHoldMessage;

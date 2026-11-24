@@ -131,4 +131,16 @@ export class InputBridge {
   sendSetMapPhysicsParam(name: string, value: number | boolean): void {
     this.worker.postMessage({ type: 'set-map-physics-param', name, value });
   }
+
+  /** 发 `set-brush-solid`：实体 brush 的运行期实心状态（门的开合放行 / wall_toggle 开关）。
+   *  权威物理与主线程预测必须同语义，否则关门不挡人、预测被权威帧纠正。 */
+  sendBrushSolid(entity: number, solid: boolean): void {
+    this.worker.postMessage({ type: 'set-brush-solid', entity, solid });
+  }
+
+  /** 发 `set-brush-offset`：实体 brush 的绝对位移（HU，Y-up；相对 BSP 出生位置）。
+   *  电梯/移动平台每步位移都要同步到权威，否则玩家会被权威帧拉回地面。 */
+  sendBrushOffset(entity: number, offset: readonly [number, number, number]): void {
+    this.worker.postMessage({ type: 'set-brush-offset', entity, x: offset[0], y: offset[1], z: offset[2] });
+  }
 }

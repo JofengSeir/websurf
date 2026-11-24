@@ -10,4 +10,4 @@
  * - Worker 在 `ready` 消息里带上自己的版本；
  * - 主线程版本不一致时在状态栏显式报错，提示重建 worker，避免静默跑旧 bundle。
  */
-export const WORKER_PROTOCOL = 2;
+export const WORKER_PROTOCOL = 3;

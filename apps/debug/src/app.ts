@@ -436,6 +436,10 @@ async function main(): Promise<void> {
 		inputBridge?.sendSetPlayerName(name, !filterOff);
 	};
 	rendererMain.onMapPhysicsParam = (name, value) => inputBridge?.sendSetMapPhysicsParam(name, value);
+	// brush 实心状态/位移必须同步权威 Worker：不同步时预测里门关了、权威里还开着，
+	// 电梯/移动平台在权威侧不动，玩家会被权威帧拉回。
+	rendererMain.onBrushSolidForAuthority = (entity, solid) => inputBridge?.sendBrushSolid(entity, solid);
+	rendererMain.onBrushOffsetForAuthority = (entity, offset) => inputBridge?.sendBrushOffset(entity, offset);
 
 	// 可选增强插件宿主（默认全关 ⇒ 不动态 import 插件、rendererMain.onEntityEvent 保持 null、零成本）。
 	// 传送必须双端一致：主线程预测物理（teleportToPos，含 bumpSampleEpoch）+ Worker 权威（sendTeleportToPos）。

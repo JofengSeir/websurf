@@ -55,6 +55,14 @@ export interface GameplayPhysLike {
    * 返回切换前的状态。物理实现缺失时静默跳过（game 端旧 wasm 兼容）。
    */
   set_brush_solid?(entity: number, solid: boolean): boolean;
+  /**
+   * 运行期平移实体 brush（`func_movelinear` / 门）：`offset` 是相对 BSP 出生位置的
+   * 绝对位移（Y-up，HU）。返回被移动的 brush 数（>0 表示物理几何真的动了）。
+   * 实现缺失时静默跳过（game 端旧 wasm 兼容）。
+   */
+  set_brush_offset?(entity: number, x: number, y: number, z: number): number;
+  /** 查询实体 brush 当前位移（诊断/重放用；实现缺失时返回 null）。 */
+  brush_offset?(entity: number): Float64Array | null;
   /** 查询实体 brush 当前是否实心（诊断/重放用；实现缺失时视为实心）。 */
   brush_solid?(entity: number): boolean;
   /**
@@ -111,6 +119,12 @@ export interface EntityGameplayOptions {
    * 调试端用它同步几何可见性；game 端可忽略（纯视觉）。
    */
   onBrushSolidChange?: (entity: number, solid: boolean) => void;
+  /**
+   * 移动 brush（`func_movelinear` / 门）的绝对位移变化（相对 BSP 出生位置，Y-up）。
+   * 渲染端消费它把合并几何写到 `base + offset`（`BrushEntityVisibility.setEntityOffset`）；
+   * game 端同样需要（电梯/移动平台是可见几何，不能只在 debug 生效）。
+   */
+  onBrushOffsetChange?: (entity: number, offset: [number, number, number]) => void;
 }
 
 /** 浮点比较阈值：跳高目标值只在跨过 1e-6 时下发。 */
@@ -137,6 +151,18 @@ function parseBrushSolidDetail(detail: string | undefined): { entity: number; so
   const entity = Number.parseInt(m[1], 10);
   if (!Number.isInteger(entity) || entity < 0) return null;
   return { entity, solid: m[2] === 'true' };
+}
+
+/** 解析实体层 `brush:offset` 事件载荷 `<entityIndex>:<x>,<y>,<z>`（Y-up 绝对位移）。 */
+function parseBrushOffsetDetail(detail: string | undefined): { entity: number; offset: [number, number, number] } | null {
+  if (!detail) return null;
+  const m = /^(-?\d+):(-?[\d.eE+-]+),(-?[\d.eE+-]+),(-?[\d.eE+-]+)$/.exec(detail);
+  if (!m) return null;
+  const entity = Number.parseInt(m[1], 10);
+  if (!Number.isInteger(entity) || entity < 0) return null;
+  const offset: [number, number, number] = [Number(m[2]), Number(m[3]), Number(m[4])];
+  if (!offset.every((v) => Number.isFinite(v))) return null;
+  return { entity, offset };
 }
 
 /**
@@ -247,6 +273,11 @@ export class EntityGameplay {
    * 这里只负责「物理实例晚于事件建立」时把已发生的开关重放上去。
    */
   private brushSolid = new Map<number, boolean>();
+  /**
+   * 移动 brush 的位移镜像（`entity → [x,y,z]` 绝对位移）：与 `brushSolid` 同理，
+   * 实体层动态加载后、物理实例建立前发生的事件要先记下来，`update()` 换实例时重放。
+   */
+  private brushOffset = new Map<number, [number, number, number]>();
   /**
    * 传送触发器的启用状态镜像（`entity → enabled`）：地图 `trigger_teleport` 的
    * `StartDisabled` 在 Rust 建表时只决定**初值**，运行期 `Enable`/`Disable` 需要本层
@@ -371,6 +402,7 @@ export class EntityGameplay {
     this.mapSpeedCap = null;
     // 换图后实体下标空间与 Rust brush 初态都是新的：清掉上一张图的运行期开关镜像。
     this.brushSolid.clear();
+    this.brushOffset.clear();
     this.teleportEnabled.clear();
     // 出生即「关」的 brush（初始开着的门 / START_OFF 墙 / StartDisabled 的 func_brush）：
     // Rust 侧建物理世界时已按 `start_solid=false` 排除碰撞，但渲染层没有事件就不会藏几何，
@@ -412,6 +444,11 @@ export class EntityGameplay {
         for (const [entity, solid] of this.brushSolid) {
           phys.set_brush_solid?.(entity, solid);
         }
+        // 移动 brush 位移镜像重放：电梯/移动平台在 `load()` 后、物理实例建立前就已被
+        // 地图 I/O 设过位置（例如出生即开启的门；movelinear 的初相位也走同一镜像）。
+        for (const [entity, offset] of this.brushOffset) {
+          phys.set_brush_offset?.(entity, offset[0], offset[1], offset[2]);
+        }
         // 传送区开关镜像重放：同上，`load()` 之后、物理实例建立之前发生的阶段推进
         // （`tp_stage01/02` 的 Enable）要补到新世界。
         for (const [entity, enabled] of this.teleportEnabled) {
@@ -444,6 +481,11 @@ export class EntityGameplay {
   /** 实体 brush 当前实心状态（运行期改过的才有记录；出生态由 Rust 决定）。 */
   brushSolidOf(entity: number): boolean | undefined {
     return this.brushSolid.get(entity);
+  }
+
+  /** 移动 brush 当前位移（运行期移动过的才有记录；初相位由实体层事件在 load 期建立）。 */
+  brushOffsetOf(entity: number): [number, number, number] | undefined {
+    return this.brushOffset.get(entity);
   }
 
   /**
@@ -491,6 +533,7 @@ export class EntityGameplay {
     this.playerNamePushed = null;
     this.teleportFilterPushed = null;
     this.brushSolid.clear();
+    this.brushOffset.clear();
     this.teleportEnabled.clear();
   }
 
@@ -534,6 +577,15 @@ export class EntityGameplay {
         this.brushSolid.set(brush.entity, brush.solid);
         this.options.getPhys()?.set_brush_solid?.(brush.entity, brush.solid);
         this.options.onBrushSolidChange?.(brush.entity, brush.solid);
+      }
+    } else if (event.kind === 'brush:offset') {
+      // 移动 brush 的几何位移（`func_movelinear` / 门）：物理碰撞与渲染几何必须同步。
+      // 物理线缺失时只记镜像，`update()` 建立物理实例后重放。
+      const moved = parseBrushOffsetDetail(event.detail);
+      if (moved) {
+        this.brushOffset.set(moved.entity, moved.offset);
+        this.options.getPhys()?.set_brush_offset?.(moved.entity, moved.offset[0], moved.offset[1], moved.offset[2]);
+        this.options.onBrushOffsetChange?.(moved.entity, moved.offset);
       }
     }
     this.options.onEntityEvent?.(event);

@@ -73,6 +73,9 @@ export function attachEntitySystem(options: AttachEntityOptions): EntitySystem |
     playSound: (s, i) => effect('sound:play', `${i}:${s}`),
     stopSound: (s, i) => effect('sound:stop', `${i}:${s}`),
     brushEnabled: (i, on) => effect('brush', `${i}:${on}`),
+    // 移动 brush 的绝对位移（相对 BSP 出生位置，Y-up）。载荷用逗号分隔的定点小数，
+    // 与 brush 开关同一「`<实体下标>:<值>`」约定，消费方在 EntityGameplay 解析。
+    brushOffset: (i, o) => effect('brush:offset', `${i}:${o[0]},${o[1]},${o[2]}`),
     script: (code, ctx) => effect('vscript', `${ctx.kind}:${code}`),
     terminateScriptScope: (i) => effect('vscript:terminate', String(i)),
   });

@@ -42,6 +42,7 @@ import type { LightingMode } from '../../../../src/renderer-shared/shader/lightm
 import { applyLightingPresentation, type RenderLightingPrefs } from '../../../../src/renderer-shared/config/render-prefs.js';
 import { installPoseEntry, cameraPoseOf, feetFromCameraPose } from '../../../../src/renderer-shared/camera/pose-entry.js';
 import { RenderSession } from '../../../../src/renderer-shared/scene/render-session.js';
+import { BrushEntityVisibility } from '../../../../src/renderer-shared/scene/brush-entity-visibility.js';
 import type { EntitySystemStats } from '../../../../src/ts-shared/entity/entity-system.js';
 import type { RawPlayerState } from '../../../../src/ts-shared/entity/host.js';
 import { EntityGameplay } from '../../../../src/ts-shared/gameplay/entity-gameplay.js';
@@ -80,6 +81,12 @@ export class RendererMain {
   /** 会话字段的本地别名（物理/探针/回放既有读点；只读，不另建实例）。 */
   private renderer: THREE.WebGLRenderer | null = null;
   private scene: THREE.Scene | null = null;
+  /**
+   * brush 实体（func_brush / func_wall_toggle / func_door 等）的合并几何可见性。
+   * 与 `EntityGameplay` 的 `brushSolid` 镜像同源：事件与载图初态都会落到这里，
+   * 否则 game 端只有物理变化、几何永远停在出生样式（#17 看得见却能穿、门开后不消失）。
+   */
+  private brushVisibility: BrushEntityVisibility | null = null;
   private camera: THREE.PerspectiveCamera | null = null;
   /** `usePressed` 的复用前向向量（每帧 +use 不分配新对象）。 */
   private readonly _useDir = new THREE.Vector3();
@@ -287,6 +294,20 @@ export class RendererMain {
   /** 地图 `servercommand` 映射出的物理参数（`sv_airaccelerate` / `sv_enablebunnyhopping` 等）。 */
   onMapPhysicsParam: ((name: string, value: number | boolean) => void) | null = null;
 
+  /**
+   * brush 实心状态「权威同步」回调：app 接到 `InputBridge.sendBrushSolid`。
+   *
+   * 与 `brushVisibility.setEntityHidden`（渲染）和 `EntityGameplay` 的主线程预测物理不同，
+   * 权威 Worker 的物理世界是独立的一份；不同步会出现「预测里门关了、权威里还开着」。
+   * 缺省 null = 不同步。
+   */
+  onBrushSolidForAuthority: ((entity: number, solid: boolean) => void) | null = null;
+
+  /** brush 位移「权威同步」回调（同 `onBrushSolidForAuthority`；电梯/移动平台每步都要发）。 */
+  onBrushOffsetForAuthority:
+    | ((entity: number, offset: readonly [number, number, number]) => void)
+    | null = null;
+
   /** 失效世代 +1（本地计数器）并调 `shared.resetRenderSample()` 让 Worker 丢弃既有采样配对。 */
   private bumpSampleEpoch(): void {
     this.sampleEpoch++;
@@ -367,6 +388,11 @@ export class RendererMain {
     this.pendingInjectReport = result.applied;
     // 回传场景包围盒最小 Y（`onSceneLoaded` 的调用方把它当死亡阈值转给 setDeathY）
     this.onSceneLoaded?.(result.bbox.min.y);
+    // brush 实体可见性索引必须在 `setupGameplay()` 之前建：实体装载期 logic_auto 等
+    // 可能立刻触发 brush 开关，晚建会把首批事件判成「未定位」丢掉（debug 端同序）。
+    this.brushVisibility?.dispose();
+    this.brushVisibility = new BrushEntityVisibility();
+    this.brushVisibility.build(this.scene);
     this.setupGameplay(data.entityIoJson);
   }
 
@@ -392,6 +418,19 @@ export class RendererMain {
       onJumpHeightChange: (height) => this.onJumpHeightChange?.(height),
       onPlayerNameChange: (name) => this.onPlayerNameChange?.(name),
       onMapPhysicsParam: (name, value) => this.onMapPhysicsParam?.(name, value),
+      // brush 实体开关 → 合并几何区间隐藏（`solid=false` ⇒ 隐藏），与物理侧
+      // `set_brush_solid` 同期生效。载图初态（spawnpos=1 的门 / START_OFF 墙 /
+      // StartDisabled 的 func_brush）也经这里同步，否则正式端会「看着关着却能穿」。
+      onBrushSolidChange: (entity, solid) => {
+        this.onBrushSolidForAuthority?.(entity, solid);
+        this.brushVisibility?.setEntityHidden(entity, !solid);
+      },
+      // 移动 brush 位移 → 合并几何顶点偏移（与物理侧 `set_brush_offset` 同期生效；
+      // 渲染端只改 position 顶点，物理端由 EntityGameplay 统一驱动）。
+      onBrushOffsetChange: (entity, offset) => {
+        this.onBrushOffsetForAuthority?.(entity, [offset[0], offset[1], offset[2]]);
+        this.brushVisibility?.setEntityOffset(entity, offset);
+      },
     });
     this.gameplay.load(entityIoJson);
   }
@@ -454,6 +493,9 @@ export class RendererMain {
     // 实体副作用宿主（含实体系统）先释放：持有玩家实体与 I/O 队列，换图必须重建
     this.gameplay?.dispose();
     this.gameplay = null;
+    // 可见性索引持有旧场景的几何引用/备份，换图前必须恢复并释放（否则旧 buffer 残留退化数据）
+    this.brushVisibility?.dispose();
+    this.brushVisibility = null;
     this.session?.disposeScene();
     this.predPhys = null;
     this.predReady = false;

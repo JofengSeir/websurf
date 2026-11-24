@@ -26,6 +26,8 @@ export interface EntityEffectSink {
   playSound?(soundName: string, entityIndex: number): void;
   stopSound?(soundName: string, entityIndex: number): void;
   brushEnabled?(entityIndex: number, enabled: boolean): void;
+  /** 移动 brush（`func_movelinear` / 门）的绝对位移（相对 BSP 出生位置，Y-up）。 */
+  brushOffset?(entityIndex: number, offset: Vec3): void;
   script?(code: string, context: {
     kind: 'code' | 'file' | 'function';
     entity: EntityRef;
@@ -60,6 +62,7 @@ export function createObservingHost(
     playSound: (soundName, entityIndex) => sink.playSound?.(soundName, entityIndex),
     stopSound: (soundName, entityIndex) => sink.stopSound?.(soundName, entityIndex),
     setBrushEnabled: (entityIndex, enabled) => sink.brushEnabled?.(entityIndex, enabled),
+    setBrushOffset: (entityIndex, offset) => sink.brushOffset?.(entityIndex, offset),
     evalScript: (code, context) => sink.script?.(code, context),
     terminateScriptScope: (entityIndex) => sink.terminateScriptScope?.(entityIndex),
     log: (message) => sink.log?.(message),

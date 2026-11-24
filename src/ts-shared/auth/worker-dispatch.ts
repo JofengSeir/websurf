@@ -301,6 +301,40 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
     }
   };
 
+  /**
+   * 最近一次收到的 brush 实心状态（`set-brush-solid` 记忆，实体下标 → 是否实心）。
+   *
+   * `world-json` 重建实例后 brush 回到 `start_solid` 初态；门被打开、`func_wall_toggle`
+   * 被关闭这些运行期状态不重放就会「重新出现/重新挡人」。按实体记忆、后到覆盖先到。
+   */
+  const lastBrushSolid = new Map<number, boolean>();
+  /** 把记忆的 brush 实心状态重放到全部已注入实例（世界重建之后调用）。 */
+  const reapplyBrushSolid = (): void => {
+    if (lastBrushSolid.size === 0) return;
+    for (const [entity, solid] of lastBrushSolid) {
+      env.phys.current?.set_brush_solid?.(entity, solid);
+      env.tickPhys?.current?.set_brush_solid?.(entity, solid);
+      env.scratch?.current?.set_brush_solid?.(entity, solid);
+    }
+  };
+
+  /**
+   * 最近一次收到的 brush 位移（`set-brush-offset` 记忆，实体下标 → 相对出生位置的绝对偏移）。
+   *
+   * 与 brush 实心状态同理：电梯/移动平台在换图/重建后回到出生位置，不重放则权威物理
+   * 与主线程预测再次脱节。按实体记录，同一实体以最后一条为准。
+   */
+  const lastBrushOffset = new Map<number, [number, number, number]>();
+  /** 把记忆的 brush 位移重放到全部已注入实例（世界重建之后调用）。 */
+  const reapplyBrushOffset = (): void => {
+    if (lastBrushOffset.size === 0) return;
+    for (const [entity, offset] of lastBrushOffset) {
+      env.phys.current?.set_brush_offset?.(entity, offset[0], offset[1], offset[2]);
+      env.tickPhys?.current?.set_brush_offset?.(entity, offset[0], offset[1], offset[2]);
+      env.scratch?.current?.set_brush_offset?.(entity, offset[0], offset[1], offset[2]);
+    }
+  };
+
   /** wasm 就绪标志：仅 `initWasm` 成功置位；`world-json` 以它作前置守卫。 */
   let ready = false;
   /** `authLoop.start()` 只允许执行一次的守卫。 */
@@ -416,6 +450,8 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       reapplySpeedCap(); // 重放记忆的手动水平速度上限（地图 sv_maxvelocity，同上）
       reapplyJumpHeight(); // 重放记忆的起跳高度（跳跃增幅区，同上）
       reapplyMapPhysicsParams(); // 重放记忆的地图物理参数（sv_airaccelerate 等，同上）
+      reapplyBrushSolid(); // 重放记忆的 brush 实心状态（门开合/wall_toggle，同上）
+      reapplyBrushOffset(); // 重放记忆的 brush 位移（电梯/移动平台，同上）
       env.decoupledLoop?.publishCurrentState(); // 立刻发布一帧，首帧状态即刻可见
       env.onWorldBuilt?.(p);
       env.onWorldSpawn?.(w.spawn.y, lastDeathY); // 出生点 Y + 已记忆的阈值（可为 null）
@@ -713,6 +749,42 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
         }
         // 即便参数名不在映射表里也回调：宿主可用来提示未识别项（面板来源等）。
         env.onMapPhysicsParam?.(name, value);
+      }
+      return;
+    }
+    if (type === 'set-brush-solid') {
+      // brush 实体运行期实心状态（门的开合放行 / `func_wall_toggle` 与 `func_brush` 开关）。
+      // 与速度上限等物理参数同理：换图/重建后 brush 回到 `start_solid` 初态，故记忆并重放。
+      const bs = msg as { entity?: unknown; solid?: unknown };
+      const entity = typeof bs.entity === 'number' ? Math.trunc(bs.entity) : -1;
+      const solid = bs.solid;
+      if (entity >= 0 && typeof solid === 'boolean') {
+        lastBrushSolid.set(entity, solid);
+        env.phys.current?.set_brush_solid?.(entity, solid);
+        env.tickPhys?.current?.set_brush_solid?.(entity, solid);
+        env.scratch?.current?.set_brush_solid?.(entity, solid);
+      }
+      return;
+    }
+    if (type === 'set-brush-offset') {
+      // 移动 brush（电梯 / 移动平台 / 可移动门）的绝对位移；权威物理必须与主线程预测同步，
+      // 否则玩家会被权威帧拉回、平台踩不住。偏移是相对 BSP 出生位置的绝对量（HU，Y-up）。
+      const bo = msg as { entity?: unknown; x?: unknown; y?: unknown; z?: unknown };
+      const entity = typeof bo.entity === 'number' ? Math.trunc(bo.entity) : -1;
+      const { x, y, z } = bo;
+      if (
+        entity >= 0 &&
+        typeof x === 'number' &&
+        typeof y === 'number' &&
+        typeof z === 'number' &&
+        Number.isFinite(x) &&
+        Number.isFinite(y) &&
+        Number.isFinite(z)
+      ) {
+        lastBrushOffset.set(entity, [x, y, z]);
+        env.phys.current?.set_brush_offset?.(entity, x, y, z);
+        env.tickPhys?.current?.set_brush_offset?.(entity, x, y, z);
+        env.scratch?.current?.set_brush_offset?.(entity, x, y, z);
       }
       return;
     }

@@ -107,6 +107,13 @@ export interface EntityHost {
   stopSound?(soundName: string, entityIndex: number): void;
   /** brush 实体的 Enable/Disable 视觉与碰撞开关。 */
   setBrushEnabled?(entityIndex: number, enabled: boolean): void;
+  /**
+   * 运行期平移实体 brush 的几何/碰撞（`func_movelinear`、`func_door` 等移动 brush）。
+   * `offset` 是相对 BSP 出生位置的**绝对位移**（不是增量），单位 HU、Y-up。
+   * 物理与渲染由宿主各自消费：物理线用 `PhysWorld.set_brush_offset`，渲染线把合并几何
+   * 的顶点写回 `base + offset`（见 `BrushEntityVisibility.setEntityOffset`）。
+   */
+  setBrushOffset?(entityIndex: number, offset: Vec3): void;
   /** `trigger_gravity` 改玩家重力倍数；不实现时该 trigger 只记录状态。 */
   setPlayerGravity?(value: number): void;
   /** 诊断日志（默认丢弃）。 */

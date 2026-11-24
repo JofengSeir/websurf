@@ -280,6 +280,113 @@ export const FuncWallToggleClass: EntityClass = {
 };
 
 // ── func_movelinear / func_rotating / func_breakable ────────────────────────
+
+/**
+ * func_movelinear 一个完整行程的时长（秒）。
+ *
+ * Source（`func_movelinear.cpp`）在 Open/Close 时把 brush 按 `speed` 移动
+ * `movedistance`，**走完才 fire OnFullyOpen / OnFullyClosed**；engine 之前统一用
+ * 0.1s 假定时，导致「电梯还没动、机关链已到终点」（ze 图 5 个 movelinear 的
+ * OnFullyOpen 挂着传送/开门/放 boss，真实时长 3.5–36.6s）。
+ *
+ * 没有位移数据（自制 selftest 实体）时退回 0.1s 的旧行为，保证既有测试不变。
+ */
+function moveLinearDuration(entity: Entity): number {
+  const distance = entity.getNumber('movedistance', 0);
+  const speed = entity.getNumber('speed', 0);
+  if (distance > 0 && speed > 0) return distance / speed;
+  return 0.1;
+}
+
+/** 移动 brush 的动画步长（秒）：20ms 一次，与 tick 对齐；只影响平滑度，不影响总时长。 */
+const MOVE_STEP_SECONDS = 0.02;
+
+/**
+ * `func_movelinear` 的移动方向（Y-up，单位向量）。
+ *
+ * SDK 里 `movedir` 是 Source 角度 `"pitch yaw roll"`，`Spawn` 用 `AngleVectors` 取 forward：
+ * `forward = (cp*cy, cp*sy, -sp)`；再按源码的坐标映射 `map_coords`（= `[y, z, x]`）转 Y-up。
+ * ze 图的实际取值：`-90 0 0` → 向上、`90 0 0` → 向下、`0 90 0` → +X、`0 0 0` → +Z。
+ */
+function moveLinearDirection(entity: Entity): [number, number, number] {
+  const stored = entity.get<[number, number, number]>('movedir');
+  const angles: [number, number, number] = stored && stored.length === 3 && stored.every(Number.isFinite)
+    ? stored
+    : [0, 0, 0];
+  const pitch = (angles[0] * Math.PI) / 180;
+  const yaw = (angles[1] * Math.PI) / 180;
+  const cp = Math.cos(pitch);
+  const sp = Math.sin(pitch);
+  const cy = Math.cos(yaw);
+  const sy = Math.sin(yaw);
+  const forward: [number, number, number] = [cp * cy, cp * sy, -sp];
+  return [forward[1], forward[2], forward[0]];
+}
+
+/**
+ * 把 `progress`（0 = 关闭端 pos1，1 = 打开端 pos2）写成实体 brush 的绝对位移。
+ *
+ * Source（`func_movelinear.cpp:87-89`）：`pos1 = origin - dir*dist*startPosition`、
+ * `pos2 = pos1 + dir*dist`；BSP 几何固定在 `origin`，所以相对几何的位移是
+ * `dir*dist*(progress - startPosition)`。本图 5 个 movelinear 都是 `startposition=0`，
+ * 也就是出生在 pos1（电梯停在井底）。
+ */
+function moveLinearApplyOffset(entity: Entity, progress: number): void {
+  const distance = entity.getNumber('movedistance', 0);
+  const startPosition = entity.getNumber('startposition', 0);
+  const [dx, dy, dz] = moveLinearDirection(entity);
+  const offset = distance * (progress - startPosition);
+  entity.set('moveLinearProgress', progress);
+  entity.runtime.host.setBrushOffset?.(entity.index, [dx * offset, dy * offset, dz * offset]);
+}
+
+/** 用 `setThink` 每 20ms 推进一步；到点调用 `done`（Source `SetMoveDone` 的定时器语义）。 */
+function moveLinearAnimate(entity: Entity, from: number, to: number, done: () => void): void {
+  const duration = moveLinearDuration(entity);
+  if (!(duration > 0.05)) {
+    moveLinearApplyOffset(entity, to);
+    done();
+    return;
+  }
+  const startTime = entity.runtime.now();
+  const step = (self: Entity): void => {
+    const elapsed = self.runtime.now() - startTime;
+    const t = Math.min(1, Math.max(0, Number.isFinite(elapsed) ? elapsed / duration : 1));
+    moveLinearApplyOffset(self, from + (to - from) * t);
+    if (t < 1) self.setThink(step, MOVE_STEP_SECONDS);
+    else done();
+  };
+  entity.setThink(step, 0);
+}
+
+/** Open：状态机 TS_GOING_UP → TS_AT_TOP，走完才 fire OnFullyOpen（Source MoveDone 语义）。 */
+function moveLinearOpen(entity: Entity, activator: Entity | null): void {
+  const state = entity.getNumber('toggleState', TS_AT_BOTTOM);
+  if (state === TS_AT_TOP || state === TS_GOING_UP) return; // 重复 Open 被 MoveTo 忽略
+  entity.set('toggleState', TS_GOING_UP);
+  entity.set('activator', activator);
+  fire(entity, 'OnOpen', activator);
+  const from = entity.getNumber('moveLinearProgress', entity.getNumber('startposition', 0));
+  moveLinearAnimate(entity, from, 1, () => {
+    entity.set('toggleState', TS_AT_TOP);
+    fire(entity, 'OnFullyOpen', activator);
+  });
+}
+
+/** Close：状态机 TS_GOING_DOWN → TS_AT_BOTTOM，走完才 fire OnFullyClosed。 */
+function moveLinearClose(entity: Entity, activator: Entity | null): void {
+  const state = entity.getNumber('toggleState', TS_AT_BOTTOM);
+  if (state === TS_AT_BOTTOM || state === TS_GOING_DOWN) return;
+  entity.set('toggleState', TS_GOING_DOWN);
+  entity.set('activator', activator);
+  fire(entity, 'OnClose', activator);
+  const from = entity.getNumber('moveLinearProgress', entity.getNumber('startposition', 0));
+  moveLinearAnimate(entity, from, 0, () => {
+    entity.set('toggleState', TS_AT_BOTTOM);
+    fire(entity, 'OnFullyClosed', activator);
+  });
+}
+
 export const FuncMovelinearClass: EntityClass = {
   name: 'func_movelinear',
   base: 'base_toggle',
@@ -291,16 +398,24 @@ export const FuncMovelinearClass: EntityClass = {
     { name: 'StartPosition', type: 'float', defaultValue: 0 },
   ],
   inputs: [
-    input('Open', FIELD_VOID, (e, d) => {
-      fire(e, 'OnOpen', d.activator as Entity | null);
-      e.setThink((self) => fire(self, 'OnFullyOpen', d.activator as Entity | null), 0.1);
-    }),
-    input('Close', FIELD_VOID, (e, d) => {
-      fire(e, 'OnClose', d.activator as Entity | null);
-      e.setThink((self) => fire(self, 'OnFullyClosed', d.activator as Entity | null), 0.1);
+    input('Open', FIELD_VOID, (e, d) => moveLinearOpen(e, d.activator as Entity | null)),
+    input('Close', FIELD_VOID, (e, d) => moveLinearClose(e, d.activator as Entity | null)),
+    input('Toggle', FIELD_VOID, (e, d) => {
+      const state = e.getNumber('toggleState', TS_AT_BOTTOM);
+      if (state === TS_AT_BOTTOM) moveLinearOpen(e, d.activator as Entity | null);
+      else if (state === TS_AT_TOP) moveLinearClose(e, d.activator as Entity | null);
     }),
     { name: 'SetSpeed', type: FIELD_FLOAT, key: 'speed' },
-    { name: 'SetPosition', type: FIELD_FLOAT, key: 'startposition' },
+    {
+      name: 'SetPosition',
+      type: FIELD_FLOAT,
+      handler: (e, data) => {
+        const value = Math.min(1, Math.max(0, data.value.float()));
+        e.set('startposition', value);
+        moveLinearApplyOffset(e, value);
+        e.set('toggleState', value >= 1 ? TS_AT_TOP : TS_AT_BOTTOM);
+      },
+    },
   ],
   outputs: [
     { name: 'OnFullyOpen', kind: 'event' },
@@ -308,6 +423,15 @@ export const FuncMovelinearClass: EntityClass = {
     { name: 'OnOpen', kind: 'event' },
     { name: 'OnClose', kind: 'event' },
   ],
+  spawn: (e) => {
+    // 出生姿态：BSP 几何固定在实体 origin；`StartPosition` 决定实体出生在 pos1(0) 还是
+    // pos2(1)（本图 5 个 movelinear 全是 0 ⇒ 出生在关闭端，电梯平台停井底）。
+    // 无 `movedistance` 的自定义实体在这里是 0 偏移，不会产生额外几何写入。
+    const startPosition = Math.min(1, Math.max(0, e.getNumber('startposition', 0)));
+    e.set('moveLinearProgress', startPosition);
+    e.set('toggleState', startPosition >= 0.5 ? TS_AT_TOP : TS_AT_BOTTOM);
+    if (e.getNumber('movedistance', 0) > 0) moveLinearApplyOffset(e, startPosition);
+  },
 };
 
 export const FuncRotatingClass: EntityClass = {
