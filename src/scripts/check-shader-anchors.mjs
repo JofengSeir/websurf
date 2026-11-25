@@ -40,7 +40,7 @@ const DEFENSIVE_ANCHORS = new Map([
   [
     'lightmap_fragment',
     'three 0.165.0 的 ShaderChunk 只有 lightmap_pars_fragment、没有 lightmap_fragment；' +
-      'src/renderer-shared/shader/lightmap-shader.ts:624-626 说明这是给未来版本的防御性通道，命中数恒为 0。',
+      'src/renderer-shared/shader/lightmap/glsl-chunks.ts:182-184 说明这是给未来版本的防御性通道，命中数恒为 0。',
   ],
 ]);
 
@@ -49,7 +49,7 @@ const DEFENSIVE_ANCHORS = new Map([
  * 这些名字同样是硬契约：名字不存在 ⇒ 覆盖逻辑静默失效。
  */
 const DIRECT_CHUNK_NAMES = new Map([
-  ['colorspace_fragment', 'lightmap-shader.ts:794 COLORSPACE_CHUNK_NAME（installGamma22Output 覆盖 γ2.2 输出）'],
+  ['colorspace_fragment', 'lightmap/glsl-chunks.ts:262 COLORSPACE_CHUNK_NAME（installGamma22Output 覆盖 γ2.2 输出）'],
 ]);
 
 const ANCHOR_RE = /#include\s*<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>/g;
