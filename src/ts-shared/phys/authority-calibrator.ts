@@ -126,7 +126,9 @@ export interface SyncRenderState {
  * 状态」，`SyncRenderState` 指「要发给权威的同步载荷」。本类用它作 `emitTeleportSync`
  * 与 `routineReanchor` 的形参类型，以及 `correctFromAuthority` 里两处 cast 的目标。
  */
-export type SyncPhysState = SyncRenderState;
+export type SyncPhysState = SyncRenderState & {
+  onLadder?: boolean;
+};
 
 /** 本类的全部外部依赖（构造函数注入，无默认实现、无缺省分支）。 */
 export interface CalibratorDeps {
@@ -628,6 +630,10 @@ export class AuthorityCalibrator {
   calibrateVelocity(now: number): void {
     const phys = this.deps.getPhys();
     if (!phys || !this.curAuth) return;
+    const st = phys.state() as unknown as SyncPhysState;
+    // 梯上攀爬速度由当前输入与朝向零惯性瞬时决定（ladder_move），不能用延迟的权威速度 + 加速度
+    // 外推去覆盖渲染物理，否则双世界时间差会反复把梯上速度拉成旧方向/零速，导致卡死或脱梯。
+    if (st.onLadder === true) return;
     const a = this.curAuth;
     // 帧龄基准是主线程读到该权威帧的时刻（同线程时钟）。
     // 若改用 a.timeMs（Worker 的 performance.now），两个时钟基准不同，dt 会被一个固定

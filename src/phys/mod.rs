@@ -365,14 +365,12 @@ impl PhysWorld {
             let max = [b.max[0] as f64, b.max[1] as f64, b.max[2] as f64];
             if b.is_ladder {
                 let facing = compute_ladder_facing(&planes);
-                if b.is_solid {
-                    self.world.solids.push(Brush {
-                        planes: planes.clone(),
-                        min,
-                        max,
-                        entity: b.entity,
-                    });
-                }
+                self.world.solids.push(Brush {
+                    planes: planes.clone(),
+                    min,
+                    max,
+                    entity: b.entity,
+                });
                 self.world.ladders.push(LadderVolume {
                     planes,
                     min,
@@ -647,6 +645,17 @@ impl PhysWorld {
         self.player.velocity = [vel_x, vel_y, vel_z];
         self.player.on_ground = on_ground;
         self.player.prev_origin = self.player.origin;
+        let mins = self.player.mins();
+        let maxs = self.player.maxs();
+        let hit = self.world.ladder_at(&self.player.origin, &mins, &maxs);
+        if self.player.on_ladder != hit {
+            if let Some(idx) = hit.filter(|_| !on_ground) {
+                self.player.on_ladder = Some(idx);
+                self.player.ladder_facing = self.world.ladders[idx].facing_toward(&self.player.origin);
+            } else if hit.is_none() || self.player.on_ladder.is_some() {
+                self.player.on_ladder = None;
+            }
+        }
     }
 
     /// 只覆盖速度（HU/s）：位置、朝向、着地均不动。
@@ -1004,8 +1013,8 @@ impl PhysWorld {
         self.noclip = enabled;
     }
 
-    /// 返回当前状态的 JS 对象。字段固定 11 项：`posX/posY/posZ`（HU）、
-    /// `yaw`/`pitch`（度）、`velX/velY/velZ`（HU/s）、`onGround`、`contactTicks`、`eyeHeight`（HU）。
+    /// 返回当前状态的 JS 对象。字段固定 12 项：`posX/posY/posZ`（HU）、
+    /// `yaw`/`pitch`（度）、`velX/velY/velZ`（HU/s）、`onGround`、`onLadder`、`contactTicks`、`eyeHeight`（HU）。
     ///
     /// **不含时间戳**——帧时间由调用方自行记录；不含蹲伏/滑行等扩展位。每次调用都新建对象。
     pub fn state(&self) -> JsValue {
@@ -1372,7 +1381,7 @@ impl PhysWorld {
 
 impl PhysWorld {
     /// 把 `player` 的当前值写成一个**新建**的 JS 对象，是 `tick` / `state`
-    /// 两个导出方法的共同出口。字段集固定 11 项（含调试用的 `contactTicks`），见 `state`
+    /// 两个导出方法的共同出口。字段集固定 12 项（含调试用的 `contactTicks`），见 `state`
     /// （`pub fn state`）的文档。
     fn state_js(&self) -> JsValue {
         let p = &self.player;
@@ -1386,6 +1395,7 @@ impl PhysWorld {
         set_f64(&obj, "velY", p.velocity[1]);
         set_f64(&obj, "velZ", p.velocity[2]);
         set_bool(&obj, "onGround", p.on_ground);
+        set_bool(&obj, "onLadder", p.on_ladder.is_some());
         set_f64(&obj, "contactTicks", p.contact_ticks as f64); // 传送 gate 计数（调试/回归测试用）
         set_f64(&obj, "eyeHeight", p.eye_height());
         obj.into()
@@ -1399,6 +1409,7 @@ impl PhysWorld {
         self.player.origin = *origin;
         self.player.velocity = [0.0, 0.0, 0.0];
         self.player.on_ground = false;
+        self.player.on_ladder = None;
         self.player.yaw = yaw;
         self.player.prev_origin = *origin;
     }

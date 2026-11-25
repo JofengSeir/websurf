@@ -313,4 +313,78 @@ fn strafing_near_ladder_edge_locks_facing_and_climbs() {
     assert!(p.origin[1] > 40.0, "边平移边爬应继续上升，实际 y={}", p.origin[1]);
 }
 
+#[test]
+fn non_solid_ladder_blocks_clip_and_set_state_syncs_ladder_attachment() {
+    use crate::phys::PhysWorld;
+
+    let to_planes_json = |min: [f32; 3], max: [f32; 3]| {
+        serde_json::json!([
+            { "normal": [1.0, 0.0, 0.0], "dist": max[0] },
+            { "normal": [-1.0, 0.0, 0.0], "dist": -min[0] },
+            { "normal": [0.0, 1.0, 0.0], "dist": max[1] },
+            { "normal": [0.0, -1.0, 0.0], "dist": -min[1] },
+            { "normal": [0.0, 0.0, 1.0], "dist": max[2] },
+            { "normal": [0.0, 0.0, -1.0], "dist": -min[2] },
+        ])
+    };
+
+    let brushes_json = serde_json::json!([
+        {
+            "planes": to_planes_json([-300.0, -32.0, -300.0], [300.0, 0.0, 300.0]),
+            "min": [-300.0, -32.0, -300.0],
+            "max": [300.0, 0.0, 300.0],
+            "is_ladder": false,
+            "is_solid": true,
+            "entity": -1,
+            "start_solid": true,
+        },
+        // 真实地图（如 ze_cursed_bear_tales / surf_*）里的纯 CONTENTS_LADDER 刷子（is_solid=false）
+        {
+            "planes": to_planes_json([-50.0, 0.0, 0.0], [50.0, 200.0, 1.0]),
+            "min": [-50.0, 0.0, 0.0],
+            "max": [50.0, 200.0, 1.0],
+            "is_ladder": true,
+            "is_solid": false,
+            "entity": -1,
+            "start_solid": true,
+        },
+    ])
+    .to_string();
+
+    let mut pw = PhysWorld::new();
+    pw.build_world(
+        &brushes_json,
+        "[]",
+        r#"{"teleports":[],"triggers":[]}"#,
+        0.0,
+        2.0,
+        32.0,
+        0.0,
+    )
+    .expect("build_world");
+    assert_eq!(pw.world.ladders.len(), 1);
+    assert_eq!(pw.world.solids.len(), 2, "纯 LADDER 刷子也必须进入 solids 防穿透");
+
+    let params = PhysParams::default();
+    let mut p = create_player([0.0, 2.0, 32.0], &params);
+    p.pitch = 45.0;
+    for _ in 0..10 {
+        player_tick(&mut pw.world, &mut p, &params, DT);
+    }
+    p.input.forward = true;
+    for _ in 0..60 {
+        player_tick(&mut pw.world, &mut p, &params, DT);
+    }
+    assert!(p.on_ladder.is_some(), "纯 LADDER 刷子外侧应能抓住梯子");
+    assert!(p.origin[1] > 40.0, "抓住后应顺利攀爬，实际 y={}", p.origin[1]);
+    assert!(p.origin[2] >= 16.9, "不应穿透纯 LADDER 刷子，实际 z={}", p.origin[2]);
+
+    // set_state 重锚到梯子外侧（离地）应立即附着，重锚到远离梯子处应清除 on_ladder
+    pw.set_state(0.0, 50.0, 17.0, 0.0, 0.0, 0.0, 0.0, 0.0, false);
+    assert_eq!(pw.player.on_ladder, Some(0), "set_state 重锚贴梯离地应附着到梯子");
+    pw.set_state(0.0, 50.0, 200.0, 0.0, 0.0, 0.0, 0.0, 0.0, false);
+    assert_eq!(pw.player.on_ladder, None, "set_state 移离梯子后必须清除旧 on_ladder");
+}
+
+
 
