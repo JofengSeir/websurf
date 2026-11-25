@@ -98,7 +98,24 @@ const {
   doorMoveSpeed,
   doorTravelSeconds,
   doorMoveOffset,
+  funcRotatingAxis,
+  rotatingSpeedLimit,
+  rotatingDegreesToRadians,
+  axisAngleEuler,
+  rotDoorAxis,
+  rotDoorSpeed,
+  rotDoorAngleEuler,
 } = await loadTsBundle('src/ts-shared/entity/classes/brush.ts', 'entity-brush');
+
+// 旋转枢轴的「rest 零变化」不变量：组位置 = pivot、mesh 局部位置 = 原位置 - pivot 时，
+// 世界坐标在旋转 0 的情况下逐分量不变（pivot 加回本身的抵消）。
+const {
+  dynamicEntityGroupPlacement,
+  markDynamicEntities,
+  collectDynamicEntityGroups,
+  DYNAMIC_ENTITY_PIVOT_KEY,
+} = await loadTsBundle('src/renderer-shared/scene/dynamic-entities.ts', 'dynamic-entities');
+const THREE = await import('three');
 
 const { ShmState, SHARED_BUFFER_SIZE, KEY_MASK, keysToMask, maskToKeys } = sharedState;
 
@@ -525,4 +542,173 @@ test('door-motion: 位移 = 方向 * 行程 * progress，progress 钳 0..1', () 
   vecNear(doorMoveOffset([0, 1, 0], 240, -1), [0, 0, 0]);
   vecNear(doorMoveOffset(undefined, 240, 1), [0, 0, 0]);
   vecNear(doorMoveOffset([1, 0, 0], 240, 0), [0, 0, 0]);
+});
+
+// ── rotation：func_rotating / func_door_rotating 的轴与角度换算（T-N5） ──────────
+// 轴语义以 bmodels.cpp:673-684 的 QAngle + physics_main.cpp:794-797 的欧拉积分 +
+// vector.h:2191-2196 的 QAngleToAngularImpulse 为准：flag4 绕 Source X、flag8 绕 Source Y、
+// 默认绕 Source Z；换到 three 轴序（convert.rs 的 map_coords）即 [0,0,1] / [1,0,0] / [0,1,0]。
+
+test('rotation: func_rotating 轴旗标 → three 轴（X/Y/Z + BACKWARDS）', () => {
+  vecNear(funcRotatingAxis(0), [0, 1, 0]); // 默认 Y_AXIS 名 → 实际绕 Source Z（竖直）
+  vecNear(funcRotatingAxis(4), [0, 0, 1]); // Z_AXIS 名 → 实际绕 Source X
+  vecNear(funcRotatingAxis(8), [1, 0, 0]); // X_AXIS 名 → 实际绕 Source Y
+  vecNear(funcRotatingAxis(2), [0, -1, 0]); // BACKWARDS 取负
+  vecNear(funcRotatingAxis(6), [0, 0, -1]);
+  vecNear(funcRotatingAxis(10), [-1, 0, 0]);
+  // BSP 实证（ze_cursed，flags / 数量）：512×2、513×1、516×1、580×1、581×2、582×1、585×4；
+  // 其中 512 是 SMALL/LARGE 半径位，不影响轴。
+  vecNear(funcRotatingAxis(513), [0, 1, 0]); // 512+1 lvl2_rotate（START_ON + 默认轴）
+  vecNear(funcRotatingAxis(516), [0, 0, 1]); // 512+4 piege01
+  vecNear(funcRotatingAxis(581), [0, 0, 1]); // 512+64+4+1 lvl2_rotate5/6
+  vecNear(funcRotatingAxis(585), [1, 0, 0]); // 512+64+8+1 lvl2_rotate01..4
+  vecNear(funcRotatingAxis(Number.NaN), [0, 1, 0]);
+});
+
+test('rotation: maxspeed 0/非有限回落 100、负值取绝对值', () => {
+  assert.equal(rotatingSpeedLimit(0), 100);
+  assert.equal(rotatingSpeedLimit(Number.NaN), 100);
+  assert.equal(rotatingSpeedLimit(Number.POSITIVE_INFINITY), 100);
+  assert.equal(rotatingSpeedLimit(-80), 80);
+  assert.equal(rotatingSpeedLimit(8), 8);
+  assert.equal(rotatingSpeedLimit(100), 100);
+});
+
+test('rotation: 角度→弧度与单轴欧拉写回，rest（0°）严格恒等', () => {
+  assert.equal(rotatingDegreesToRadians(180), Math.PI);
+  assert.equal(rotatingDegreesToRadians(90), Math.PI / 2);
+  assert.equal(rotatingDegreesToRadians(Number.NaN), 0);
+  vecNear(axisAngleEuler([0, 1, 0], Math.PI / 2), [0, Math.PI / 2, 0]);
+  vecNear(axisAngleEuler([1, 0, 0], Math.PI), [Math.PI, 0, 0]);
+  vecNear(axisAngleEuler([0, 0, 1], -Math.PI / 4), [0, 0, -Math.PI / 4]);
+  // rest 不变量：未旋转时三分量必须都是 0（否则枢轴组会带着初始旋转出生）。
+  vecNear(axisAngleEuler([0, 1, 0], 0), [0, 0, 0]);
+  vecNear(axisAngleEuler([0, 0, 1], rotatingDegreesToRadians(0)), [0, 0, 0]);
+  vecNear(axisAngleEuler(null, 1.23), [0, 0, 0]);
+  vecNear(axisAngleEuler([Number.NaN, 0, 0], 1), [0, 0, 0]);
+});
+
+test('rotation: func_door_rotating 轴（YAW/ROLL/PITCH + BACKWARDS）', () => {
+  vecNear(rotDoorAxis(0), [0, 1, 0]); // 默认 YAW → 竖直
+  vecNear(rotDoorAxis(2), [0, -1, 0]);
+  vecNear(rotDoorAxis(64), [0, 0, 1]); // ROTATE_ROLL → 绕 Source X
+  vecNear(rotDoorAxis(128), [1, 0, 0]); // ROTATE_PITCH → 绕 Source Y
+  vecNear(rotDoorAxis(66), [0, 0, -1]);
+  vecNear(rotDoorAxis(130), [-1, 0, 0]);
+  vecNear(rotDoorAxis(12), [0, 1, 0]); // ze_cursed flags=12（NONSOLID_TO_PLAYER|PASSABLE）非轴
+  vecNear(rotDoorAxis(Number.NaN), [0, 1, 0]);
+});
+
+test('rotation: 旋转门速度 0/非有限/负数回落 100 度/秒', () => {
+  assert.equal(rotDoorSpeed(0), 100);
+  assert.equal(rotDoorSpeed(-30), 100);
+  assert.equal(rotDoorSpeed(Number.NaN), 100);
+  assert.equal(rotDoorSpeed(30), 30);
+  assert.equal(rotDoorSpeed(300), 300);
+});
+
+test('rotation: 旋转门角度按 progress 线性插值并钳 0..1', () => {
+  vecNear(rotDoorAngleEuler([0, 1, 0], 180, 0), [0, 0, 0]);
+  vecNear(rotDoorAngleEuler([0, 1, 0], 180, 0.5), [0, Math.PI / 2, 0]);
+  vecNear(rotDoorAngleEuler([0, 1, 0], 180, 1), [0, Math.PI, 0]);
+  vecNear(rotDoorAngleEuler([0, 1, 0], 180, 2), [0, Math.PI, 0]);
+  vecNear(rotDoorAngleEuler([0, 1, 0], 180, -1), [0, 0, 0]);
+  vecNear(rotDoorAngleEuler([0, 0, 1], 90, 1), [0, 0, Math.PI / 2]);
+  vecNear(rotDoorAngleEuler([0, 1, 0], 180, Number.NaN), [0, 0, 0]);
+});
+
+test('rotation: 枢轴组放置的 rest 零变化不变量（world = pivot + worldPos - pivot）', () => {
+  const pivot = [12556, 12896, -140]; // 实测 #116 lvl2_rotate 的 BSP origin
+  const meshWorld = [12556, 12896, -140]; // 合并后 mesh 已清零局部变换，世界坐标 = 0；这里取与 pivot 重合的最简分支
+  const placed = dynamicEntityGroupPlacement(pivot, meshWorld);
+  vecNear(placed.position, pivot);
+  vecNear(placed.meshOffset, [0, 0, 0]);
+  const world = [placed.position[0] + placed.meshOffset[0], placed.position[1] + placed.meshOffset[1], placed.position[2] + placed.meshOffset[2]];
+  vecNear(world, meshWorld);
+  // 带内部偏移的 mesh（多 primitive / 非零局部变换）：世界坐标同样逐分量不变。
+  const offsetWorld = [12600, 12896, -100];
+  const placed2 = dynamicEntityGroupPlacement(pivot, offsetWorld);
+  vecNear(placed2.position, pivot);
+  vecNear(placed2.meshOffset, [44, 0, 40]);
+  vecNear([
+    placed2.position[0] + placed2.meshOffset[0],
+    placed2.position[1] + placed2.meshOffset[1],
+    placed2.position[2] + placed2.meshOffset[2],
+  ], offsetWorld);
+  // 未合并路径：子 mesh 世界坐标 = 实体 origin（父链平移仍在），偏移应为 0 而不是 -pivot。
+  vecNear(dynamicEntityGroupPlacement(pivot, pivot).meshOffset, [0, 0, 0]);
+  // 缺 pivot（旧 GLB / 无 origin 实体）→ 组在原点，行为与改造前一致。
+  vecNear(dynamicEntityGroupPlacement(null, [4, 5, 6]).position, [0, 0, 0]);
+  vecNear(dynamicEntityGroupPlacement(null, [4, 5, 6]).meshOffset, [4, 5, 6]);
+  vecNear(dynamicEntityGroupPlacement([1, Number.NaN, 3], [1, 2, 3]).position, [1, 0, 3]);
+});
+
+test('rotation: 动态实体组绕自身 BSP origin 旋转（rest 世界坐标零变化）', () => {
+  // 造一个「合并前」的场景：实体节点 translation = BSP origin（GLB 导出即如此），
+  // mesh 几何已世界烘焙、局部变换单位阵（scene-optimizer 的 exclude 分支结果）。
+  const root = new THREE.Scene();
+  const entityNode = new THREE.Group();
+  entityNode.name = 'brush_5';
+  entityNode.userData.vbsp_entity_index = 5;
+  entityNode.userData.vbsp_model = '*1';
+  entityNode.position.set(10, 20, 30);
+  const mesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial());
+  mesh.userData.vbsp_entity_index = 5;
+  entityNode.add(mesh);
+  root.add(entityNode);
+
+  assert.equal(markDynamicEntities(root, new Set([5])), 1);
+  assert.deepEqual(mesh.userData[DYNAMIC_ENTITY_PIVOT_KEY], [10, 20, 30]);
+  // 合并路径：exclude 分支把顶点烘焙到世界空间、局部变换清零，mesh 成为新 root 的直接子节点。
+  root.add(mesh);
+  mesh.position.set(0, 0, 0);
+  mesh.rotation.set(0, 0, 0);
+  mesh.scale.set(1, 1, 1);
+  const groups = collectDynamicEntityGroups(root);
+  const group = groups.get(5);
+  assert.ok(group, '组已建立');
+  assert.deepEqual([group.position.x, group.position.y, group.position.z], [10, 20, 30]);
+  assert.deepEqual([mesh.position.x, mesh.position.y, mesh.position.z], [-10, -20, -30]);
+
+  root.updateMatrixWorld(true);
+  const pivotPoint = new THREE.Vector3(10, 20, 30); // 恰在枢轴上的顶点
+  const offPoint = new THREE.Vector3(11, 20, 30); // 枢轴 +1 HU
+  const worldOf = (v) => v.clone().applyMatrix4(mesh.matrixWorld);
+  vecNear(worldOf(pivotPoint).toArray(), [10, 20, 30], 1e-6); // rest：零变化
+  vecNear(worldOf(offPoint).toArray(), [11, 20, 30], 1e-6);
+
+  group.rotation.y = Math.PI / 2; // func_rotating 默认轴（three Y = 竖直）
+  root.updateMatrixWorld(true);
+  vecNear(worldOf(pivotPoint).toArray(), [10, 20, 30], 1e-6); // 枢轴点严格不动（不绕世界原点公转）
+  // three Y 轴 +90°：相对偏移 (1,0,0) → (0,0,-1)。
+  vecNear(worldOf(offPoint).toArray(), [10, 20, 29], 1e-6);
+});
+
+test('rotation: 未合并路径（多 primitive 子 mesh）rest 世界坐标不变', () => {
+  // merge === false 时不跑合并器：几何仍是模型局部坐标，mesh 保持挂在实体节点下，
+  // 世界坐标 = 实体 origin + 局部偏移。偏移必须按世界坐标算，否则会少加一次 origin。
+  const root = new THREE.Scene();
+  const entityNode = new THREE.Group();
+  entityNode.name = 'brush_7';
+  entityNode.userData.vbsp_entity_index = 7;
+  entityNode.userData.vbsp_model = '*2';
+  entityNode.position.set(100, -50, 4);
+  const mesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial());
+  mesh.userData.vbsp_entity_index = 7;
+  entityNode.add(mesh);
+  root.add(entityNode);
+
+  markDynamicEntities(root, new Set([7]));
+  const groups = collectDynamicEntityGroups(root);
+  const group = groups.get(7);
+  assert.ok(group, '组已建立');
+  assert.deepEqual([group.position.x, group.position.y, group.position.z], [100, -50, 4]);
+  assert.deepEqual([mesh.position.x, mesh.position.y, mesh.position.z], [0, 0, 0]);
+
+  root.updateMatrixWorld(true);
+  const localPoint = new THREE.Vector3(1, 0, 0); // 模型局部顶点
+  vecNear(localPoint.clone().applyMatrix4(mesh.matrixWorld).toArray(), [101, -50, 4], 1e-6);
+  group.rotation.y = Math.PI / 2;
+  root.updateMatrixWorld(true);
+  vecNear(localPoint.clone().applyMatrix4(mesh.matrixWorld).toArray(), [100, -50, 3], 1e-6);
 });

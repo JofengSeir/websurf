@@ -76,6 +76,8 @@ export function attachEntitySystem(options: AttachEntityOptions): EntitySystem |
     // 移动 brush 的绝对位移（相对 BSP 出生位置，Y-up）。载荷用逗号分隔的定点小数，
     // 与 brush 开关同一「`<实体下标>:<值>`」约定，消费方在 EntityGameplay 解析。
     brushOffset: (i, o) => effect('brush:offset', `${i}:${o[0]},${o[1]},${o[2]}`),
+    // 旋转 brush 的 three 欧拉角（弧度，绕实体 origin）；与位移同一「`<下标>:<x>,<y>,<z>`」载荷。
+    brushRotation: (i, a) => effect('brush:rotation', `${i}:${a[0]},${a[1]},${a[2]}`),
     // sprite / 粒子的可见性与发射开关，沿用同一「`<实体下标>:<bool>`」载荷约定。
     spriteVisible: (i, on) => effect('sprite', `${i}:${on}`),
     particleActive: (i, on) => effect('particle', `${i}:${on}`),

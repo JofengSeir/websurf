@@ -92,9 +92,17 @@ interface MeshLike {
   readonly parent?: Object3DLike | null;
 }
 
-/** 动态实体组的最小形状：组级显隐 + 位移（three.Group 可直接满足）。 */
+/** 动态实体组的最小形状：组级显隐 + 位移 + 旋转（three.Group 可直接满足）。 */
+interface EulerLike {
+  x: number;
+  y: number;
+  z: number;
+  set(x: number, y: number, z: number): void;
+}
+
 interface GroupLike extends Object3DLike {
   readonly position: Vector3Like;
+  readonly rotation?: EulerLike;
 }
 
 /**
@@ -197,6 +205,8 @@ export interface BrushEntityVisibilityStats {
   readonly unresolvedEvents: number;
   /** 当前「应隐藏」实体数（事件 + 载图初态；PVS 重建后按它重放）。 */
   readonly desiredHidden: number;
+  /** 当前记有旋转目标角的动态实体组数（PVS 重建后按它重放）。 */
+  readonly desiredRotations: number;
   /** 接受索引的来源表几何张数。 */
   readonly tablesAccepted: number;
   /** 因表形态/区间共享冲突被整张跳过的来源表几何张数。 */
@@ -218,6 +228,12 @@ export type BrushEntityOffsetResult =
   | { readonly status: 'changed'; readonly rebuilt: boolean; readonly triangles: number; readonly slots: number }
   | { readonly status: 'unchanged'; readonly rebuilt: boolean }
   | { readonly status: 'unresolved'; readonly rebuilt: boolean };
+
+/**
+ * `setEntityRotation()` 的结果。旋转只对动态实体组生效（逐区间写顶点的旧路径没有枢轴，
+ * 无法在不重建几何的前提下绕自身 origin 旋转）；找不到组时返回 `unresolved` 且不写任何缓冲。
+ */
+export type BrushEntityRotationResult = BrushEntityOffsetResult;
 
 // ── 纯函数 helper ───────────────────────────────────────────────────────────
 
@@ -401,6 +417,8 @@ export class BrushEntityVisibility {
   private readonly desiredHidden = new Set<number>();
   /** 移动 brush 的位移镜像（事件驱动的绝对偏移；重建索引后按它重放）。 */
   private readonly desiredOffsets = new Map<number, [number, number, number]>();
+  /** 旋转 brush 的目标角镜像（three Euler，弧度；只对动态实体组生效）。 */
+  private readonly desiredRotations = new Map<number, [number, number, number]>();
   private tablesAccepted = 0;
   private tablesRejected = 0;
   private bindingSlots = 0;
@@ -428,6 +446,7 @@ export class BrushEntityVisibility {
     this.reset();
     this.desiredHidden.clear();
     this.desiredOffsets.clear();
+    this.desiredRotations.clear();
     const root = sceneRoot as SceneRootLike | null | undefined;
     if (!root || typeof root.traverse !== 'function') {
       this.limitations.push('宿主未注入 sceneRoot：拿不到合并后的几何（面板状态行会显示未载图）');
@@ -529,6 +548,8 @@ export class BrushEntityVisibility {
     for (const [entityIndex, group] of this.entityGroups) {
       const base = this.groupBasePositions.get(entityIndex);
       if (base) group.position.set(base[0], base[1], base[2]);
+      // 旋转同样必须回零：否则换图重建索引时会把当前角度当成新基准持续叠加。
+      group.rotation?.set(0, 0, 0);
     }
   }
 
@@ -581,6 +602,43 @@ export class BrushEntityVisibility {
     return { status: 'changed', rebuilt, triangles: binding.triangles, slots: binding.slots.length };
   }
 
+  /**
+   * 设置动态实体组的旋转（three Euler，弧度，Y-up；绕组枢轴旋转）。
+   *
+   * 只对 `collectDynamicEntityGroups()` 产出的组生效：组 `position` 就是实体 BSP origin，
+   * 组内几何已世界烘焙到「相对 origin」的局部坐标，因此写 `group.rotation` 就是**严格绕自身
+   * 枢轴**旋转，而不是绕世界原点公转。逐区间写顶点的旧路径没有枢轴，返回 `unresolved`。
+   * 与 `setEntityOffset()` 共用 PVS 换缓冲检测：缓冲被换掉后重建索引再重放旋转。
+   */
+  setEntityRotation(
+    entityIndex: number,
+    angles: [number, number, number],
+  ): BrushEntityRotationResult {
+    const previous = this.desiredRotations.get(entityIndex);
+    this.desiredRotations.set(entityIndex, angles);
+    let rebuilt = false;
+    if (this.hasStaleIndexBuffer()) {
+      this.refresh();
+      rebuilt = true;
+    }
+    const group = this.entityGroups.get(entityIndex);
+    if (group) {
+      if (
+        previous
+        && previous[0] === angles[0]
+        && previous[1] === angles[1]
+        && previous[2] === angles[2]
+      ) {
+        return { status: 'unchanged', rebuilt };
+      }
+      this.writeGroupRotation(group, angles);
+      return { status: 'changed', rebuilt, triangles: 0, slots: 0 };
+    }
+    // 逐区间路径没有枢轴，强转会绕世界原点公转（T-N5 明确不做），只计数不写几何。
+    this.unresolvedEvents += 1;
+    return { status: 'unresolved', rebuilt };
+  }
+
   /** 诊断快照：实体/区间/隐藏计数与限制文本（字段口径与应用层状态行一致）。 */
   stats(): BrushEntityVisibilityStats {
     let entities = this.bindings.size;
@@ -603,6 +661,7 @@ export class BrushEntityVisibility {
       hiddenVertexSlots: this.hiddenVertexSlots,
       unresolvedEvents: this.unresolvedEvents,
       desiredHidden: this.desiredHidden.size,
+      desiredRotations: this.desiredRotations.size,
       tablesAccepted: this.tablesAccepted,
       skippedGeometries: this.tablesRejected,
       rebuilds: this.rebuilds,
@@ -616,6 +675,7 @@ export class BrushEntityVisibility {
     this.reset();
     this.desiredHidden.clear();
     this.desiredOffsets.clear();
+    this.desiredRotations.clear();
   }
 
   // ── 内部实现 ─────────────────────────────────────────────────────────────
@@ -661,6 +721,7 @@ export class BrushEntityVisibility {
     });
     this.applyDesiredHidden();
     this.applyDesiredOffsets();
+    this.applyDesiredRotations();
     this.rebuilds += 1;
   }
 
@@ -883,6 +944,11 @@ export class BrushEntityVisibility {
     group.position.set(base[0] + offset[0], base[1] + offset[1], base[2] + offset[2]);
   }
 
+  /** 组级旋转：直接写组欧拉角（组原点已对齐实体 origin，故旋转绕自身枢轴）。 */
+  private writeGroupRotation(group: GroupLike, angles: [number, number, number]): void {
+    group.rotation?.set(angles[0], angles[1], angles[2]);
+  }
+
   /** 把一个区间的顶点写成 `基准 + offset`；隐藏中的位移不写点（恢复时补写）。 */
   private writeSlotOffset(slot: Slot, offset: [number, number, number]): void {
     const vertices = slot.vertices;
@@ -906,6 +972,14 @@ export class BrushEntityVisibility {
       binding.offset = [offset[0], offset[1], offset[2]];
       if (binding.hidden) continue;
       for (const slot of binding.slots) this.writeSlotOffset(slot, binding.offset);
+    }
+  }
+
+  /** 把旋转镜像应用到已建好的动态实体组（PVS 重建索引后重放）。 */
+  private applyDesiredRotations(): void {
+    for (const [entityIndex, angles] of this.desiredRotations) {
+      const group = this.entityGroups.get(entityIndex);
+      if (group) this.writeGroupRotation(group, angles);
     }
   }
 

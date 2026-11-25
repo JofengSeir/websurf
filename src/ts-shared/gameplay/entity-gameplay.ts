@@ -127,6 +127,11 @@ export interface EntityGameplayOptions {
    */
   onBrushOffsetChange?: (entity: number, offset: [number, number, number]) => void;
   /**
+   * 旋转 brush（`func_rotating` / `func_door_rotating`）的欧拉角变化（three 轴序，Y-up，弧度，
+   * 绕实体 BSP origin）。渲染端消费它写动态实体组的 `rotation`；本仓碰撞不随旋转。
+   */
+  onBrushRotationChange?: (entity: number, angles: [number, number, number]) => void;
+  /**
    * `env_sprite` 的 ShowSprite / HideSprite / ToggleSprite 可见性变化。
    * 渲染侧由 RenderSession.applyEntityInput / setSpriteVisible 消费（宿主自行接线）。
    */
@@ -178,14 +183,28 @@ function parseToggleDetail(detail: string | undefined): { entity: number; on: bo
 
 /** 解析实体层 `brush:offset` 事件载荷 `<entityIndex>:<x>,<y>,<z>`（Y-up 绝对位移）。 */
 function parseBrushOffsetDetail(detail: string | undefined): { entity: number; offset: [number, number, number] } | null {
+  const parsed = parseBrushVec3Detail(detail);
+  return parsed ? { entity: parsed.entity, offset: parsed.values } : null;
+}
+
+/** 解析实体层 `brush:rotation` 事件载荷 `<entityIndex>:<x>,<y>,<z>`（three 欧拉角，弧度）。 */
+function parseBrushRotationDetail(detail: string | undefined): { entity: number; angles: [number, number, number] } | null {
+  const parsed = parseBrushVec3Detail(detail);
+  return parsed ? { entity: parsed.entity, angles: parsed.values } : null;
+}
+
+/** `brush:offset` / `brush:rotation` 共用的 `<下标>:<x>,<y>,<z>` 解析（三值都必须是有限数）。 */
+function parseBrushVec3Detail(
+  detail: string | undefined,
+): { entity: number; values: [number, number, number] } | null {
   if (!detail) return null;
   const m = /^(-?\d+):(-?[\d.eE+-]+),(-?[\d.eE+-]+),(-?[\d.eE+-]+)$/.exec(detail);
   if (!m) return null;
   const entity = Number.parseInt(m[1], 10);
   if (!Number.isInteger(entity) || entity < 0) return null;
-  const offset: [number, number, number] = [Number(m[2]), Number(m[3]), Number(m[4])];
-  if (!offset.every((v) => Number.isFinite(v))) return null;
-  return { entity, offset };
+  const values: [number, number, number] = [Number(m[2]), Number(m[3]), Number(m[4])];
+  if (!values.every((v) => Number.isFinite(v))) return null;
+  return { entity, values };
 }
 
 /**
@@ -262,6 +281,11 @@ export class EntityGameplay {
    * 实体层动态加载后、物理实例建立前发生的事件要先记下来，`update()` 换实例时重放。
    */
   private brushOffset = new Map<number, [number, number, number]>();
+  /**
+   * 旋转 brush 的角度镜像（`entity → [x,y,z]` three 欧拉角，弧度）：旋转只走渲染线，
+   * 没有物理副作用；换图/重建渲染索引后由宿主按它重放。
+   */
+  private brushRotation = new Map<number, [number, number, number]>();
   /**
    * 传送触发器的启用状态镜像（`entity → enabled`）：地图 `trigger_teleport` 的
    * `StartDisabled` 在 Rust 建表时只决定**初值**，运行期 `Enable`/`Disable` 需要本层
@@ -396,19 +420,22 @@ export class EntityGameplay {
     // 换图后实体下标空间与 Rust brush 初态都是新的：清掉上一张图的运行期开关镜像。
     this.brushSolid.clear();
     this.brushOffset.clear();
+    this.brushRotation.clear();
     this.teleportEnabled.clear();
     // 出生即「关」的 brush（START_OFF 墙 / StartDisabled 的 func_brush / 拿不到 movedir 的
     // 旧式门）：Rust 侧建物理世界时已按 `start_solid=false` 排除碰撞，但渲染层没有事件就
     // 不会藏几何，于是会出现「能穿过去但看着是关着的门/墙」。这里把初态同步成渲染可见性
     // 镜像：记进 `brushSolid`（物理实例晚于本调用建立时由 `update()` 重放，属于安全冗余），
     // 并通过 `onBrushSolidChange` 通知宿主隐藏几何。
-    // `func_door` 例外：能算出行程的门在 spawn 期已把几何移到开位、把自己设成实心
-    // （`doorMotionReady`，见 classes/brush.ts）；再按 start_solid 规则隐藏，会把开着的门
-    // 变成看不见的空洞。没有平移数据、回退旧隐藏近似的门不受影响。
+    // `func_door` / `func_door_rotating` 例外：能算出行程的门在 spawn 期已把几何移到开位、
+    // 把自己设成实心（`doorMotionReady`）或交给旋转通道（`brushRotationReady`，旋转门往往
+    // 带 PASSABLE 旗标、被 Rust 判成 start_solid=false）；再按 start_solid 规则隐藏，会把
+    // 开着的门变成看不见的空洞。没有平移/旋转数据的旧式门不受影响。
     const attached = this.entitySystem;
     if (attached) {
       for (const entity of attached.entList.entities) {
         if (entity.getBool('doorMotionReady', false)) continue;
+        if (entity.getBool('brushRotationReady', false)) continue;
         if (!entityStartsNonSolid(entity)) continue;
         this.brushSolid.set(entity.index, false);
         this.options.onBrushSolidChange?.(entity.index, false);
@@ -563,6 +590,7 @@ export class EntityGameplay {
     this.teleportFilterPushed = null;
     this.brushSolid.clear();
     this.brushOffset.clear();
+    this.brushRotation.clear();
     this.teleportEnabled.clear();
     this.childrenByParent.clear();
   }
@@ -618,6 +646,11 @@ export class EntityGameplay {
         this.applyBrushOffset(moved.entity, moved.offset);
         this.propagateBrushOffsetToDescendants(moved.entity, moved.offset);
       }
+    } else if (event.kind === 'brush:rotation') {
+      // 旋转 brush（`func_rotating` / 旋转门）：只写渲染组，物理碰撞保持出生姿态
+      // （World::trace 的凸体旋转是 T-N5 的 OUT，见任务书）。
+      const rotated = parseBrushRotationDetail(event.detail);
+      if (rotated) this.applyBrushRotation(rotated.entity, rotated.angles);
     } else if (event.kind === 'sprite') {
       // `env_sprite` 的 ShowSprite / HideSprite / ToggleSprite（Sprite.cpp:590-602）。
       const v = parseToggleDetail(event.detail);
@@ -643,6 +676,15 @@ export class EntityGameplay {
     const phys = this.options.getPhys();
     phys?.set_brush_offset?.(entity, offset[0], offset[1], offset[2]);
     this.options.onBrushOffsetChange?.(entity, offset);
+  }
+
+  /**
+   * 把某实体的旋转同时落到镜像与宿主渲染回调（旋转没有物理 setter：碰撞不随旋转）。
+   * 渲染索引重建后由宿主按 `brushRotation` 镜像重放；这里不重复写事件队列。
+   */
+  private applyBrushRotation(entity: number, angles: [number, number, number]): void {
+    this.brushRotation.set(entity, angles);
+    this.options.onBrushRotationChange?.(entity, angles);
   }
 
   /**

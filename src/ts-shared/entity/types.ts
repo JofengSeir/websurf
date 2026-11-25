@@ -103,6 +103,12 @@ export interface EntityHost {
    * 的顶点写回 `base + offset`（见 `BrushEntityVisibility.setEntityOffset`）。
    */
   setBrushOffset?(entityIndex: number, offset: Vec3): void;
+  /**
+   * 运行期旋转实体 brush 的渲染几何（`func_rotating` / `func_door_rotating`）。
+   * `angles` 是 three 轴序（Y-up）的欧拉角、**弧度**，绕实体 BSP origin 旋转；未旋转时为零。
+   * 只走渲染线（`BrushEntityVisibility.setEntityRotation`）：本仓碰撞不随旋转（T-N5 的已知差异）。
+   */
+  setBrushRotation?(entityIndex: number, angles: Vec3): void;
   /** `trigger_gravity` 改玩家重力倍数；不实现时该 trigger 只记录状态。 */
   setPlayerGravity?(value: number): void;
   /**

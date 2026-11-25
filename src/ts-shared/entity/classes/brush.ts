@@ -679,21 +679,435 @@ export const FuncMovelinearClass: EntityClass = {
   },
 };
 
+// ── 旋转驱动换算（Source SDK 2013）───────────────────────────────────────────
+// «func_rotating»：game/server/bmodels.cpp:673-692（轴）/ 718-731（maxspeed、START_ON）/ 971
+//   （SetLocalAngularVelocity）/ 1097-1131（常速 think）/ 1229-1337（输入）。
+// «func_door_rotating»：game/server/doors.cpp:944-1130（开关状态机）/ 1354-1400（CRotDoor::Spawn），
+//   «CBaseToggle::AxisDir»（game/server/subs.cpp:326-334）、«AngularMove»（subs.cpp:268-301）。
+//
+// **轴旗标的命名陷阱**：util.h:518-522 写的是 «Z_AXIS 4 / X_AXIS 8»，但 bmodels.cpp:673-684 把
+// flag4 映射成 «QAngle(0,0,1)»、flag8 成 «QAngle(1,0,0)»；而 QAngle 在
+// physics_main.cpp:794-797 是**按欧拉分量积分**的（angles += angularVelocity*dt），
+// «QAngleToAngularImpulse»（public/mathlib/vector.h:2191-2196）也确认 QAngle.z 是绕 X 的 roll、
+// QAngle.x 是绕 Y 的 pitch、QAngle.y 是绕 Z 的 yaw。因此实际语义是：
+//   bit4 → 绕 Source **X** 轴；bit8 → 绕 Source **Y** 轴；无旗标 → 绕 Source **Z** 轴（竖直）。
+// Hammer 的旗标文案（X Axis [4] / Y Axis [8]）与这一实际行为一致。
+// 经 «map_coords([x,y,z])=[y,z,x]» 换到 three（Y-up）：Source X→three Z、Source Y→three X、
+// Source Z→three Y，故本文件的轴函数直接返回 three 轴向量。
+export type RotatingVec3 = readonly [number, number, number];
+
+const SF_ROTATE_START_ON = 1;
+const SF_ROTATE_BACKWARDS = 2;
+/** 名叫 Z_AXIS，实际是绕 Source **X** 轴（见上方说明）。 */
+const SF_ROTATE_Z_AXIS = 4;
+/** 名叫 X_AXIS，实际是绕 Source **Y** 轴。 */
+const SF_ROTATE_X_AXIS = 8;
+const SF_ROTATE_ACCDCC = 16;
+const SF_ROTATE_HURT = 32;
+const SF_ROTATE_NOT_SOLID = 64;
+
+const SF_ROTDOOR_START_OPEN_OBSOLETE = 1;
+const SF_ROTDOOR_BACKWARDS = 2;
+const SF_ROTDOOR_NONSOLID_TO_PLAYER = 4;
+const SF_ROTDOOR_PASSABLE = 8;
+const SF_ROTDOOR_ONEWAY = 16;
+const SF_ROTDOOR_NO_AUTO_RETURN = 32;
+const SF_ROTDOOR_ROLL = 64;
+const SF_ROTDOOR_PITCH = 128;
+const SF_ROTDOOR_PUSE = 256;
+const SF_ROTDOOR_PTOUCH = 1024;
+const SF_ROTDOOR_LOCKED = 2048;
+
+/**
+ * «func_rotating» 的旋转轴（three 轴序，单位向量；BACKWARDS 已取负）。
+ *
+ * 见文件内「轴旗标的命名陷阱」：bit4 → three [0,0,1]、bit8 → three [1,0,0]、
+ * 无轴旗标 → three [0,1,0]（竖直）。
+ */
+export function funcRotatingAxis(spawnflags: number): [number, number, number] {
+  const flags = Number.isFinite(spawnflags) ? spawnflags | 0 : 0;
+  let axis: [number, number, number];
+  if ((flags & SF_ROTATE_Z_AXIS) !== 0) axis = [0, 0, 1];
+  else if ((flags & SF_ROTATE_X_AXIS) !== 0) axis = [1, 0, 0];
+  else axis = [0, 1, 0];
+  return (flags & SF_ROTATE_BACKWARDS) !== 0 ? [-axis[0], -axis[1], -axis[2]] : axis;
+}
+
+/** Source «fabs(maxspeed); if (== 0) 100»（bmodels.cpp:718-722）；非有限值同样回落 100（度/秒）。 */
+export function rotatingSpeedLimit(maxspeed: number): number {
+  if (!Number.isFinite(maxspeed) || maxspeed === 0) return 100;
+  return Math.abs(maxspeed);
+}
+
+/** 累计角度（度）转弧度；非有限值按 0（避免把 NaN 写进渲染组）。 */
+export function rotatingDegreesToRadians(degrees: number): number {
+  return (Number.isFinite(degrees) ? degrees : 0) * (Math.PI / 180);
+}
+
+/**
+ * 单轴角位移 → three 欧拉角三元组（弧度）。
+ *
+ * 本仓所有旋转实体都只有一个轴（X/Y/Z），three 的 «rotation.x/y/z» 即绕对应轴的角度；
+ * 用「轴向量 × 角度」写出三分量，未选中的分量严格为 0，避免欧拉组合顺序引入额外旋转。
+ */
+export function axisAngleEuler(
+  axis: RotatingVec3 | null | undefined,
+  radians: number,
+): [number, number, number] {
+  const angle = Number.isFinite(radians) ? radians : 0;
+  if (!axis) return [0, 0, 0];
+  return [
+    (Number.isFinite(axis[0]) ? axis[0] : 0) * angle,
+    (Number.isFinite(axis[1]) ? axis[1] : 0) * angle,
+    (Number.isFinite(axis[2]) ? axis[2] : 0) * angle,
+  ];
+}
+
+/**
+ * «func_door_rotating» 的旋转轴（three 轴序；BACKWARDS 已取负）。
+ *
+ * «CBaseToggle::AxisDir»（subs.cpp:326-334）：ROLL(64) → QAngle(0,0,1)（绕 Source X）、
+ * PITCH(128) → QAngle(1,0,0)（绕 Source Y）、默认 YAW → QAngle(0,1,0)（绕 Source Z，竖直）。
+ * 换到 three 后分别为 [0,0,1] / [1,0,0] / [0,1,0]。
+ */
+export function rotDoorAxis(spawnflags: number): [number, number, number] {
+  const flags = Number.isFinite(spawnflags) ? spawnflags | 0 : 0;
+  let axis: [number, number, number];
+  if ((flags & SF_ROTDOOR_ROLL) !== 0) axis = [0, 0, 1];
+  else if ((flags & SF_ROTDOOR_PITCH) !== 0) axis = [1, 0, 0];
+  else axis = [0, 1, 0];
+  return (flags & SF_ROTDOOR_BACKWARDS) !== 0 ? [-axis[0], -axis[1], -axis[2]] : axis;
+}
+
+/** 旋转门速度（度/秒）：SDK «if (m_flSpeed == 0) 100»（doors.cpp:293-296）；负值/非有限回落 100。 */
+export function rotDoorSpeed(speed: number): number {
+  return Number.isFinite(speed) && speed > 0 ? speed : 100;
+}
+
+/** 旋转门在进度 «progress»（0 = 出生角，1 = 目标角）时的 three 欧拉角（弧度）。 */
+export function rotDoorAngleEuler(
+  axis: RotatingVec3 | null | undefined,
+  distanceDegrees: number,
+  progress: number,
+): [number, number, number] {
+  const distance = Number.isFinite(distanceDegrees) ? distanceDegrees : 0;
+  const p = Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : 0;
+  return axisAngleEuler(axis, rotatingDegreesToRadians(distance * p));
+}
+
+// ── func_rotating（持续旋转） ─────────────────────────────────────────────────
+
+function rotatingApply(entity: Entity): void {
+  const axis = entity.get<[number, number, number]>('rotatingAxis') ?? [0, 1, 0];
+  const degrees = entity.getNumber('rotatingDegrees', 0);
+  entity.runtime.host.setBrushRotation?.(entity.index, axisAngleEuler(axis, rotatingDegreesToRadians(degrees)));
+}
+
+/**
+ * 20ms 步进：先按「瞬时 / ACCDCC」语义推进速度，再按 speed*dt 积分角度。
+ *
+ * Source 由引擎每帧积分 SetLocalAngularVelocity（physics_main.cpp:794-797），这里用固定步长
+ * think 复刻。角度取模 360 只为防长时间运行的浮点精度流失（单轴欧拉角视觉等价）。
+ * 非 ACCDCC 时速度瞬时到目标；ACCDCC 时按 0.2/0.1 * maxspeed * fanfriction 每 0.1s 线性逼近
+ * （bmodels.cpp SpinUp/SpinDown）。反向中途的「先减速到 0 再反向」在此简化为按当前差值减速，
+ * 对 ze_cursed 的常速旋转无可见差异（该图旋转实体均无 ACCDCC）。
+ */
+function rotatingStep(entity: Entity): void {
+  const now = entity.runtime.now();
+  const last = entity.getNumber('rotatingLastTime', now);
+  const dt = Math.min(0.25, Math.max(0, now - last));
+  entity.set('rotatingLastTime', now);
+  const maxspeed = entity.getNumber('rotatingMaxSpeed', 100);
+  const friction = entity.getNumber('rotatingFanFriction', 1);
+  let speed = entity.getNumber('rotatingSpeed', 0);
+  const target = entity.getNumber('rotatingTarget', 0);
+  if (entity.hasSpawnFlags(SF_ROTATE_ACCDCC)) {
+    const sameDirection = speed === 0 || target === 0 || (speed > 0) === (target > 0);
+    const perSecond = (sameDirection ? 0.2 : 0.1) * maxspeed * friction * 10;
+    const delta = perSecond * dt;
+    if (speed < target) speed = Math.min(target, speed + delta);
+    else if (speed > target) speed = Math.max(target, speed - delta);
+  } else {
+    speed = target;
+  }
+  entity.set('rotatingSpeed', speed);
+  const degrees = entity.getNumber('rotatingDegrees', 0) + speed * dt;
+  entity.set('rotatingDegrees', ((degrees % 360) + 360) % 360);
+  rotatingApply(entity);
+  if (speed !== 0 || target !== 0) entity.setThink(rotatingStep, MOVE_STEP_SECONDS);
+}
+
+/** 启动 think 链；重复调用不会叠加（setThink 覆盖同一 thinkFn）。 */
+function rotatingWake(entity: Entity): void {
+  entity.set('rotatingLastTime', entity.runtime.now());
+  entity.setThink(rotatingStep, 0);
+}
+
+function rotatingStart(entity: Entity): void {
+  entity.set('rotatingTarget', entity.getNumber('rotatingMaxSpeed', 100));
+  rotatingWake(entity);
+}
+
+function rotatingStop(entity: Entity): void {
+  entity.set('rotatingTarget', 0);
+  rotatingWake(entity);
+}
+
+/** Source 的 m_bReversed 落到轴上：翻转旋转方向，不改速度大小。 */
+function rotatingSetDirection(entity: Entity, forward: boolean): void {
+  const base = entity.get<[number, number, number]>('rotatingBaseAxis') ?? [0, 1, 0];
+  entity.set('rotatingAxis', forward ? base : [-base[0], -base[1], -base[2]]);
+}
+
 export const FuncRotatingClass: EntityClass = {
   name: 'func_rotating',
   base: 'base',
   brush: true,
+  spawnFlags: {
+    START_ON: SF_ROTATE_START_ON,
+    BACKWARDS: SF_ROTATE_BACKWARDS,
+    Z_AXIS: SF_ROTATE_Z_AXIS,
+    X_AXIS: SF_ROTATE_X_AXIS,
+    ACCDCC: SF_ROTATE_ACCDCC,
+    HURT: SF_ROTATE_HURT,
+    NOT_SOLID: SF_ROTATE_NOT_SOLID,
+  },
   keyfields: [
-    { name: 'spawnorigin', type: 'vec3', defaultValue: [0, 0, 0] as [number, number, number] },
-    { name: 'speed', type: 'float', defaultValue: 0 },
+    // Source 的 speed 键在 spawn 期被无条件清零（bmodels.cpp:744），真正的速度上限是 maxspeed；
+    // fanfriction 按百分比 /100（0 → 1，bmodels.cpp:665-668）。
+    { name: 'maxspeed', type: 'float', defaultValue: 0 },
     { name: 'fanfriction', type: 'float', defaultValue: 0 },
   ],
   inputs: [
-    { name: 'Start', type: FIELD_VOID, handler: (e) => e.set('rotating', true) },
-    { name: 'Stop', type: FIELD_VOID, handler: (e) => e.set('rotating', false) },
-    { name: 'SetSpeed', type: FIELD_FLOAT, key: 'speed' },
-    input('Toggle', FIELD_VOID, (e) => e.set('rotating', !e.getBool('rotating', false))),
+    input('Start', FIELD_VOID, (e) => rotatingStart(e)),
+    input('Stop', FIELD_VOID, (e) => rotatingStop(e)),
+    input('Reverse', FIELD_VOID, (e) => {
+      const axis = e.get<[number, number, number]>('rotatingAxis') ?? [0, 1, 0];
+      e.set('rotatingAxis', [-axis[0], -axis[1], -axis[2]]);
+      e.set('rotatingTarget', Math.abs(e.getNumber('rotatingSpeed', 0)));
+      rotatingWake(e);
+    }),
+    input('Toggle', FIELD_VOID, (e) => {
+      // bmodels.cpp:1327-1337：m_flSpeed > 0 才停；反向旋转时 Toggle 仍走「启动」。
+      if (e.getNumber('rotatingSpeed', 0) > 0) rotatingStop(e);
+      else rotatingStart(e);
+    }),
+    input('StartForward', FIELD_VOID, (e) => {
+      rotatingSetDirection(e, true);
+      rotatingStart(e);
+    }),
+    input('StartBackward', FIELD_VOID, (e) => {
+      rotatingSetDirection(e, false);
+      rotatingStart(e);
+    }),
+    input('SetSpeed', FIELD_FLOAT, (e, d) => {
+      // bmodels.cpp:1300-1337：value 是比例（0..1），负值表示反向；clamp 后乘 maxspeed。
+      const value = d.value.float();
+      rotatingSetDirection(e, !(value < 0));
+      const ratio = Number.isFinite(value) ? Math.min(1, Math.max(0, Math.abs(value))) : 0;
+      e.set('rotatingTarget', ratio * e.getNumber('rotatingMaxSpeed', 100));
+      rotatingWake(e);
+    }),
   ],
+  spawn: (e) => {
+    const maxspeed = rotatingSpeedLimit(e.getNumber('maxspeed', 0));
+    const rawFan = e.getRaw('fanfriction');
+    const fan = rawFan === undefined ? 0 : Number.parseFloat(rawFan);
+    e.set('rotatingMaxSpeed', maxspeed);
+    e.set('rotatingFanFriction', Number.isFinite(fan) && fan > 0 ? fan / 100 : 1);
+    // base 轴不含 BACKWARDS，供 StartForward/StartBackward/SetSpeed 切方向时复用。
+    e.set('rotatingBaseAxis', funcRotatingAxis(e.spawnflags & ~SF_ROTATE_BACKWARDS));
+    e.set('rotatingAxis', funcRotatingAxis(e.spawnflags));
+    e.set('rotatingSpeed', 0);
+    e.set('rotatingTarget', 0);
+    e.set('rotatingDegrees', 0);
+    e.set('rotatingLastTime', e.runtime.now());
+    // START_ON：SDK 在 0.2s 后调一次 Use（bmodels.cpp:727-731），即从静止启动；
+    // 无该旗标的实体保持静止，等 Start / Toggle 输入。
+    if (e.hasSpawnFlags(SF_ROTATE_START_ON)) e.setThink(rotatingStart, 0.2);
+  },
+  use: (e) => {
+    if (e.getNumber('rotatingSpeed', 0) > 0) rotatingStop(e);
+    else rotatingStart(e);
+  },
+};
+
+// ── func_door_rotating（按角度插值的旋转门） ─────────────────────────────────
+
+function rotDoorApply(entity: Entity, progress: number): void {
+  const a = entity.get<[number, number, number]>('rotDoorAngleA') ?? [0, 0, 0];
+  const b = entity.get<[number, number, number]>('rotDoorAngleB') ?? [0, 0, 0];
+  const p = Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : 0;
+  entity.set('rotDoorProgress', p);
+  entity.runtime.host.setBrushRotation?.(entity.index, [
+    a[0] + (b[0] - a[0]) * p,
+    a[1] + (b[1] - a[1]) * p,
+    a[2] + (b[2] - a[2]) * p,
+  ]);
+}
+
+/** 20ms 角度插值（SDK AngularMove：时长 = 角行程 / speed，subs.cpp:268-301）。 */
+function rotDoorAnimate(entity: Entity, to: number, done: () => void): void {
+  const from = entity.getNumber('rotDoorProgress', 0);
+  const duration = doorTravelSeconds(
+    entity.getNumber('rotDoorDistance', 0),
+    rotDoorSpeed(entity.getNumber('speed', 100)),
+    to - from,
+  );
+  if (!(duration > 0.05)) {
+    rotDoorApply(entity, to);
+    done();
+    return;
+  }
+  const startTime = entity.runtime.now();
+  const step = (self: Entity): void => {
+    const elapsed = self.runtime.now() - startTime;
+    const t = Math.min(1, Math.max(0, Number.isFinite(elapsed) ? elapsed / duration : 1));
+    rotDoorApply(self, from + (to - from) * t);
+    if (t < 1) self.setThink(step, MOVE_STEP_SECONDS);
+    else done();
+  };
+  entity.setThink(step, 0);
+}
+
+function rotDoorHitTop(entity: Entity): void {
+  entity.set('toggleState', TS_AT_TOP);
+  // doors.cpp:1052-1059：START_OPEN_OBSOLETE 的物理开位在角度的「低端」，输出语义相反。
+  const inverted = entity.hasSpawnFlags(SF_ROTDOOR_START_OPEN_OBSOLETE);
+  fire(entity, inverted ? 'OnFullyClosed' : 'OnFullyOpen', entity);
+  if (!entity.hasSpawnFlags(SF_ROTDOOR_NO_AUTO_RETURN)) {
+    const wait = entity.getNumber('wait', 3);
+    if (wait !== -1) entity.setThink(rotDoorGoDown, wait);
+  }
+}
+
+function rotDoorHitBottom(entity: Entity): void {
+  entity.set('toggleState', TS_AT_BOTTOM);
+  const inverted = entity.hasSpawnFlags(SF_ROTDOOR_START_OPEN_OBSOLETE);
+  fire(entity, inverted ? 'OnFullyOpen' : 'OnFullyClosed', entity);
+}
+
+function rotDoorGoUp(entity: Entity): void {
+  if (entity.getNumber('toggleState', TS_AT_BOTTOM) === TS_AT_TOP) return;
+  entity.set('toggleState', TS_GOING_UP);
+  fire(entity, 'OnOpen', entity);
+  rotDoorAnimate(entity, 1, () => rotDoorHitTop(entity));
+}
+
+function rotDoorGoDown(entity: Entity): void {
+  entity.set('toggleState', TS_GOING_DOWN);
+  fire(entity, 'OnClose', entity);
+  rotDoorAnimate(entity, 0, () => rotDoorHitBottom(entity));
+}
+
+export const FuncDoorRotatingClass: EntityClass = {
+  name: 'func_door_rotating',
+  base: 'base_toggle',
+  brush: true,
+  spawnFlags: {
+    START_OPEN_OBSOLETE: SF_ROTDOOR_START_OPEN_OBSOLETE,
+    BACKWARDS: SF_ROTDOOR_BACKWARDS,
+    NONSOLID_TO_PLAYER: SF_ROTDOOR_NONSOLID_TO_PLAYER,
+    PASSABLE: SF_ROTDOOR_PASSABLE,
+    ONEWAY: SF_ROTDOOR_ONEWAY,
+    NO_AUTO_RETURN: SF_ROTDOOR_NO_AUTO_RETURN,
+    ROTATE_ROLL: SF_ROTDOOR_ROLL,
+    ROTATE_PITCH: SF_ROTDOOR_PITCH,
+    PUSE: SF_ROTDOOR_PUSE,
+    PTOUCH: SF_ROTDOOR_PTOUCH,
+    LOCKED: SF_ROTDOOR_LOCKED,
+  },
+  keyfields: [
+    { name: 'distance', type: 'float', defaultValue: 90 },
+    { name: 'speed', type: 'float', defaultValue: 100 },
+    { name: 'wait', type: 'float', defaultValue: 3 },
+    { name: 'locked', type: 'bool', defaultValue: false },
+  ],
+  inputs: [
+    input('Open', FIELD_VOID, (e, d) => {
+      const state = e.getNumber('toggleState', TS_AT_BOTTOM);
+      if (state === TS_AT_TOP || state === TS_GOING_UP) return;
+      if (e.getBool('locked', false)) return;
+      e.set('activator', d.activator as Entity | null);
+      rotDoorGoUp(e);
+    }),
+    input('Close', FIELD_VOID, (e, d) => {
+      // Close 不受锁限制（doors.cpp:821-825）。
+      if (e.getNumber('toggleState', TS_AT_BOTTOM) === TS_AT_BOTTOM) return;
+      e.set('activator', d.activator as Entity | null);
+      rotDoorGoDown(e);
+    }),
+    input('Toggle', FIELD_VOID, (e, d) => {
+      if (e.getBool('locked', false)) return;
+      const state = e.getNumber('toggleState', TS_AT_BOTTOM);
+      e.set('activator', d.activator as Entity | null);
+      if (state === TS_AT_BOTTOM) rotDoorGoUp(e);
+      else if (state === TS_AT_TOP) rotDoorGoDown(e);
+    }),
+    { name: 'Lock', type: FIELD_VOID, handler: (e) => e.set('locked', true) },
+    { name: 'Unlock', type: FIELD_VOID, handler: (e) => e.set('locked', false) },
+    // doors.cpp:888-891：InputSetSpeed 直接赋值（度/秒），负值同样写入。
+    { name: 'SetSpeed', type: FIELD_FLOAT, key: 'speed' },
+    { name: 'SetToggleState', type: FIELD_FLOAT, key: 'toggleState' },
+  ],
+  outputs: [
+    { name: 'OnBlockedOpening', kind: 'event' },
+    { name: 'OnBlockedClosing', kind: 'event' },
+    { name: 'OnUnblockedOpening', kind: 'event' },
+    { name: 'OnUnblockedClosing', kind: 'event' },
+    { name: 'OnFullyClosed', kind: 'event' },
+    { name: 'OnFullyOpen', kind: 'event' },
+    { name: 'OnClose', kind: 'event' },
+    { name: 'OnOpen', kind: 'event' },
+    { name: 'OnLockedUse', kind: 'event' },
+  ],
+  spawn: (e) => {
+    const flags = e.spawnflags;
+    const axis = rotDoorAxis(flags);
+    const rawDistance = e.getNumber('distance', 90);
+    // 缺 distance 时 Source 会 angle1==angle2；这里 90° 兜底，保证开合有可见行程
+    // （ze_cursed 的 7 个旋转门 7/7 都写了 distance）。
+    const distance = Number.isFinite(rawDistance) && rawDistance !== 0 ? Math.abs(rawDistance) : 90;
+    e.set('rotDoorDistance', distance);
+    e.set('speed', rotDoorSpeed(e.getNumber('speed', 0)));
+    e.set('locked', e.getBool('locked', false) || e.hasSpawnFlags(SF_ROTDOOR_LOCKED));
+    const angle = axisAngleEuler(axis, rotatingDegreesToRadians(distance));
+    const rawSpawnpos = e.getRaw('spawnpos');
+    const spawnpos = rawSpawnpos === undefined ? e.getNumber('spawnpos', 0) : Number.parseFloat(rawSpawnpos) || 0;
+    if (e.hasSpawnFlags(SF_ROTDOOR_START_OPEN_OBSOLETE)) {
+      // doors.cpp:1376-1389：交换 angle1/angle2 并翻转 moveAng；AT_BOTTOM 落在物理开位，
+      // Open 反而朝 angle2=出生角走（旧旗标的反转语义，按 SDK 原样复刻）。
+      e.set('rotDoorAngleA', angle);
+      e.set('rotDoorAngleB', [0, 0, 0]);
+      e.set('toggleState', TS_AT_BOTTOM);
+      e.set('rotDoorProgress', 0);
+    } else if (spawnpos !== 0) {
+      // doors.cpp:1390-1396：spawnpos=1 直接 Teleport 到 angle2 并停在 AT_TOP。
+      e.set('rotDoorAngleA', [0, 0, 0]);
+      e.set('rotDoorAngleB', angle);
+      e.set('toggleState', TS_AT_TOP);
+      e.set('rotDoorProgress', 1);
+    } else {
+      e.set('rotDoorAngleA', [0, 0, 0]);
+      e.set('rotDoorAngleB', angle);
+      e.set('toggleState', TS_AT_BOTTOM);
+      e.set('rotDoorProgress', 0);
+    }
+    // 旋转门几何始终可见（不参与 T-N4 的 0.1s 隐藏近似），EntityGameplay 据此跳过初态隐藏。
+    e.set('brushRotationReady', true);
+    e.set('activator', null);
+    rotDoorApply(e, e.getNumber('rotDoorProgress', 0));
+  },
+  use: (e, activator) => {
+    if (e.getBool('locked', false)) {
+      fire(e, 'OnLockedUse', activator);
+      return;
+    }
+    const state = e.getNumber('toggleState', TS_AT_BOTTOM);
+    e.set('activator', activator);
+    if (state === TS_AT_BOTTOM) rotDoorGoUp(e);
+    else if (state === TS_AT_TOP) rotDoorGoDown(e);
+  },
 };
 
 export const FuncBreakableClass: EntityClass = {
@@ -743,8 +1157,8 @@ export function registerBrushClasses(): void {
     FuncButtonClass, FuncDoorClass, FuncBrushClass, FuncWallToggleClass,
     FuncMovelinearClass, FuncRotatingClass, FuncBreakableClass,
   ]) registerClass(cls);
-  // 旋转门 / 移动门是 func_door 的子类（SDK 里 LINK_ENTITY_TO_CLASS 到同一实现族）
-  registerClass({ ...FuncDoorClass, name: 'func_door_rotating' });
+  // 旋转门有独立的角度状态机（doors.cpp CRotDoor），不能复用 func_door 的平移/0.1s 隐藏近似。
+  registerClass(FuncDoorRotatingClass);
   registerClass({ ...FuncDoorClass, name: 'func_water_analog' });
   registerClass({ ...FuncButtonClass, name: 'func_rot_button' });
   registerClass({ ...FuncButtonClass, name: 'momentary_rot_button' });

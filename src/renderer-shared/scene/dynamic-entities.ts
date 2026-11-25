@@ -27,6 +27,48 @@ export const DYNAMIC_ENTITY_MESH_KEY = 'vbspDynamicEntity';
 /** 实体组上的标记：值 = 实体下标。静态矩阵冻结按它豁免整棵子树。 */
 export const DYNAMIC_ENTITY_GROUP_KEY = 'vbspDynamicEntityGroup';
 
+/** mesh 上的枢轴标记：值 = 实体 BSP origin 的世界坐标（Y-up，three 轴序）。 */
+export const DYNAMIC_ENTITY_PIVOT_KEY = 'vbspDynamicEntityPivot';
+
+/** 动态实体组的一次放置：组位置 = 枢轴，组内 mesh 局部偏移 = 原世界位置 − 枢轴。 */
+export interface DynamicEntityGroupPlacement {
+  /** 组 `position`（世界坐标 = 实体 origin，旋转围绕它进行）。 */
+  readonly position: [number, number, number];
+  /** 组内 mesh 的局部 `position`（未旋转时与组位置相加仍等于原来的世界坐标）。 */
+  readonly meshOffset: [number, number, number];
+}
+
+function finiteComponent(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * 计算「组 = 枢轴、mesh = 原世界坐标 − 枢轴」的放置（纯函数，供单测锁住零变化不变量）。
+ *
+ * 入参必须是 **mesh 当时的世界坐标**，不是它的局部 `position`：合并路径里
+ * `scene-optimizer` 的 exclude 分支已把顶点烘焙到世界空间、把 mesh 局部变换清零（世界坐标 = 0），
+ * 而未合并路径（`render-session.ts` 的 `merge === false`）里子 mesh 的世界坐标 = 实体 origin。
+ * 两种路径都用「世界坐标 − 枢轴」才能让 `组位置 + mesh 偏移 === 原世界坐标`，即
+ * **rest 姿态世界坐标逐分量不变**（像素一致）；用局部位置会在多 primitive 的未合并场景上
+ * 少算一次父链平移。
+ */
+export function dynamicEntityGroupPlacement(
+  pivot?: readonly number[] | null,
+  meshWorldPosition?: readonly number[] | null,
+): DynamicEntityGroupPlacement {
+  const px = finiteComponent(pivot?.[0]);
+  const py = finiteComponent(pivot?.[1]);
+  const pz = finiteComponent(pivot?.[2]);
+  return {
+    position: [px, py, pz],
+    meshOffset: [
+      finiteComponent(meshWorldPosition?.[0]) - px,
+      finiteComponent(meshWorldPosition?.[1]) - py,
+      finiteComponent(meshWorldPosition?.[2]) - pz,
+    ],
+  };
+}
+
 /**
  * 运行期可能显隐 / 平移 / 旋转的 brush 实体类。
  *
@@ -73,6 +115,26 @@ export function parseDynamicEntityIndices(
   return indices;
 }
 
+/** 读 mesh 上记录的枢轴（`markDynamicEntities()` 写入；没有则回落原点）。 */
+function pivotOf(mesh: THREE.Mesh | undefined): [number, number, number] {
+  const raw = mesh?.userData?.[DYNAMIC_ENTITY_PIVOT_KEY];
+  if (!Array.isArray(raw) || raw.length < 3) return [0, 0, 0];
+  return [finiteComponent(raw[0]), finiteComponent(raw[1]), finiteComponent(raw[2])];
+}
+
+/**
+ * 沿父链找 mesh 所属的 brush 实体节点（`vbsp_model` 只在实体节点上，`tagBrushEntityOwners()`
+ * 不会往下复制），并核对实体下标，避免多 primitive 时错拿到父实体的原点。
+ */
+function findBrushEntityNode(mesh: THREE.Object3D, entityIndex: number): THREE.Object3D | null {
+  for (let node: THREE.Object3D | null = mesh; node; node = node.parent) {
+    const userData = node.userData as Record<string, unknown>;
+    if (userData.vbsp_entity_index !== entityIndex) continue;
+    if (typeof userData.vbsp_model === 'string' && userData.vbsp_model !== '') return node;
+  }
+  return null;
+}
+
 /**
  * 给动态实体下的 mesh 打标，必须在合并**之前**调用（合并后模型身份就没了）。
  *
@@ -95,7 +157,14 @@ export function markDynamicEntities(
     const entityIndex = userData.vbsp_entity_index;
     if (typeof entityIndex !== 'number' || !dynamicEntityIndices.has(entityIndex)) return;
     if (typeof userData[DYNAMIC_ENTITY_MESH_KEY] === 'number') return;
+    // 枢轴 = 实体节点（GLB 里 `brush_<下标>`，其 translation 就是 BSP origin）的世界坐标。
+    // 必须在合并前记录：合并会把顶点烘焙到世界空间并清掉节点变换（见 scene-optimizer 的
+    // exclude 分支），之后再也拿不回 origin。找不到实体节点（无 vbsp_model 的 props 等）
+    // 时回落 (0,0,0)，与旧行为一致。
+    const entityNode = findBrushEntityNode(mesh, entityIndex);
+    const pivot = entityNode ? entityNode.getWorldPosition(new THREE.Vector3()) : null;
     userData[DYNAMIC_ENTITY_MESH_KEY] = entityIndex;
+    userData[DYNAMIC_ENTITY_PIVOT_KEY] = pivot ? [pivot.x, pivot.y, pivot.z] : [0, 0, 0];
     marked++;
   });
   return marked;
@@ -127,12 +196,25 @@ export function collectDynamicEntityGroups(root: THREE.Object3D): Map<number, TH
   });
 
   const groups = new Map<number, THREE.Group>();
+  // 世界坐标要现取：合并路径下 mesh 已被清成单位变换，未合并路径下还要算上父链平移。
+  root.updateMatrixWorld(true);
+  const world = new THREE.Vector3();
   for (const [entityIndex, meshes] of meshesByEntity) {
     const group = new THREE.Group();
     group.name = `vbsp_dyn_ent_${entityIndex}`;
-    // 标记：静态矩阵冻结必须放过这棵子树，否则运行期改 group.position 不会生效。
+    // 标记：静态矩阵冻结必须放过这棵子树，否则运行期改 group.position / rotation 不会生效。
     (group.userData as Record<string, unknown>)[DYNAMIC_ENTITY_GROUP_KEY] = entityIndex;
-    for (const mesh of meshes) group.add(mesh);
+    const pivot = pivotOf(meshes[0]);
+    const placement = dynamicEntityGroupPlacement(pivot);
+    group.position.set(placement.position[0], placement.position[1], placement.position[2]);
+    for (const mesh of meshes) {
+      // 世界坐标必须在 reparent 前取（挂进组之后父链就变了）。合并路径下它是 0（顶点已世界
+      // 烘焙），未合并路径下它是实体 origin + 局部偏移 —— 两种情况都由「世界坐标 − 枢轴」覆盖。
+      mesh.getWorldPosition(world);
+      const offset = dynamicEntityGroupPlacement(pivot, [world.x, world.y, world.z]).meshOffset;
+      mesh.position.set(offset[0], offset[1], offset[2]);
+      group.add(mesh);
+    }
     root.add(group);
     groups.set(entityIndex, group);
   }

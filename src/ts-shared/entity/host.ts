@@ -28,6 +28,8 @@ export interface EntityEffectSink {
   brushEnabled?(entityIndex: number, enabled: boolean): void;
   /** 移动 brush（`func_movelinear` / 门）的绝对位移（相对 BSP 出生位置，Y-up）。 */
   brushOffset?(entityIndex: number, offset: Vec3): void;
+  /** 旋转 brush（`func_rotating` / 旋转门）的 three 欧拉角（弧度，绕实体 origin）。 */
+  brushRotation?(entityIndex: number, angles: Vec3): void;
   /** `env_sprite` 的 ShowSprite / HideSprite / ToggleSprite。 */
   spriteVisible?(entityIndex: number, visible: boolean): void;
   /** `info_particle_system` 的 Start / Stop。 */
@@ -69,6 +71,7 @@ export function createObservingHost(
     stopSound: (soundName, entityIndex) => sink.stopSound?.(soundName, entityIndex),
     setBrushEnabled: (entityIndex, enabled) => sink.brushEnabled?.(entityIndex, enabled),
     setBrushOffset: (entityIndex, offset) => sink.brushOffset?.(entityIndex, offset),
+    setBrushRotation: (entityIndex, angles) => sink.brushRotation?.(entityIndex, angles),
     setSpriteVisible: (entityIndex, visible) => sink.spriteVisible?.(entityIndex, visible),
     setParticleActive: (entityIndex, active) => sink.particleActive?.(entityIndex, active),
     setPropVisible: (entityIndex, visible) => sink.propVisible?.(entityIndex, visible),
