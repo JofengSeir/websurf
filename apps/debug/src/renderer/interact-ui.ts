@@ -5,6 +5,8 @@
  * - 提示只读、不拦点击；随瞄准实时更新（同一实体换目标才重写 DOM，内容变化有淡入）。
  * - 指针锁定时提示与浮层可见，但鼠标不可用 —— 浮层底部显式提示「ESC 解锁后可操作」。
  * - 指针解锁后浮层保留，按钮才真正可点（`data-ui-block-lock` 防止点击穿透抢回锁定）。
+ * - 浮层按「主触发边」组织成以根为顶的文件树（缩进 + 引导线 + 子树折叠），抽屉与复制文本同序；
+ *   跨层/重复触发不另起分支，以 `+N 条触发` 标注，完整边在详情抽屉。
  * - 删除是**本地面板语义**：只影响浮层/抽屉列表，不改变实体，不删除地图数据；
  *   删除集按根实体持久（关闭重开仍在，换图/重载清空），可一键「恢复已删」。
  * - 面板打开期间每 {@link PANEL_REFRESH_MS} 用 renderer 提供的 provider 重新收集关联，
@@ -42,6 +44,26 @@ export type EntityResolver = (name: string) => Entity[];
 export type ChainProvider = (rootIndex: number) => ChainInfo | null;
 
 type DrawerMode = { kind: 'chain' } | { kind: 'entity'; index: number };
+
+/**
+ * 关联树视图：每个节点挂在其主触发边（primary）的来源下，形成以根为顶的文件树。
+ * 主触发边总是来自更浅一层（BFS 发现顺序），因此不会成环；来源缺失/被隐藏时挂回根。
+ */
+interface ChainTree {
+  /** 父下标 → 子节点（保持 BFS 发现顺序）。 */
+  children: Map<number, ChainNodeInfo[]>;
+  /** 子下标 → 父下标（根不在表中）。 */
+  parent: Map<number, number>;
+}
+
+/** 一个节点的入边摘要：主触发边 + 其余触发边数。 */
+interface IncomingInfo {
+  primary: ChainEdgeInfo | null;
+  extra: number;
+}
+
+/** 树节点折叠态：叶子 / 展开 / 已折叠。 */
+type FoldState = 'leaf' | 'open' | 'closed';
 
 const HIDDEN = 'hidden';
 /** 面板打开时重新收集关联的间隔（毫秒）；只在签名变化时重绘。 */
@@ -125,6 +147,7 @@ export class InteractUi {
   private readonly panelClose: HTMLButtonElement | null;
   private readonly panelFull: HTMLButtonElement | null;
   private readonly panelUndo: HTMLButtonElement | null;
+  private readonly panelTree: HTMLButtonElement | null;
   private readonly panelState: HTMLElement | null;
 
   // ── 全部信息抽屉 ────────────────────────────────────────────────────────
@@ -145,6 +168,9 @@ export class InteractUi {
   private rootGone = false;
   private deletedByRoot = new Map<number, Set<number>>();
   private deleted: Set<number> = new Set();
+  /** 树节点折叠集（按根实体持久，与删除集同生命周期）。 */
+  private treeCollapsedByRoot = new Map<number, Set<number>>();
+  private treeCollapsed: Set<number> = new Set();
   private collapsed = false;
   private drawerMode: DrawerMode | null = null;
   private refreshHandle: ReturnType<typeof setInterval> | null = null;
@@ -175,6 +201,7 @@ export class InteractUi {
     this.panelClose = $('interactPanelClose') as HTMLButtonElement | null;
     this.panelFull = $('interactPanelFull') as HTMLButtonElement | null;
     this.panelUndo = $('interactPanelUndo') as HTMLButtonElement | null;
+    this.panelTree = $('interactPanelTree') as HTMLButtonElement | null;
     this.panelState = $('interactPanelState');
 
     this.drawer = $('interactDrawer');
@@ -244,6 +271,12 @@ export class InteractUi {
       this.deletedByRoot.set(chain.root.index, deleted);
     }
     this.deleted = deleted;
+    let folded = this.treeCollapsedByRoot.get(chain.root.index);
+    if (!folded) {
+      folded = new Set();
+      this.treeCollapsedByRoot.set(chain.root.index, folded);
+    }
+    this.treeCollapsed = folded;
     this.lastSignature = this.chainSignature(chain);
     this.panel.classList.remove(HIDDEN);
     this.panel.setAttribute('aria-hidden', 'false');
@@ -260,6 +293,7 @@ export class InteractUi {
     this.chain = null;
     this.rootGone = false;
     this.deleted = new Set();
+    this.treeCollapsed = new Set();
     this.panel?.classList.add(HIDDEN);
     this.panel?.setAttribute('aria-hidden', 'true');
     this.aimKey = '';
@@ -276,6 +310,8 @@ export class InteractUi {
     this.rootGone = false;
     this.deletedByRoot.clear();
     this.deleted = new Set();
+    this.treeCollapsedByRoot.clear();
+    this.treeCollapsed = new Set();
     this.aim = null;
     this.aimKey = '';
     this.aimEntityIndex = -1;
@@ -326,8 +362,10 @@ export class InteractUi {
       const index = Number(btn.dataset.idx ?? '-1');
       if (action === 'del' && index >= 0) this.deleteEntry(index);
       else if (action === 'detail' && index >= 0) this.openEntityDrawer(index);
+      else if (action === 'toggle' && index >= 0) this.toggleNode(index);
     });
     this.panelCollapse?.addEventListener('click', () => this.setCollapsed(!this.collapsed));
+    this.panelTree?.addEventListener('click', () => this.toggleAllTree());
     this.panelClose?.addEventListener('click', () => this.closePanel());
     this.panelFull?.addEventListener('click', () => this.openChainDrawer());
     this.panelUndo?.addEventListener('click', () => this.restoreDeleted());
@@ -427,13 +465,15 @@ export class InteractUi {
       else if (this.deleted.size > 0) this.panelCount.textContent = `${visible}/${chain.nodes.length} 关联`;
       else this.panelCount.textContent = `${chain.nodes.length} 关联`;
     }
-    if (this.panelBody) this.panelBody.innerHTML = this.renderPanelBody(chain, hidden);
+    const tree = this.buildTree(chain, hidden);
+    if (this.panelBody) this.panelBody.innerHTML = this.renderPanelBody(chain, hidden, tree);
     if (this.panelFull) this.panelFull.disabled = this.rootGone;
     this.updateUndo();
+    this.updateTreeButton(chain, tree);
     this.renderPanelState();
   }
 
-  private renderPanelBody(chain: ChainInfo, hidden: Set<number>): string {
+  private renderPanelBody(chain: ChainInfo, hidden: Set<number>, tree: ChainTree): string {
     const parts: string[] = [this.renderRootRow(chain)];
     if (this.rootGone) {
       parts.push(
@@ -455,19 +495,11 @@ export class InteractUi {
       return parts.join('');
     }
 
-    const depths = [...new Set(visibleNodes.map((node) => node.depth))].sort((a, b) => a - b);
-    for (const depth of depths) {
-      const allAtDepth = chain.nodes.filter((node) => node.depth === depth).length;
-      const rows = visibleNodes.filter((node) => node.depth === depth);
-      parts.push(
-        `<div class="ip-group"><div class="ip-group-head">` +
-          `<span class="ip-group-title">L${depth} · ${depth === 1 ? '直接关联' : '二级关联'}</span>` +
-          `<span class="ip-group-count">${rows.length}${rows.length !== allAtDepth ? ` / ${allAtDepth}` : ''}</span>` +
-          `</div>`,
-      );
-      for (const node of rows) parts.push(this.renderNodeRow(chain, node));
-      parts.push('</div>');
-    }
+    parts.push(
+      `<ul class="ip-tree ip-tree-top" role="tree" aria-label="关联树">` +
+        this.renderTreeLevel(chain, tree, chain.root.index) +
+        `</ul>`,
+    );
 
     if (chain.truncated) parts.push('<div class="ip-note">输出过多，部分关联已截断（连线/列表均受影响）</div>');
     const notes = this.skippedNotes(chain);
@@ -479,16 +511,20 @@ export class InteractUi {
     const root = chain.root;
     const state: EntityLifeState = this.rootGone ? 'removed' : entityLifeState(root);
     const stats = entityOutputStats(root);
-    const direct = chain.nodes.filter((node) => node.depth === 1).length;
+    const l1 = chain.nodes.filter((node) => node.depth === 1).length;
+    const l2 = chain.nodes.filter((node) => node.depth === 2).length;
     const name = root.targetname ? `<span class="ip-name">${esc(root.targetname)}</span>` : '';
     const detailDisabled = this.rootGone ? ' disabled' : '';
+    const levels =
+      `<span class="ip-lvl ip-lvl-1" title="直接关联（根的输出目标）">L1 ${l1}</span>` +
+      (l2 > 0 ? `<span class="ip-lvl ip-lvl-2" title="二级关联（L1 的输出目标）">L2 ${l2}</span>` : '');
     return (
       `<div class="ip-row ip-root" data-idx="${root.index}">` +
-      `<span class="ip-depth ip-depth-root">根</span>` +
+      `<span class="ip-tog ip-tog-root" aria-hidden="true" title="根实体">◆</span>` +
       `<span class="ip-main">` +
       `<span class="ip-line"><span class="ip-class">${esc(root.classname || '?')}</span>` +
       `<span class="ip-idx">#${root.index}</span>${name}${lifeBadge(state)}</span>` +
-      `<span class="ip-meta">${stats.links} 条输出连接 · ${direct} 个直接目标</span>` +
+      `<span class="ip-meta">${stats.links} 条输出连接${levels}</span>` +
       `</span>` +
       `<span class="ip-acts">` +
       `<button type="button" class="ip-btn" data-act="detail" data-idx="${root.index}"${detailDisabled} ` +
@@ -497,27 +533,68 @@ export class InteractUi {
     );
   }
 
-  private renderNodeRow(chain: ChainInfo, node: ChainNodeInfo): string {
+  /** 递归渲染某父节点下的一层子节点（`<li>` 列表；展开的子树嵌套 `<ul>`）。 */
+  private renderTreeLevel(chain: ChainInfo, tree: ChainTree, parentIndex: number): string {
+    const kids = tree.children.get(parentIndex) ?? [];
+    return kids
+      .map((node) => {
+        const index = node.entity.index;
+        const hasKids = (tree.children.get(index)?.length ?? 0) > 0;
+        const fold: FoldState = !hasKids ? 'leaf' : this.treeCollapsed.has(index) ? 'closed' : 'open';
+        const row = this.renderNodeRow(chain, node, parentIndex, fold, hasKids ? this.descendantCount(tree, index) : 0);
+        const nested =
+          fold === 'open'
+            ? `<ul class="ip-tree" role="group">${this.renderTreeLevel(chain, tree, index)}</ul>`
+            : '';
+        const expanded = hasKids ? ` aria-expanded="${fold === 'open' ? 'true' : 'false'}"` : '';
+        return (
+          `<li class="ip-tnode" role="treeitem" aria-level="${node.depth + 1}"${expanded} data-depth="${node.depth}">` +
+          `${row}${nested}</li>`
+        );
+      })
+      .join('');
+  }
+
+  private renderNodeRow(
+    chain: ChainInfo,
+    node: ChainNodeInfo,
+    parentIndex: number,
+    fold: FoldState,
+    descendants: number,
+  ): string {
     const entity = node.entity;
     const state = entityLifeState(entity);
-    const own = chain.edges.filter((edge) => edge.to === entity.index);
-    const primary = own.find((edge) => edge.primary) ?? own[0] ?? null;
-    const extra = own.length - (primary ? 1 : 0);
+    const { primary, extra } = this.incomingOf(chain, entity.index);
     const fromEntity = primary ? this.entityByIndex(chain, primary.from) : null;
     const fromName = fromEntity
       ? entityDisplayName(fromEntity)
       : primary
         ? `#${primary.from}`
         : '';
+    // 树位置已经表达了来源；只有主触发来源与挂载父节点不一致（回退挂到根）时才显式写出来源。
     const detail = primary
-      ? edgeLink(primary, node.depth > 1 ? fromName : null)
+      ? edgeLink(primary, primary.from !== parentIndex ? fromName : null)
       : '<span class="ip-link ip-warn">触发路径未解析</span>';
     const name = entity.targetname ? `<span class="ip-name">${esc(entity.targetname)}</span>` : '';
+    let toggle: string;
+    if (fold === 'leaf') {
+      toggle = '<span class="ip-tog ip-tog-leaf" aria-hidden="true"></span>';
+    } else {
+      const open = fold === 'open';
+      const label = `${open ? '折叠' : '展开'}子项（${descendants}）`;
+      toggle =
+        `<button type="button" class="ip-tog" data-act="toggle" data-idx="${entity.index}" ` +
+        `title="${label}" aria-label="${label}">${open ? '▾' : '▸'}</button>`;
+    }
+    const folded =
+      fold === 'closed' ? `<span class="ip-kids" title="子树已折叠">${descendants} 个子项</span>` : '';
     return (
       `<div class="ip-row ip-chain" data-idx="${entity.index}" data-depth="${node.depth}">` +
+      toggle +
       `<span class="ip-main">` +
-      `<span class="ip-line"><span class="ip-class">${esc(entity.classname || '?')}</span>` +
-      `<span class="ip-idx">#${entity.index}</span>${name}${lifeBadge(state)}</span>` +
+      `<span class="ip-line"><span class="ip-lvl ip-lvl-${node.depth}" title="距根 ${node.depth} 层">L${node.depth}</span>` +
+      `<span class="ip-class">${esc(entity.classname || '?')}</span>` +
+      `<span class="ip-idx">#${entity.index}</span>${name}${lifeBadge(state)}${folded}</span>` +
       `${detail}` +
       (extra > 0
         ? `<span class="ip-more" title="该实体还有 ${extra} 条其他触发连接，可在「详情」抽屉查看">+${extra} 条触发</span>`
@@ -525,9 +602,116 @@ export class InteractUi {
       `</span>` +
       `<span class="ip-acts">` +
       `<button type="button" class="ip-btn" data-act="detail" data-idx="${entity.index}" title="在抽屉查看完整信息">详情</button>` +
-      `<button type="button" class="ip-btn ip-del" data-act="del" data-idx="${entity.index}" title="仅从本列表隐藏（可恢复），不改变实体">删除</button>` +
+      `<button type="button" class="ip-btn ip-del" data-act="del" data-idx="${entity.index}" title="仅从本列表隐藏（含其子树，可恢复），不改变实体">删除</button>` +
       `</span></div>`
     );
+  }
+
+  // ── 关联树 ──────────────────────────────────────────────────────────────
+
+  /** 某节点的入边：主触发边优先，否则取第一条；extra 为其余条数。 */
+  private incomingOf(chain: ChainInfo, index: number): IncomingInfo {
+    const own = chain.edges.filter((edge) => edge.to === index);
+    const primary = own.find((edge) => edge.primary) ?? own[0] ?? null;
+    return { primary, extra: Math.max(0, own.length - (primary ? 1 : 0)) };
+  }
+
+  /** 按主触发边把可见节点组织成以根为顶的树（见 {@link ChainTree}）。 */
+  private buildTree(chain: ChainInfo, hidden: Set<number>): ChainTree {
+    const rootIndex = chain.root.index;
+    const depthOf = new Map<number, number>([[rootIndex, 0]]);
+    for (const node of chain.nodes) depthOf.set(node.entity.index, node.depth);
+    const children = new Map<number, ChainNodeInfo[]>();
+    const parent = new Map<number, number>();
+    for (const node of chain.nodes) {
+      const index = node.entity.index;
+      if (hidden.has(index)) continue;
+      const { primary } = this.incomingOf(chain, index);
+      let parentIndex = rootIndex;
+      if (primary) {
+        const parentDepth = depthOf.get(primary.from);
+        // 只接受更浅一层的来源，杜绝成环；来源被隐藏时回退挂到根。
+        if (parentDepth !== undefined && parentDepth < node.depth && !hidden.has(primary.from)) {
+          parentIndex = primary.from;
+        }
+      }
+      parent.set(index, parentIndex);
+      const list = children.get(parentIndex);
+      if (list) list.push(node);
+      else children.set(parentIndex, [node]);
+    }
+    return { children, parent };
+  }
+
+  private descendantCount(tree: ChainTree, index: number): number {
+    let count = 0;
+    const stack = [...(tree.children.get(index) ?? [])];
+    while (stack.length > 0) {
+      const node = stack.pop() as ChainNodeInfo;
+      count++;
+      for (const child of tree.children.get(node.entity.index) ?? []) stack.push(child);
+    }
+    return count;
+  }
+
+  /** 先序遍历（抽屉/复制按树序输出，与浮层一致）。 */
+  private treeOrder(tree: ChainTree, rootIndex: number): ChainNodeInfo[] {
+    const out: ChainNodeInfo[] = [];
+    const walk = (index: number): void => {
+      for (const node of tree.children.get(index) ?? []) {
+        out.push(node);
+        walk(node.entity.index);
+      }
+    };
+    walk(rootIndex);
+    return out;
+  }
+
+  /** 从根到该节点的显示名路径（含两端）。 */
+  private treePath(chain: ChainInfo, tree: ChainTree, index: number): string[] {
+    const names: string[] = [];
+    let current: number | undefined = index;
+    for (let guard = 0; current !== undefined && guard < 16; guard++) {
+      const entity = this.entityByIndex(chain, current);
+      names.push(entity ? entityDisplayName(entity) : `#${current}`);
+      if (current === chain.root.index) break;
+      current = tree.parent.get(current) ?? chain.root.index;
+    }
+    return names.reverse();
+  }
+
+  /** 可折叠的父节点（根除外）。 */
+  private treeParents(chain: ChainInfo, tree: ChainTree): number[] {
+    return [...tree.children.keys()].filter((index) => index !== chain.root.index);
+  }
+
+  private toggleNode(index: number): void {
+    if (!this.chain) return;
+    if (this.treeCollapsed.has(index)) this.treeCollapsed.delete(index);
+    else this.treeCollapsed.add(index);
+    this.renderPanel();
+  }
+
+  private toggleAllTree(): void {
+    const chain = this.chain;
+    if (!chain) return;
+    const parents = this.treeParents(chain, this.buildTree(chain, this.hiddenIndices(chain)));
+    if (parents.some((index) => this.treeCollapsed.has(index))) {
+      for (const index of parents) this.treeCollapsed.delete(index);
+    } else {
+      for (const index of parents) this.treeCollapsed.add(index);
+    }
+    this.renderPanel();
+  }
+
+  private updateTreeButton(chain: ChainInfo, tree: ChainTree): void {
+    const button = this.panelTree;
+    if (!button) return;
+    const parents = this.treeParents(chain, tree);
+    const anyFolded = parents.some((index) => this.treeCollapsed.has(index));
+    button.classList.toggle(HIDDEN, parents.length === 0 || this.rootGone);
+    button.textContent = anyFolded ? '全部展开' : '全部折叠';
+    button.title = anyFolded ? '展开所有子树' : '折叠所有子树，只看直接关联';
   }
 
   private emptyChainHtml(chain: ChainInfo): string {
@@ -703,18 +887,22 @@ export class InteractUi {
           ` · ${chain.edges.length} 条关联`;
       }
       const parts: string[] = [this.renderEntitySection(chain, chain.root, '根', null, 0)];
-      for (const depth of [1, 2]) {
-        const rows = visible.filter((node) => node.depth === depth);
-        if (rows.length === 0) continue;
+      const tree = this.buildTree(chain, hidden);
+      const order = this.treeOrder(tree, chain.root.index);
+      if (order.length > 0) {
         parts.push(
-          `<div class="idr-sec-title">L${depth} · ${depth === 1 ? '直接关联' : '二级关联'}` +
-            `<span class="idr-count">${rows.length}</span></div>`,
+          `<div class="idr-sec-title idr-tree-title">关联树 · 按触发路径` +
+            `<span class="idr-count">${order.length}</span></div>`,
         );
-        for (const node of rows) {
-          const own = chain.edges.filter((edge) => edge.to === node.entity.index);
-          const primary = own.find((edge) => edge.primary) ?? own[0] ?? null;
-          parts.push(this.renderEntitySection(chain, node.entity, `L${depth}`, primary, own.length - 1));
-        }
+      }
+      for (const node of order) {
+        const { primary, extra } = this.incomingOf(chain, node.entity.index);
+        parts.push(
+          this.renderEntitySection(chain, node.entity, `L${node.depth}`, primary, extra, {
+            level: node.depth,
+            path: this.treePath(chain, tree, node.entity.index),
+          }),
+        );
       }
       const notes: string[] = [];
       if (this.deleted.size > 0) notes.push(`${this.deleted.size} 个条目已在浮层中删除（可恢复）`);
@@ -734,18 +922,27 @@ export class InteractUi {
     }
     if (this.drawerTitle) this.drawerTitle.textContent = entityDisplayName(entity);
     if (this.drawerSub) this.drawerSub.textContent = `${entity.classname || '?'} #${entity.index}`;
-    const own = chain.edges.filter((edge) => edge.to === entity.index);
-    const primary = own.find((edge) => edge.primary) ?? own[0] ?? null;
-    body.innerHTML = this.renderEntitySection(chain, entity, '详情', primary, own.length - 1);
+    const { primary, extra } = this.incomingOf(chain, entity.index);
+    const isRoot = entity.index === chain.root.index;
+    const tree = isRoot ? null : this.buildTree(chain, this.hiddenIndices(chain));
+    body.innerHTML = this.renderEntitySection(
+      chain,
+      entity,
+      '详情',
+      primary,
+      extra,
+      tree ? { level: 0, path: this.treePath(chain, tree, entity.index) } : undefined,
+    );
   }
 
-  /** 抽屉里的单个实体段：头部 + 触发来源 + 键值 + 输出按事件分组。 */
+  /** 抽屉里的单个实体段：头部 + 树路径 + 触发来源 + 键值 + 输出按事件分组。 */
   private renderEntitySection(
     chain: ChainInfo,
     entity: Entity,
     tag: string,
     incoming: ChainEdgeInfo | null,
     extraIncoming: number,
+    tree?: { level: number; path: string[] },
   ): string {
     const state = entityLifeState(entity);
     const stats = entityOutputStats(entity);
@@ -812,12 +1009,29 @@ export class InteractUi {
           `</div>`
         : '';
 
+    const pathHtml =
+      tree && tree.path.length > 1
+        ? `<div class="idr-path" title="关联树路径（根 → 本实体）"><span class="idr-k">路径</span>` +
+          tree.path
+            .map((name, i) =>
+              i === tree.path.length - 1
+                ? `<span class="idr-path-self">${esc(name)}</span>`
+                : `<span class="idr-path-item">${esc(name)}</span>`,
+            )
+            .join('<span class="idr-path-sep">›</span>') +
+          `</div>`
+        : '';
+    const level = tree?.level ?? 0;
+    const secAttrs =
+      level > 0 ? ` class="idr-sec idr-sec-child idr-lvl-${level}" style="--lvl:${level}"` : ' class="idr-sec"';
+
     return (
-      `<section class="idr-sec">` +
-      `<div class="idr-sec-head"><span class="idr-badge">${esc(tag)}</span>` +
+      `<section${secAttrs}>` +
+      `<div class="idr-sec-head"><span class="idr-badge${level > 0 ? ` idr-badge-l${level}` : ''}">${esc(tag)}</span>` +
       `<span class="idr-name">${esc(entityDisplayName(entity))}</span>` +
       `<span class="idr-class">${esc(entity.classname || '?')}</span>` +
       `<span class="idr-idx">#${entity.index}</span>${lifeBadge(state)}</div>` +
+      pathHtml +
       incomingHtml +
       `<dl class="idr-grid">${grid}</dl>` +
       `<div class="idr-sec-title">地图键值</div>${propsTable}` +
@@ -914,7 +1128,8 @@ export class InteractUi {
     const mode = this.drawerMode;
     if (!chain || !mode) return '';
     const lines: string[] = [];
-    const pushEntity = (entity: Entity, tag: string, incoming: ChainEdgeInfo | null): void => {
+    const pushEntity = (entity: Entity, tag: string, incoming: ChainEdgeInfo | null, indent = ''): void => {
+      const start = lines.length;
       const state = entityLifeState(entity);
       lines.push(`[${tag}] ${entityDisplayName(entity)} (${entity.classname || '?'} #${entity.index}) 状态=${lifeLabel(state)}`);
       if (entity.targetname) lines.push(`  targetname: ${entity.targetname}`);
@@ -933,6 +1148,7 @@ export class InteractUi {
           lines.push(`    ${outputName} -> ${action.target ?? '(空)'} (${meta.join(', ')})`);
         }
       }
+      if (indent) for (let i = start; i < lines.length; i++) lines[i] = indent + lines[i];
       lines.push('');
     };
 
@@ -943,17 +1159,18 @@ export class InteractUi {
       );
       lines.push('');
       pushEntity(chain.root, '根', null);
-      for (const node of chain.nodes) {
-        const own = chain.edges.filter((edge) => edge.to === node.entity.index);
-        pushEntity(node.entity, `L${node.depth}`, own.find((edge) => edge.primary) ?? own[0] ?? null);
+      // 与浮层/抽屉同一棵树：先序遍历，按层级缩进（已在浮层删除的条目不导出）。
+      const tree = this.buildTree(chain, this.hiddenIndices(chain));
+      for (const node of this.treeOrder(tree, chain.root.index)) {
+        const { primary } = this.incomingOf(chain, node.entity.index);
+        pushEntity(node.entity, `L${node.depth}`, primary, '    '.repeat(node.depth));
       }
     } else {
       const entity = this.entityByIndex(chain, mode.index);
       if (!entity) return '';
-      const own = chain.edges.filter((edge) => edge.to === entity.index);
       lines.push(`# 实体详情：${entityDisplayName(entity)}`);
       lines.push('');
-      pushEntity(entity, '详情', own.find((edge) => edge.primary) ?? own[0] ?? null);
+      pushEntity(entity, '详情', this.incomingOf(chain, entity.index).primary);
     }
     return lines.join('\n').trim();
   }

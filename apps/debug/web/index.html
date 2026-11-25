@@ -445,11 +445,21 @@
     }
     .ip-row:hover { background: rgba(255, 255, 255, 0.03); }
     .ip-root { background: var(--accent-weak); border-bottom-color: var(--border); }
-    .ip-depth {
-      flex: 0 0 20px; color: var(--muted); font-family: var(--mono); font-size: 9px;
-      padding-top: 2px; letter-spacing: 0.02em;
+    /* 行首折叠位（14px）：根 = ◆，有子 = ▾/▸ 按钮，叶子 = 小方点；同宽保证引导线对齐 */
+    .ip-tog {
+      flex: 0 0 14px; width: 14px; height: 14px; margin-top: 1px; padding: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: transparent; border: 1px solid transparent; border-radius: 2px;
+      color: var(--muted); font-family: var(--mono); font-size: 9px; line-height: 1; cursor: pointer;
     }
-    .ip-depth-root { color: var(--accent); }
+    button.ip-tog:hover { color: var(--accent); border-color: var(--border-strong); background: rgba(0, 0, 0, 0.25); }
+    button.ip-tog:focus-visible { outline: 1px solid var(--accent); outline-offset: 0; }
+    .ip-tog-root { color: var(--accent); cursor: default; font-size: 10px; }
+    .ip-tog-leaf { cursor: default; }
+    .ip-tog-leaf::before {
+      content: ''; width: 4px; height: 4px; border-radius: 1px; background: var(--border-strong);
+    }
+    #interactPanel.is-locked button.ip-tog { pointer-events: none; }
     .ip-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
     .ip-line { display: flex; align-items: baseline; gap: 5px; min-width: 0; flex-wrap: wrap; }
     .ip-class { font-family: var(--mono); color: var(--text); overflow-wrap: anywhere; }
@@ -458,7 +468,18 @@
       font-family: var(--mono); color: var(--accent); font-size: 10px;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
     }
-    .ip-meta { color: var(--muted); font-size: 10px; }
+    .ip-meta { color: var(--muted); font-size: 10px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 5px; }
+    /* 层级徽记：L1 仪表橙、L2 中性灰，与引导线配合读出深度 */
+    .ip-lvl {
+      flex: 0 0 auto; font-family: var(--mono); font-size: 9px; line-height: 1.4;
+      padding: 0 3px; border-radius: 2px; letter-spacing: 0.02em;
+      color: var(--muted); background: rgba(255, 255, 255, 0.06);
+    }
+    .ip-lvl-1 { color: var(--accent); background: var(--accent-weak); }
+    .ip-kids {
+      font-size: 9px; line-height: 1.4; padding: 0 4px; border-radius: 2px;
+      color: var(--muted); border: 1px dashed var(--border-strong);
+    }
     .ip-state {
       font-size: 9px; line-height: 1.4; padding: 0 4px; border-radius: 2px;
       border: 1px solid var(--border-strong); color: var(--muted);
@@ -497,13 +518,29 @@
       padding: 5px 12px 4px; color: var(--muted); font-size: 10px; line-height: 1.5;
       border-top: 1px dashed rgba(255, 255, 255, 0.06);
     }
-    .ip-group-head {
-      display: flex; align-items: baseline; justify-content: space-between; gap: 6px;
-      padding: 7px 10px 2px; color: var(--muted); font-family: var(--mono); font-size: 9px;
-      letter-spacing: 0.05em;
+    /* 关联树：文件树式缩进 + 引导线（│ ├ └）。根行折叠位中心 ≈ 17px，子层 ul 左缘对齐父折叠位中心；
+       每个 li 的 ::before 画竖线（末子只画到拐点），::after 画拐向本行折叠位的横线。
+       悬停某行时高亮它到父节点的拐线与其直接子树的引导线，便于顺着分支读。 */
+    .ip-tree { list-style: none; margin: 0; padding: 0; }
+    .ip-tree-top { margin: 2px 0 3px 17px; }
+    .ip-tree .ip-tree { margin-left: 18px; }
+    .ip-tnode { position: relative; padding-left: 11px; }
+    .ip-tnode::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+      border-left: 1px solid var(--border-strong); pointer-events: none;
     }
-    .ip-group-count { color: var(--border-strong); }
-    .ip-group .ip-row { padding-left: 10px; }
+    .ip-tnode:last-child::before { bottom: auto; height: 12px; }
+    .ip-tnode::after {
+      content: ''; position: absolute; left: 0; top: 12px; width: 9px;
+      border-top: 1px solid var(--border-strong); pointer-events: none;
+    }
+    .ip-tree .ip-row { padding: 4px 10px 4px 0; border-bottom: none; border-radius: 2px; }
+    .ip-tnode[data-depth="1"] + .ip-tnode[data-depth="1"] { margin-top: 1px; }
+    .ip-tnode:has(> .ip-row:hover)::after,
+    .ip-tnode:has(> .ip-row:hover) > .ip-tree > .ip-tnode::before,
+    .ip-tnode:has(> .ip-row:hover) > .ip-tree > .ip-tnode::after,
+    .ip-body:has(> .ip-root:hover) > .ip-tree-top > .ip-tnode::before,
+    .ip-body:has(> .ip-root:hover) > .ip-tree-top > .ip-tnode::after { border-color: var(--accent); }
     .ip-foot { border-top: 1px solid var(--border); padding: 7px 10px 6px; display: flex; flex-direction: column; gap: 4px; }
     .ip-foot-row { display: flex; align-items: center; gap: 6px; }
     .ip-foot-state { color: var(--muted); font-size: 10px; line-height: 1.45; }
@@ -543,6 +580,22 @@
     }
     .idr-sec { padding: 10px 0 12px; border-bottom: 1px solid var(--border); }
     .idr-sec:last-child { border-bottom: none; }
+    /* 抽屉按树序排列：子实体段按层级缩进并带左侧结构线（L1 仪表橙、L2 中性），与浮层树同语彙 */
+    .idr-sec-child {
+      margin-left: calc((var(--lvl, 1) - 1) * 14px); padding-left: 11px;
+      border-left: 2px solid var(--border-strong);
+    }
+    .idr-lvl-1 { border-left-color: var(--accent); }
+    .idr-tree-title { margin-top: 12px; }
+    .idr-badge-l2 { background: var(--muted); }
+    .idr-path {
+      display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 5px;
+      margin: -1px 0 6px; font-family: var(--mono); font-size: 10px; color: var(--muted);
+    }
+    .idr-path .idr-k { font-family: inherit; margin-right: 2px; }
+    .idr-path-item { overflow-wrap: anywhere; }
+    .idr-path-self { color: var(--text); overflow-wrap: anywhere; }
+    .idr-path-sep { color: var(--border-strong); }
     .idr-sec-head {
       display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline;
       margin-bottom: 5px; font-family: var(--mono);
@@ -1351,6 +1404,7 @@
           <div class="ip-foot">
             <div class="ip-foot-row">
               <button class="ip-btn hidden" id="interactPanelUndo">恢复已删 (0)</button>
+              <button class="ip-btn hidden" id="interactPanelTree">全部折叠</button>
               <span class="ip-spacer"></span>
               <button class="ip-btn ip-primary" id="interactPanelFull">查看全部信息</button>
             </div>
