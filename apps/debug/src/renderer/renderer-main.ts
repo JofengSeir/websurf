@@ -956,6 +956,23 @@ export class RendererMain {
         if (this.brushVisibilityDeferred) return;
         this.brushVisibility?.setEntityOffset(entity, offset);
       },
+      // 旋转 brush 角度 → 动态实体组绕 BSP origin 旋转（插件接管可见性时同样让位）。
+      onBrushRotationChange: (entity, angles) => {
+        if (this.brushVisibilityDeferred) return;
+        this.brushVisibility?.setEntityRotation(entity, angles);
+      },
+      // prop_dynamic 显隐 → 隐藏/显示 prop_ 区间（不改碰撞；插件接管时让位）。
+      onPropVisibleChange: (entity, visible) => {
+        if (this.brushVisibilityDeferred) return;
+        this.brushVisibility?.setEntityHidden(entity, !visible);
+      },
+      // env_sprite / info_particle_system 运行期显隐与启停 → 驱动 RenderSession 渲染图元。
+      onSpriteVisibleChange: (entity, visible) => {
+        this.session?.setSpriteVisible(entity, visible);
+      },
+      onParticleActiveChange: (entity, active) => {
+        this.session?.setParticleActive(entity, active);
+      },
     });
     this.gameplay.load(entityIoJson);
     // 实体装配完成后把带体积的 trigger（加速板等）送进碰撞可视化；换图时会被下次装配覆盖。

@@ -445,6 +445,21 @@ export class RendererMain {
         this.onBrushOffsetForAuthority?.(entity, [offset[0], offset[1], offset[2]]);
         this.brushVisibility?.setEntityOffset(entity, offset);
       },
+      // 旋转 brush 角度 → 动态实体组绕 BSP origin 旋转（仅影响渲染几何，碰撞保持出生姿态）。
+      onBrushRotationChange: (entity, angles) => {
+        this.brushVisibility?.setEntityRotation(entity, angles);
+      },
+      // prop_dynamic TurnOn/TurnOff 与 StartDisabled 初态 → 隐藏/显示 prop_ 合并区间（不改碰撞）。
+      onPropVisibleChange: (entity, visible) => {
+        this.brushVisibility?.setEntityHidden(entity, !visible);
+      },
+      // env_sprite ShowSprite/HideSprite/ToggleSprite 与 info_particle_system Start/Stop → 驱动渲染图元。
+      onSpriteVisibleChange: (entity, visible) => {
+        this.session?.setSpriteVisible(entity, visible);
+      },
+      onParticleActiveChange: (entity, active) => {
+        this.session?.setParticleActive(entity, active);
+      },
     });
     this.gameplay.load(entityIoJson);
   }
