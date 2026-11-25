@@ -15,12 +15,16 @@
 //!   把一次 `World::trace` 直接暴露给诊断脚本。
 //!
 //! 三份数据 ↔ 两套索引（`World::build_index` 一次建齐）：
-//! - `solids` → `BrushGrid`（cell 512）；`tri_meshes` → `TriangleGrid`（cell 256，
-//!   且仅在 `tri_meshes` 非空时构建）；**`ladders` 不进任何索引**，
-//!   `World::ladder_at` 对它线性扫描。
-//! - `BrushGrid::build` 用 `to_vec` 把 brush **按值复制**进网格，`TriangleGrid::build`
+//! - `solids` 按实体归属拆两路：`entity < 0` 的世界几何进 `BrushGrid`（cell 512）；
+//!   `entity >= 0` 的实体 brush 不进网格，只在 `World::dynamic_solid_indices` 里记下标，
+//!   查询时按扫掠盒 AABB 现场过滤 —— 电梯/门每帧移动**不需要重建静态网格**。
+//!   `tri_meshes` → `TriangleGrid`（cell 256，且仅在 `tri_meshes` 非空时构建）；
+//!   **`ladders` 不进任何索引**，`World::ladder_at` 对它线性扫描。
+//! - `BrushGrid` 只存下标、不复制 brush（查询直接读 `World::solids`）；`TriangleGrid::build`
 //!   对每个网格深克隆一次、网格内按 `Rc` 共享。因此 `build_index` 之后再改
-//!   `World::solids` / `World::tri_meshes`，索引仍是旧副本，必须重建才生效。
+//!   `World::tri_meshes`（或增删世界几何），索引仍是旧副本，必须重建才生效；
+//!   实体 brush 的位移经 `World::set_entity_offset` 直接写回 `World::solids`，
+//!   由动态下标指向，下一次查询立即生效。
 //!
 //! 关键约定（全部由本文件代码固定）：
 //! - 平面法线**朝外**，实体 = 各半空间交集 `dot(n, p) - dist <= 0`；
@@ -686,30 +690,72 @@ pub fn trace_box(
     maxs: &V3,
     brushes: &[&Brush],
 ) -> TraceResult {
-    let mut result = TraceResult::new(*end);
+    trace_box_iter(start, end, mins, maxs, brushes.iter().copied())
+}
 
+/// 扫掠盒宽阶段包围盒：盒心线段按 `pad = 1.0` 外扩。
+///
+/// 两处必须共用同一份口径：`trace_box_iter` / `trace_box_tri_iter` 的内层 AABB 判据，
+/// 与 `World::collect_brush_candidates` 对动态 brush 的过滤。任何一处单独改 pad 都会让
+/// “候选是超集”不再成立（动态 brush 会被提前砍掉）。
+fn sweep_bounds(start: &V3, end: &V3, mins: &V3, maxs: &V3) -> (V3, V3) {
     let pad = 1.0;
-    let s_min_x = start[0].min(end[0]) + mins[0] - pad;
-    let s_min_y = start[1].min(end[1]) + mins[1] - pad;
-    let s_min_z = start[2].min(end[2]) + mins[2] - pad;
-    let s_max_x = start[0].max(end[0]) + maxs[0] + pad;
-    let s_max_y = start[1].max(end[1]) + maxs[1] + pad;
-    let s_max_z = start[2].max(end[2]) + maxs[2] + pad;
+    (
+        [
+            start[0].min(end[0]) + mins[0] - pad,
+            start[1].min(end[1]) + mins[1] - pad,
+            start[2].min(end[2]) + mins[2] - pad,
+        ],
+        [
+            start[0].max(end[0]) + maxs[0] + pad,
+            start[1].max(end[1]) + maxs[1] + pad,
+            start[2].max(end[2]) + maxs[2] + pad,
+        ],
+    )
+}
+
+/// `trace_box` 的泛型核心：接受任意 `&Brush` 迭代器（全量切片或按下标现取），
+/// 语义与返回值同 `trace_box`。
+fn trace_box_iter<'a>(
+    start: &V3,
+    end: &V3,
+    mins: &V3,
+    maxs: &V3,
+    brushes: impl IntoIterator<Item = &'a Brush>,
+) -> TraceResult {
+    let mut result = TraceResult::new(*end);
+    let (s_min, s_max) = sweep_bounds(start, end, mins, maxs);
 
     for brush in brushes {
-        if brush.min[0] > s_max_x
-            || brush.max[0] < s_min_x
-            || brush.min[1] > s_max_y
-            || brush.max[1] < s_min_y
-            || brush.min[2] > s_max_z
-            || brush.max[2] < s_min_z
+        if brush.min[0] > s_max[0]
+            || brush.max[0] < s_min[0]
+            || brush.min[1] > s_max[1]
+            || brush.max[1] < s_min[1]
+            || brush.min[2] > s_max[2]
+            || brush.max[2] < s_min[2]
         {
             continue;
         }
         clip_box_to_brush(brush, start, end, mins, maxs, &mut result);
     }
+    finish_trace(result, start, end)
+}
 
-    // start_solid 不改变 fraction（不钉住追踪），脱离重叠起点由移动方负责
+/// 按下标从 `solids` 现取 brush：热路径候选只存下标，这里避免先摊成 `Vec<&Brush>`。
+fn trace_box_indices(
+    start: &V3,
+    end: &V3,
+    mins: &V3,
+    maxs: &V3,
+    solids: &[Brush],
+    ids: &[usize],
+) -> TraceResult {
+    trace_box_iter(start, end, mins, maxs, ids.iter().map(|&i| &solids[i]))
+}
+
+/// 收尾：`fraction < 1.0` 时按 `start + (end - start) * fraction` 反算 `end_pos`；
+/// `start_solid` 不改变 `fraction`（不钉住追踪），脱离重叠起点由移动方负责。
+fn finish_trace(mut result: TraceResult, start: &V3, end: &V3) -> TraceResult {
     if result.fraction < 1.0 {
         result.end_pos = [
             start[0] + (end[0] - start[0]) * result.fraction,
@@ -733,23 +779,27 @@ pub fn trace_box_tri_entries(
     maxs: &V3,
     entries: &[&TriEntry],
 ) -> TraceResult {
-    let mut result = TraceResult::new(*end);
+    trace_box_tri_iter(start, end, mins, maxs, entries.iter().copied())
+}
 
-    let pad = 1.0;
-    let s_min_x = start[0].min(end[0]) + mins[0] - pad;
-    let s_min_y = start[1].min(end[1]) + mins[1] - pad;
-    let s_min_z = start[2].min(end[2]) + mins[2] - pad;
-    let s_max_x = start[0].max(end[0]) + maxs[0] + pad;
-    let s_max_y = start[1].max(end[1]) + maxs[1] + pad;
-    let s_max_z = start[2].max(end[2]) + maxs[2] + pad;
+/// `trace_box_tri_entries` 的泛型核心（与 brush 侧同构，宽阶段按 `TriEntry` 三轴 AABB）。
+fn trace_box_tri_iter<'a>(
+    start: &V3,
+    end: &V3,
+    mins: &V3,
+    maxs: &V3,
+    entries: impl IntoIterator<Item = &'a TriEntry>,
+) -> TraceResult {
+    let mut result = TraceResult::new(*end);
+    let (s_min, s_max) = sweep_bounds(start, end, mins, maxs);
 
     for e in entries {
-        if e.min_x > s_max_x
-            || e.max_x < s_min_x
-            || e.min_y > s_max_y
-            || e.max_y < s_min_y
-            || e.min_z > s_max_z
-            || e.max_z < s_min_z
+        if e.min_x > s_max[0]
+            || e.max_x < s_min[0]
+            || e.min_y > s_max[1]
+            || e.max_y < s_min[1]
+            || e.min_z > s_max[2]
+            || e.max_z < s_min[2]
         {
             continue;
         }
@@ -757,15 +807,19 @@ pub fn trace_box_tri_entries(
             &e.mesh, e.a, e.b, e.c, start, end, mins, maxs, &mut result,
         );
     }
+    finish_trace(result, start, end)
+}
 
-    if result.fraction < 1.0 {
-        result.end_pos = [
-            start[0] + (end[0] - start[0]) * result.fraction,
-            start[1] + (end[1] - start[1]) * result.fraction,
-            start[2] + (end[2] - start[2]) * result.fraction,
-        ];
-    }
-    result
+/// 按下标从 `TriangleGrid::entries` 现取（同 `trace_box_indices`）。
+fn trace_box_tri_indices(
+    start: &V3,
+    end: &V3,
+    mins: &V3,
+    maxs: &V3,
+    entries: &[TriEntry],
+    ids: &[usize],
+) -> TraceResult {
+    trace_box_tri_iter(start, end, mins, maxs, ids.iter().map(|&i| &entries[i]))
 }
 
 /// 盒（盒心 `origin` + 偏移 `mins` / `maxs`）是否与 `planes` 描述的凸体相交。
@@ -889,17 +943,13 @@ impl<T> GridCells<T> {
 }
 
 /// brush 的均匀网格 broadphase（cell 512）：`BrushGrid::build` 后可用。
-/// `brushes` 是 `World::solids` 的按值副本，二者不共享内存。
+///
+/// **不持有 brush 副本**：格子里只存 `World::solids` 的下标，查询返回的也是下标，
+/// 由调用方现取几何。因此运行期平移实体 brush 不需要重建本索引（它们本就不在格子里）。
 pub struct BrushGrid {
     /// 入格与查询共用同一个 cell 尺寸（`build` 写入，`World::build_index` 传 512.0）。
     cell_size: f64,
     cells: GridCells<Brush>,
-    /// 全部 brush 的副本（`build` 用 `to_vec` 复制）：既是查询的数据源，
-    /// 也是 `query_refs` 返回引用的所有者，故 `build` 之后旧引用全部失效。
-    brushes: Vec<Brush>,
-    /// 查询复用缓冲：`query_refs` 每次先 `mem::take` 走它、用完再还回，
-    /// 使每 tick 的多次查询不再新建 `Vec`。
-    scratch: Vec<usize>,
 }
 
 impl BrushGrid {
@@ -909,27 +959,31 @@ impl BrushGrid {
         BrushGrid {
             cell_size: 512.0,
             cells: GridCells::new(),
-            brushes: Vec::new(),
-            scratch: Vec::new(),
         }
     }
 
-    /// 重建索引：按值复制 `brushes`、记下 `cell_size`、重置 cell 表，然后逐个 brush
-    /// 求覆盖的 cell 区间 `[floor(min / cell_size), floor(max / cell_size)]`。
+    /// 重建索引：记下 `cell_size`、重置 cell 表，然后逐个 brush 求覆盖的 cell 区间
+    /// `[floor(min / cell_size), floor(max / cell_size)]`。
+    ///
+    /// `keep` 返回 `false` 的 brush **不入格**（`World::build_index` 用它排除
+    /// `entity >= 0` 的实体 brush，那些走动态候选）；入格用的是它在参数切片里的
+    /// **原始下标**，与 `World::solids` 同序，故 `GridCells::rebuild` 的 `count`
+    /// 必须是 `brushes.len()` 而不是入格数量。
     ///
     /// 三轴 cell 数之积 `span` 以 `i64` 计算：超 `BIG_CELL_LIMIT` 的 brush 走
     /// `push_big` + `continue`，其余按 cell 逐个 `push` 下标 —— 同一个 brush 会在它
     /// 覆盖的每个 cell 里各出现一次，跨 cell 的重复由查询侧的 `epoch` 消掉。
     ///
-    /// 副作用：丢掉旧 `brushes` 副本与全部 `cells`（`scratch` 的容量保留）；
-    /// 本函数不读 `World::solids`，只认参数里的切片。
-    pub fn build(&mut self, brushes: &[Brush], cell_size: f64) {
-        self.brushes = brushes.to_vec();
+    /// 副作用：丢掉全部 `cells`；本函数不读 `World::solids`，只认参数里的切片。
+    pub fn build(&mut self, brushes: &[Brush], keep: impl Fn(&Brush) -> bool, cell_size: f64) {
         self.cell_size = cell_size;
         self.cells.rebuild(brushes.len());
 
         let inv = 1.0 / cell_size;
         for (i, b) in brushes.iter().enumerate() {
+            if !keep(b) {
+                continue;
+            }
             let cx0 = (b.min[0] * inv).floor() as i32;
             let cx1 = (b.max[0] * inv).floor() as i32;
             let cy0 = (b.min[1] * inv).floor() as i32;
@@ -957,7 +1011,7 @@ impl BrushGrid {
     ///
     /// 覆盖范围按 `[floor(min / cell_size), floor(max / cell_size)]` 取整成 cell 区间，
     /// 全部交给 `GridCells::query`；去重由后者的 `epoch` 负责，本函数不做
-    /// `contains` 线性扫描（对比 `TriangleGrid::query_entries`，那里保留了一次）。
+    /// `contains` 线性扫描。
     /// `out` 进入时先被 `clear`，因此调用方复用的缓冲不会累积上一轮结果。
     fn query_indices(&mut self, min: &V3, max: &V3, out: &mut Vec<usize>) {
         out.clear();
@@ -977,19 +1031,6 @@ impl BrushGrid {
         self.cells.query(key_iter, &mut |id: usize| out.push(id));
     }
 
-    /// 查 brush 引用（`World::trace` / `World::is_position_free` 用）：先用复用的
-    /// `scratch` 取下标，再逐个映射成 `&Brush` **追加**进 `out`（本函数不清空 `out`，
-    /// 清空发生在上游 `query_indices`）。返回的引用借自 `self.brushes`。
-    fn query_refs<'a>(&'a mut self, min: &V3, max: &V3, out: &mut Vec<&'a Brush>) {
-        // mem::take 把复用缓冲整块挪出 self（零成本移动），避开
-        // query_indices(&mut self) 与 &mut self.scratch 的双重可变借用
-        let mut scratch = std::mem::take(&mut self.scratch);
-        self.query_indices(min, max, &mut scratch);
-        for &id in &scratch {
-            out.push(&self.brushes[id]);
-        }
-        self.scratch = scratch;
-    }
 }
 
 /// 三角形空间索引条目：一个条目 = 一个三角形。
@@ -1029,7 +1070,7 @@ pub struct TriangleGrid {
     /// 入格与查询共用同一个 cell 尺寸（`build` 写入，`World::build_index` 传 256.0）。
     cell_size: f64,
     cells: GridCells<TriEntry>,
-    /// 全部三角形条目：`build` 先 `clear` 再逐个压入，`query_refs` 返回的引用源。
+    /// 全部三角形条目：`build` 先 `clear` 再逐个压入，`query_indices` 返回下标的取值源。
     entries: Vec<TriEntry>,
 }
 
@@ -1122,10 +1163,10 @@ impl TriangleGrid {
     /// 查候选三角形下标（超集）。覆盖范围取整方式与 `BrushGrid::query_indices` 相同，
     /// `out` 同样先清空。
     ///
-    /// 与 brush 侧的唯一结构差别：这里的 `visit` 闭包在 push 前多做一次
-    /// `out.contains(&id)` 线性去重。`GridCells::query` 的 `epoch` 已经保证同一对象每次
-    /// 查询只回调一次，所以这一步在当前实现下是重复的（候选多时是平方级开销）。
-    fn query_entries(&mut self, min: &V3, max: &V3, out: &mut Vec<usize>) {
+    /// 去重完全交给 `GridCells::query` 的 `epoch`：同一三角形在一次查询里至多回调一次，
+    /// 因此这里**不再**做 `out.contains(&id)` 线性扫描（旧实现在候选多时是平方级开销）。
+    /// `pub(crate)` 供 `brush_offset_tests` 验证跨多 cell 的三角形只出现一次。
+    pub(crate) fn query_indices(&mut self, min: &V3, max: &V3, out: &mut Vec<usize>) {
         out.clear();
         let inv = 1.0 / self.cell_size;
         let cx0 = (min[0] * inv).floor() as i32;
@@ -1140,23 +1181,7 @@ impl TriangleGrid {
                 (cz0..=cz1).map(move |cz| (cx, cy, cz))
             })
         });
-        let mut visit = |id: usize| {
-            if !out.contains(&id) {
-                out.push(id);
-            }
-        };
-        self.cells.query(key_iter, &mut visit);
-    }
-
-    /// 查三角形条目引用：先取下标，再逐个映射成 `&TriEntry` **追加**进 `out`
-    /// （不清空 `out`）。`ids` 是每次调用新建的局部缓冲 —— 与 `BrushGrid::query_refs`
-    /// 复用 `scratch` 的做法不同，这条路径每次查询都分配一次。
-    fn query_refs<'a>(&'a mut self, min: &V3, max: &V3, out: &mut Vec<&'a TriEntry>) {
-        let mut ids: Vec<usize> = Vec::new();
-        self.query_entries(min, max, &mut ids);
-        for id in ids {
-            out.push(&self.entries[id]);
-        }
+        self.cells.query(key_iter, &mut |id: usize| out.push(id));
     }
 }
 
@@ -1167,8 +1192,9 @@ impl TriangleGrid {
 /// 一份地图的碰撞数据 + 两套索引。
 ///
 /// `solids` / `ladders` / `tri_meshes` 是权威数据（上游 `PhysWorld::build_world` 填充），
-/// `grid` / `tri_grid` 是它们的索引副本。字段公开可写，但索引不会跟着变 ——
-/// 改完这三个字段必须重跑 `World::build_index`。
+/// `static_grid` / `tri_grid` 是它们的索引副本。字段公开可写，但索引不会跟着变 ——
+/// 改完这三个字段必须重跑 `World::build_index`（实体 brush 的位移是例外：走
+/// `World::set_entity_offset`，直接写回 `solids`，不经网格）。
 ///
 /// `trace` 与 `is_position_free` 取 `&mut self`：查询要推进 `GridCells` 的 `epoch`
 /// 并复用内部缓冲。
@@ -1180,24 +1206,33 @@ pub struct World {
     ///
     /// **权威状态**：`true` = 实心，参与碰撞；缺省/越界按实心处理（保守）。由
     /// `PhysWorld::build_world` 按 `start_solid` 初值填，运行期经
-    /// [`World::set_entity_solid`] 切换。`solids` 与空间索引始终保留全部 brush，
-    /// 查询时按这张表过滤——切换不需要重建索引，也不移动砍掉的几何。
+    /// [`World::set_entity_solid`] 切换。`solids` 始终保留全部 brush（静态网格只收
+    /// 世界几何，实体 brush 由动态下标指向），查询时按这张表过滤——切换不需要重建
+    /// 索引，也不移动砍掉的几何。
     pub entity_solid: Vec<bool>,
     /// 每个实体 brush 的当前位移（下标 = 实体枚举下标；缺省 `[0.0, 0.0, 0.0]`）。
     ///
     /// 运行期移动 brush（`func_movelinear` / `func_door` 等）按**实体**整体平移，
     /// 见 [`World::set_entity_offset`]；`solids` 里存的是「基准几何 + 当前位移」的副本。
     pub entity_offsets: Vec<V3>,
-    /// `solids` 的基准快照（位移前）。`set_entity_offset` 每次从它重算，
-    /// 避免每帧累加产生浮点漂移；由 `PhysWorld::build_world` 装载完成后调用
-    /// [`World::capture_base_solids`] 落一次。`pub(crate)` 供 `PhysWorld` 做「站在
-    /// 移动 brush 上的玩家随平台带走」判定（见 `PhysWorld::set_brush_offset`）。
-    pub(crate) base_solids: Vec<Brush>,
-    /// `ladders` 的基准快照（位移前），与 [`World::base_solids`] 同口径：
-    /// `set_entity_offset` 平移梯子时也按绝对位移从它重算。
-    pub(crate) base_ladders: Vec<LadderVolume>,
-    grid: BrushGrid,
+    /// `entity >= 0` 的 brush 在 `solids` 里的原始下标（`build_index` /
+    /// `capture_base_solids` 现扫）。它们不进静态网格，每次查询按扫掠盒 AABB 现场过滤。
+    pub(crate) dynamic_solid_indices: Vec<usize>,
+    /// 动态 brush 的基准快照 `(solids 下标, 位移前几何)`，只含 `entity >= 0`。
+    /// `set_entity_offset` 每次从它重算，避免逐帧累加漂移。`pub(crate)` 供
+    /// `PhysWorld` 做「站在移动 brush 上的玩家随平台带走」判定
+    /// （见 `PhysWorld::set_brush_offset`）。
+    pub(crate) dynamic_base_solids: Vec<(usize, Brush)>,
+    /// `ladders` 的基准快照（位移前），与 [`World::dynamic_base_solids`] 同口径：
+    /// 只含 `entity >= 0` 的梯子，`set_entity_offset` 按绝对位移从它重算。
+    pub(crate) dynamic_base_ladders: Vec<(usize, LadderVolume)>,
+    /// 只索引 `entity < 0` 的世界几何；实体 brush 位移不触碰它。
+    static_grid: BrushGrid,
     tri_grid: TriangleGrid,
+    /// `trace` / `is_position_free` / `collide_attrib` 复用的候选下标缓冲
+    /// （先 `mem::take` 借出、用完还回，避免每次查询分配）。
+    scratch_brush_ids: Vec<usize>,
+    scratch_tri_ids: Vec<usize>,
 }
 
 /// 单个三角形的命中归属（`World::collide_attrib` 报的第一个三角形命中）。
@@ -1264,24 +1299,43 @@ impl World {
             tri_meshes: Vec::new(),
             entity_solid: Vec::new(),
             entity_offsets: Vec::new(),
-            base_solids: Vec::new(),
-            base_ladders: Vec::new(),
-            grid: BrushGrid::new(),
+            dynamic_solid_indices: Vec::new(),
+            dynamic_base_solids: Vec::new(),
+            dynamic_base_ladders: Vec::new(),
+            static_grid: BrushGrid::new(),
             tri_grid: TriangleGrid::new(),
+            scratch_brush_ids: Vec::new(),
+            scratch_tri_ids: Vec::new(),
         }
     }
 
-    /// 一次建齐两套索引：`BrushGrid` 用 `solids` 与 **512** 的 cell；`TriangleGrid` 用
-    /// `tri_meshes` 与 **256** 的 cell，且**只在 `tri_meshes` 非空时**才构建
-    /// （空网格时 `trace` / `is_position_free` 也都不查三角索引）。
+    /// 一次建齐两套索引：`BrushGrid` 用 `solids` 里 **`entity < 0`** 的世界几何与
+    /// **512** 的 cell（`entity >= 0` 的实体 brush 只登记进
+    /// `World::dynamic_solid_indices`，不进网格）；`TriangleGrid` 用 `tri_meshes` 与
+    /// **256** 的 cell，且**只在 `tri_meshes` 非空时**才构建（空网格时 `trace` /
+    /// `is_position_free` 也都不查三角索引）。
     ///
     /// 调用时机：`solids` / `ladders` / `tri_meshes` 赋值**之后**。索引是副本，此后改动
     /// 这三个字段必须重新调用才生效。`ladders` 不参与索引（`World::ladder_at` 线性扫描）。
-    /// 本函数只读三个字段，不改任何数据。
+    /// 本函数只读三个字段、只写索引与动态下标，不改几何。
     pub fn build_index(&mut self) {
-        self.grid.build(&self.solids, 512.0);
+        self.refresh_dynamic_indices();
+        self.static_grid
+            .build(&self.solids, |b| b.entity < 0, 512.0);
         if !self.tri_meshes.is_empty() {
             self.tri_grid.build(&self.tri_meshes, 256.0);
+        }
+    }
+
+    /// 重新收集动态 brush 下标（`entity >= 0`）。`build_index` 与
+    /// `capture_base_solids` 都调它：只建索引、不落基准的用法（如
+    /// `brush_solid_tests` 的 `world_with`）也必须能查到实体 brush。
+    fn refresh_dynamic_indices(&mut self) {
+        self.dynamic_solid_indices.clear();
+        for (i, b) in self.solids.iter().enumerate() {
+            if b.entity >= 0 {
+                self.dynamic_solid_indices.push(i);
+            }
         }
     }
 
@@ -1303,19 +1357,35 @@ impl World {
         previous
     }
 
-    /// 把当前 `solids` / `ladders` 记成「位移基准」。装载完成、`build_index` 之后调用一次；
-    /// 之后 [`World::set_entity_offset`] 都从这份快照重算，不依赖几何的现值。
+    /// 把当前**动态** brush / 梯子（`entity >= 0`）记成「位移基准」。装载完成、
+    /// `build_index` 之后调用一次；之后 [`World::set_entity_offset`] 都从这份快照重算，
+    /// 不依赖几何的现值。世界几何（`entity < 0`）不会移动，不进快照。
     pub fn capture_base_solids(&mut self) {
-        self.base_solids = self.solids.clone();
-        self.base_ladders = self.ladders.clone();
+        self.refresh_dynamic_indices();
+        self.dynamic_base_solids.clear();
+        for k in 0..self.dynamic_solid_indices.len() {
+            let index = self.dynamic_solid_indices[k];
+            let base = self.solids[index].clone();
+            self.dynamic_base_solids.push((index, base));
+        }
+        self.dynamic_base_ladders.clear();
+        for (index, ladder) in self.ladders.iter().enumerate() {
+            if ladder.entity >= 0 {
+                self.dynamic_base_ladders.push((index, ladder.clone()));
+            }
+        }
     }
 
     /// 运行期平移某个实体的全部 brush（电梯 / 移动平台 / 可移动门）。
     ///
-    /// `offset` 是相对**基准几何**的位移（绝对量，不是增量）：每次按 `base_solids`
-    /// 重算，所以反复调用不会累积浮点误差。只动属于该实体的 brush（`Brush::entity`）；
-    /// 世界几何（`entity = -1`）与 ladder 不受影响。改完重建 brush 空间索引
-    /// （`BrushGrid` 是按值副本，必须重建才生效；三角网格不变，不重建）。
+    /// `offset` 是相对**基准几何**的位移（绝对量，不是增量）：每次按
+    /// `dynamic_base_solids` / `dynamic_base_ladders` 重算，所以反复调用不会累积
+    /// 浮点误差。只动属于该实体的 brush / ladder（`entity` 字段匹配者）；
+    /// 世界几何（`entity = -1`）不受影响。
+    ///
+    /// **不重建静态网格**：`entity >= 0` 的 brush 本就不在 `static_grid` 里，查询时按
+    /// `dynamic_solid_indices` 现取（见 `World::collect_brush_candidates`），所以这里只写
+    /// `solids`，下一次 `trace` / `is_position_free` 立即看到新位置；三角网格也不重建。
     ///
     /// 返回命中的 brush 数（0 = 该实体在本图没有实心 brush，调用方忽略即可）。
     /// 消费方：`PhysWorld::set_brush_offset`（wasm 导出）← TS 移动 brush 驱动每帧下发。
@@ -1323,7 +1393,7 @@ impl World {
         if entity < 0 {
             return 0;
         }
-        if self.base_solids.len() != self.solids.len() {
+        if self.dynamic_base_solids.is_empty() && self.solids.iter().any(|b| b.entity >= 0) {
             // 还没落基准（例如测试直接构造 World）：以当前几何为基准。
             self.capture_base_solids();
         }
@@ -1333,7 +1403,7 @@ impl World {
         }
         self.entity_offsets[entity_index] = offset;
         let mut moved = 0usize;
-        for (index, base) in self.base_solids.iter().enumerate() {
+        for (index, base) in &self.dynamic_base_solids {
             if base.entity != entity {
                 continue;
             }
@@ -1356,17 +1426,11 @@ impl World {
                     + plane.normal[1] * offset[1]
                     + plane.normal[2] * offset[2];
             }
-            self.solids[index] = brush;
-        }
-        if moved > 0 {
-            self.grid.build(&self.solids, 512.0);
+            self.solids[*index] = brush;
         }
         // 梯子也随所属实体一起平移（门的 LADDER 面、移动平台上的梯子等）：
-        // 与 solids 同口径从基准快照重算，避免累加漂移。
-        if self.base_ladders.len() != self.ladders.len() {
-            self.base_ladders = self.ladders.clone();
-        }
-        for (index, base) in self.base_ladders.iter().enumerate() {
+        // 与 solids 同口径从动态基准快照重算，避免累加漂移。
+        for (index, base) in &self.dynamic_base_ladders {
             if base.entity != entity {
                 continue;
             }
@@ -1386,51 +1450,74 @@ impl World {
                     + plane.normal[1] * offset[1]
                     + plane.normal[2] * offset[2];
             }
-            self.ladders[index] = ladder;
+            self.ladders[*index] = ladder;
         }
         moved
     }
 
+    /// 收集查询盒 `[s_min, s_max]` 命中的 brush 下标（超集）到 `scratch_brush_ids`。
+    ///
+    /// 静态部分由 `static_grid` 给出（只含 `entity < 0`，与 cell 相交即候选）；动态
+    /// brush 不在网格里，逐条按**与 `trace_box_iter` 内层完全相同**的 AABB 分离判据过滤，
+    /// 并跳过被 `entity_solid` 关掉的。因此这份候选是任何全量遍历的超集：这里保留的
+    /// brush 才可能在精判里命中，这里跳过的在精判里也必然被跳过。
+    fn collect_brush_candidates(&mut self, s_min: &V3, s_max: &V3) {
+        let mut ids = std::mem::take(&mut self.scratch_brush_ids);
+        self.static_grid.query_indices(s_min, s_max, &mut ids);
+        for &index in &self.dynamic_solid_indices {
+            let brush = &self.solids[index];
+            if !brush_is_active(brush, &self.entity_solid)
+                || brush.min[0] > s_max[0]
+                || brush.max[0] < s_min[0]
+                || brush.min[1] > s_max[1]
+                || brush.max[1] < s_min[1]
+                || brush.min[2] > s_max[2]
+                || brush.max[2] < s_min[2]
+            {
+                continue;
+            }
+            ids.push(index);
+        }
+        self.scratch_brush_ids = ids;
+    }
+
+    /// 收集查询盒命中的三角形下标（超集）到 `scratch_tri_ids`；调用方保证
+    /// `tri_meshes` 非空（此时索引也只在非空时建立）。
+    fn collect_tri_candidates(&mut self, s_min: &V3, s_max: &V3) {
+        let mut ids = std::mem::take(&mut self.scratch_tri_ids);
+        self.tri_grid.query_indices(s_min, s_max, &mut ids);
+        self.scratch_tri_ids = ids;
+    }
+
     /// 扫掠盒追踪：brush 与三角网格两条线各取候选，返回更早的那次命中。
     ///
-    /// 流程：① 把扫掠运动的包围盒按 `pad = 1.0` 外扩成 `[s_min, s_max]`；
-    /// ② 向 `BrushGrid` 取候选得 `brush_result`；③ 仅当 `tri_meshes` 非空时再向
-    /// `TriangleGrid` 取候选得 `tri_result`，**严格小于**才改判为三角命中 ——
-    /// 两者同分时取 brush；④ 无三角网格时直接返回 brush 结果。
+    /// 流程：① `sweep_bounds` 把扫掠运动外扩成查询盒 `[s_min, s_max]`；
+    /// ② 静态网格 + 动态 brush 取候选得 `brush_result`；③ 仅当 `tri_meshes` 非空时
+    /// 再取三角候选得 `tri_result`，**严格小于**才改判为三角命中 —— 两者同分时取
+    /// brush；④ 无三角网格时直接返回 brush 结果。
     ///
     /// 参数与返回语义同 `trace_box`（`fraction`、`end_pos`、`normal`、`start_solid` /
     /// `all_solid`）。需要 `&mut self` 是因为查询会推进 `epoch` 并复用内部缓冲。
     /// 本函数不移动任何东西，也只返回**单个**最早命中（不返回命中列表）。
     pub fn trace(&mut self, start: &V3, end: &V3, mins: &V3, maxs: &V3) -> TraceResult {
-        let pad = 1.0;
-        let s_min = [
-            start[0].min(end[0]) + mins[0] - pad,
-            start[1].min(end[1]) + mins[1] - pad,
-            start[2].min(end[2]) + mins[2] - pad,
-        ];
-        let s_max = [
-            start[0].max(end[0]) + maxs[0] + pad,
-            start[1].max(end[1]) + maxs[1] + pad,
-            start[2].max(end[2]) + maxs[2] + pad,
-        ];
-
-        // brush 候选：网格给出的是超集，命中判定在 trace_box 里；
-        // 先按实体碰撞状态过滤（出生即关/被 I/O 关掉的 brush 不参与）。
-        let mut candidates: Vec<&Brush> = Vec::new();
-        self.grid.query_refs(&s_min, &s_max, &mut candidates);
-        let entity_solid = &self.entity_solid;
-        candidates.retain(|b| brush_is_active(b, entity_solid));
-        let brush_result = trace_box(start, end, mins, maxs, &candidates[..]);
+        let (s_min, s_max) = sweep_bounds(start, end, mins, maxs);
+        self.collect_brush_candidates(&s_min, &s_max);
+        let brush_ids = std::mem::take(&mut self.scratch_brush_ids);
+        let brush_result = trace_box_indices(start, end, mins, maxs, &self.solids, &brush_ids);
 
         // 三角网格同理；只有更早（严格小于）才覆盖 brush 结果
         if !self.tri_meshes.is_empty() {
-            let mut tri_candidates: Vec<&TriEntry> = Vec::new();
-            self.tri_grid.query_refs(&s_min, &s_max, &mut tri_candidates);
-            let tri_result = trace_box_tri_entries(start, end, mins, maxs, &tri_candidates[..]);
+            self.collect_tri_candidates(&s_min, &s_max);
+            let tri_ids = std::mem::take(&mut self.scratch_tri_ids);
+            let tri_result =
+                trace_box_tri_indices(start, end, mins, maxs, &self.tri_grid.entries, &tri_ids);
+            self.scratch_tri_ids = tri_ids;
             if tri_result.fraction < brush_result.fraction {
+                self.scratch_brush_ids = brush_ids;
                 return tri_result;
             }
         }
+        self.scratch_brush_ids = brush_ids;
         brush_result
     }
 
@@ -1455,29 +1542,32 @@ impl World {
             origin[2] + maxs[2] + 1.0,
         ];
 
-        let mut candidates: Vec<&Brush> = Vec::new();
-        self.grid.query_refs(&q_min, &q_max, &mut candidates);
-        let entity_solid = &self.entity_solid;
-        candidates.retain(|b| brush_is_active(b, entity_solid));
-        let tr = trace_box(origin, origin, mins, maxs, &candidates[..]);
-        if tr.start_solid {
-            return false;
+        self.collect_brush_candidates(&q_min, &q_max);
+        let brush_ids = std::mem::take(&mut self.scratch_brush_ids);
+        let mut free =
+            !trace_box_indices(origin, origin, mins, maxs, &self.solids, &brush_ids).start_solid;
+        if free && !self.tri_meshes.is_empty() {
+            self.collect_tri_candidates(&q_min, &q_max);
+            let tri_ids = std::mem::take(&mut self.scratch_tri_ids);
+            free = !trace_box_tri_indices(
+                origin,
+                origin,
+                mins,
+                maxs,
+                &self.tri_grid.entries,
+                &tri_ids,
+            )
+            .start_solid;
+            self.scratch_tri_ids = tri_ids;
         }
-        if !self.tri_meshes.is_empty() {
-            let mut tri_candidates: Vec<&TriEntry> = Vec::new();
-            self.tri_grid.query_refs(&q_min, &q_max, &mut tri_candidates);
-            let tri_tr = trace_box_tri_entries(origin, origin, mins, maxs, &tri_candidates[..]);
-            if tri_tr.start_solid {
-                return false;
-            }
-        }
-        true
+        self.scratch_brush_ids = brush_ids;
+        free
     }
 
     /// 归属诊断：给定盒体位置，报"哪些碰撞体把它判成实心"。
     ///
     /// 与 [`World::is_position_free`] 的**判决谓词完全一致** —— 它同样是逐个候选单独调
-    /// `trace_box` / `trace_box_tri_entries` 并看 `start_solid`，只是每次只传一个候选。
+    /// `trace_box_iter` / `trace_box_tri_iter` 并看 `start_solid`，只是每次只传一个候选。
     /// 谓词一致是刻意的：若这里改用 `box_in_brush` 之类另一套判定，报出的归属可能与
     /// `is_position_free` 的实际判决对不上，那这份诊断就不可信了。
     ///
@@ -1498,25 +1588,26 @@ impl World {
         ];
         let mut out = CollideAttrib::default();
 
-        let mut candidates: Vec<&Brush> = Vec::new();
-        self.grid.query_refs(&q_min, &q_max, &mut candidates);
-        let entity_solid = &self.entity_solid;
-        for b in candidates {
-            if brush_is_active(b, entity_solid)
-                && trace_box(origin, origin, mins, maxs, &[b]).start_solid
-            {
+        // 候选已按实体碰撞状态过滤（collect_brush_candidates），这里逐条精判。
+        self.collect_brush_candidates(&q_min, &q_max);
+        let brush_ids = std::mem::take(&mut self.scratch_brush_ids);
+        for &index in &brush_ids {
+            let b = &self.solids[index];
+            if trace_box_iter(origin, origin, mins, maxs, std::iter::once(b)).start_solid {
                 out.brush_hits += 1;
                 if out.first_brush_aabb.is_none() {
                     out.first_brush_aabb = Some((b.min, b.max));
                 }
             }
         }
+        self.scratch_brush_ids = brush_ids;
 
         if !self.tri_meshes.is_empty() {
-            let mut tri_candidates: Vec<&TriEntry> = Vec::new();
-            self.tri_grid.query_refs(&q_min, &q_max, &mut tri_candidates);
-            for e in tri_candidates {
-                if trace_box_tri_entries(origin, origin, mins, maxs, &[e]).start_solid {
+            self.collect_tri_candidates(&q_min, &q_max);
+            let tri_ids = std::mem::take(&mut self.scratch_tri_ids);
+            for &index in &tri_ids {
+                let e = &self.tri_grid.entries[index];
+                if trace_box_tri_iter(origin, origin, mins, maxs, std::iter::once(e)).start_solid {
                     out.tri_hits += 1;
                     if out.first_tri.is_none() {
                         out.first_tri = Some(TriHit {
@@ -1530,6 +1621,7 @@ impl World {
                     }
                 }
             }
+            self.scratch_tri_ids = tri_ids;
         }
         out.free = out.brush_hits == 0 && out.tri_hits == 0;
         out

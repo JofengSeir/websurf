@@ -1098,7 +1098,7 @@ impl PhysWorld {
     /// 玩家站在本次被移动的 brush 上时，把玩家一起带走（Source 的 `CBaseEntity` 载客语义
     /// 的等价近似）：只做平移，不改速度/视角；不在其上或悬空则不动。
     ///
-    /// 判定用**移动前**的几何（`base_solids + previous`）：脚底 y 与 brush 顶面差 ≤ 2 HU、
+    /// 判定用**移动前**的几何（`dynamic_base_solids + previous`）：脚底 y 与 brush 顶面差 ≤ 2 HU、
     /// 水平位置落在 brush AABB 外扩 2 HU 内即视为「站在上面」。命中第一个这样的 brush 就
     /// 整段位移，不再重复叠加。
     fn carry_player_on_moved_brush(&mut self, entity: i32, previous: [f64; 3], delta: [f64; 3]) {
@@ -1106,7 +1106,7 @@ impl PhysWorld {
             return;
         }
         let feet = self.player.origin;
-        for base in &self.world.base_solids {
+        for (_, base) in &self.world.dynamic_base_solids {
             if base.entity != entity {
                 continue;
             }

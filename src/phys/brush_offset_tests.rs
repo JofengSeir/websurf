@@ -10,7 +10,7 @@
 //! 载客判定的边界条件（脚底与顶面差 ≤ 2 HU、水平外扩 2 HU）见
 //! `PhysWorld::carry_player_on_moved_brush` 文档；本文件用平台顶面站立的最小场景覆盖。
 
-use super::world::{Brush, Plane, World, V3};
+use super::world::{Brush, Plane, TriMesh, TriangleGrid, World, V3};
 use crate::phys::PhysWorld;
 
 const ENTITY: i32 = 7;
@@ -153,3 +153,89 @@ fn airborne_player_is_not_carried() {
     w.set_brush_offset(ENTITY, 0.0, 64.0, 0.0);
     assert_eq!(w.player.origin, before, "悬空玩家不应被平台带走");
 }
+/// 200 个静态 brush + 1 个实体平台：反复平移实体后静态碰撞仍正确、动态碰撞跟随，
+/// 并且基准快照里只留那 1 个动态 brush（证明世界几何既不进快照、也不随平移重建）。
+#[test]
+fn dynamic_offset_keeps_static_grid_and_only_snapshots_entity_brushes() {
+    let mut w = World::new();
+    for i in 0..200 {
+        let x = 1000.0 + i as f64 * 50.0;
+        w.solids
+            .push(box_brush([x, 0.0, 0.0], [x + 10.0, 10.0, 10.0], -1));
+    }
+    w.solids.push(platform());
+    w.entity_solid = vec![true; ENTITY as usize + 1];
+    w.build_index();
+    w.capture_base_solids();
+
+    assert_eq!(w.dynamic_base_solids.len(), 1, "快照应只含实体 brush");
+    assert_eq!(w.entity_offsets.len(), 0, "未平移前不应写偏移表");
+
+    let inside_platform: V3 = [0.0, 10.0, 0.0];
+    let inside_static: V3 = [1005.0, 5.0, 5.0];
+    let z: V3 = [0.0; 3];
+    assert!(!w.is_position_free(&inside_platform, &z, &z), "平台初始应挡人");
+    assert!(!w.is_position_free(&inside_static, &z, &z), "静态块应挡人");
+
+    for offset in [
+        [0.0, 100.0, 0.0],
+        [300.0, 0.0, 0.0],
+        [0.0, 0.0, -250.0],
+    ] {
+        assert_eq!(w.set_entity_offset(ENTITY, offset), 1);
+        assert_eq!(w.dynamic_base_solids.len(), 1, "平移不应改动基准快照");
+        assert_eq!(w.dynamic_solid_indices.len(), 1);
+        assert!(
+            !w.is_position_free(&inside_static, &z, &z),
+            "静态几何应始终挡人（偏移 {offset:?}）"
+        );
+        assert!(
+            w.is_position_free(&inside_platform, &z, &z),
+            "平台移走后原位应自由（偏移 {offset:?}）"
+        );
+        let moved = [
+            inside_platform[0] + offset[0],
+            inside_platform[1] + offset[1],
+            inside_platform[2] + offset[2],
+        ];
+        assert!(
+            !w.is_position_free(&moved, &z, &z),
+            "平台新位置应挡人（偏移 {offset:?}）"
+        );
+    }
+}
+
+/// 跨多个 256-cell 的大三角形：去掉 `contains` 之后，`GridCells` 的 epoch 去重仍必须
+/// 让每个三角形每次查询只出现一次。
+#[test]
+fn triangle_query_dedups_multi_cell_triangle_via_epoch() {
+    let mesh = TriMesh {
+        name: "huge".to_string(),
+        vertices: vec![
+            [-1000.0, 0.0, -1000.0],
+            [1000.0, 0.0, -1000.0],
+            [0.0, 0.0, 1000.0],
+        ],
+        indices: vec![[0, 1, 2]],
+        min: [-1000.0, 0.0, -1000.0],
+        max: [1000.0, 0.0, 1000.0],
+    };
+    let mut grid = TriangleGrid::new();
+    grid.build(&[mesh], 256.0);
+
+    // 三角形 AABB 覆盖 x/z 各 8 个 cell（span = 64 < BIG_CELL_LIMIT，走 cells 而非 big）；
+    // 查询范围覆盖全部 64 个 cell，去重前会 push 64 次。
+    let mut ids: Vec<usize> = Vec::new();
+    let lo: V3 = [-2000.0, -100.0, -2000.0];
+    let hi: V3 = [2000.0, 100.0, 2000.0];
+    grid.query_indices(&lo, &hi, &mut ids);
+    assert_eq!(ids, vec![0], "跨 cell 三角形应只出现一次");
+    grid.query_indices(&lo, &hi, &mut ids);
+    assert_eq!(ids, vec![0], "再次查询（epoch 递增）仍只出现一次");
+
+    let far_lo: V3 = [5000.0, 5000.0, 5000.0];
+    let far_hi: V3 = [6000.0, 6000.0, 6000.0];
+    grid.query_indices(&far_lo, &far_hi, &mut ids);
+    assert!(ids.is_empty(), "不相交范围应无候选，且 out 先被清空");
+}
+
