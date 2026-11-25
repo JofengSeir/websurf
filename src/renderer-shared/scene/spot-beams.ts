@@ -147,7 +147,7 @@ void main() {
 	float edgeMask = max(0.0, 1.0 - across * across);
 	float scatter = exp(-across * across * 2.4) * edgeMask * edgeMask;
 	float mouthHot = exp(-vBeamUv.y * 10.0) * exp(-across * across * 5.0);
-	float along = smoothstep(0.0, 0.025, vBeamUv.y) * pow(max(0.0, 1.0 - vBeamUv.y), 2.15);
+	float along = smoothstep(0.0, 0.008, vBeamUv.y) * pow(max(0.0, 1.0 - vBeamUv.y), 2.15);
 	float camFade = smoothstep(0.0, ${SHADEOUT_DISTANCE.toFixed(1)}, distance(cameraPosition, vBeamWorld));
 	float a = uPeak * (scatter * 0.85 + mouthHot * 0.35) * along * camFade * vViewFade;
 	if (a <= 0.001) discard;
@@ -169,6 +169,7 @@ uniform float uAspect;
 varying vec2 vUv;
 varying vec2 vNdc;
 varying float vFacing;
+varying float vBulb;
 varying float vGlare;
 varying float vCamFade;
 void main() {
@@ -182,6 +183,7 @@ void main() {
 	vec4 clip = projectionMatrix * viewMatrix * worldOrigin;
 	if (clip.w <= 0.1) {
 		vNdc = vec2(2.0);
+		vBulb = 0.0;
 		vGlare = 0.0;
 		gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
 		return;
@@ -189,11 +191,12 @@ void main() {
 	vec2 ndc = clip.xy / clip.w;
 	vNdc = ndc;
 	float aimFactor = exp(-dot(ndc, ndc) * 1.4);
-	// 45°（sin 45° ≈ 0.707）起非线性爬升炫光，越正对光轴越明显。
-	float glareCurve = pow(smoothstep(0.707, 0.995, vFacing), 1.6);
-	vGlare = glareCurve * (0.28 + 0.72 * aimFactor);
+	// 0° 起连续非线性爬升：灯头球亮度先温和亮起，光学星芒/彩虹炫光随后在更大倾角加速绽放。
+	float fwd = max(0.0, vFacing);
+	vBulb = pow(fwd, 1.8);
+	vGlare = pow(fwd, 3.2) * (0.30 + 0.70 * aimFactor);
 	float distScale = clamp(420.0 / (dist + 180.0), 0.45, 1.15);
-	float scale = mix(0.24 * distScale, 1.15, vGlare);
+	float scale = mix(0.22 * distScale, 1.15, vGlare);
 	vec2 halfExt = vec2(scale / max(0.5, uAspect), scale);
 	gl_Position = vec4(ndc + position.xy * 2.0 * halfExt, 0.0, 1.0);
 }
@@ -207,6 +210,7 @@ uniform float uSeed;
 varying vec2 vUv;
 varying vec2 vNdc;
 varying float vFacing;
+varying float vBulb;
 varying float vGlare;
 varying float vCamFade;
 void main() {
@@ -245,8 +249,8 @@ void main() {
 	) * 0.45;
 	vec3 rainbow = (arcPrimary + arcOuter) * sideMask * 0.40 * vGlare;
 
-	float backDim = mix(0.10, 0.26, smoothstep(-0.25, 0.40, vFacing));
-	float baseTerm = innerHalo * (backDim + 0.58 * vGlare) + pinpoint * (0.18 + 0.72 * vGlare) + veiling;
+	float sideBase = mix(0.14, 0.42, smoothstep(-0.25, 0.15, vFacing));
+	float baseTerm = innerHalo * (sideBase + 0.48 * vBulb) + pinpoint * (0.45 + 0.65 * vBulb) + veiling;
 	float opticalTerm = (rays * 0.46 + streak * 0.26) * vGlare;
 
 	vec3 baseTint = mix(uColor, vec3(1.0), clamp(pinpoint * 0.90 + veiling * 0.45, 0.0, 1.0));
