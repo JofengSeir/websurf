@@ -10,11 +10,20 @@ import { OutputTyped } from '../entity-io.js';
 import { FIELD_VOID } from '../variant.js';
 import type { FieldType } from '../variant.js';
 import type { InputData } from '../types.js';
+import type { IEntityList } from '../interfaces.js';
+
+/**
+ * `g_Runtime.entList` 的结构类型只约束到 `EntityRef`（原因见 `interfaces.ts`）；
+ * 运行时它由 `EntitySystem` 装配，槽里始终是具体 `Entity`，这里按具体类型收窄一次。
+ */
+function concreteEntityList(): IEntityList<Entity> | null {
+  return g_Runtime.entList as IEntityList<Entity> | null;
+}
 
 /** `gEntList.FindEntityByName(NULL, name, ...)` —— 第一个同名实体。 */
 export function findByName(name: string): Entity | null {
   if (!name) return null;
-  const list = g_Runtime.entList;
+  const list = concreteEntityList();
   if (!list) return null;
   return list.findEntityByName(null, name, null, null, null);
 }
@@ -22,7 +31,7 @@ export function findByName(name: string): Entity | null {
 /** 遍历全部同名匹配（ServiceEvents 的语义）。 */
 export function findAllByName(name: string): Entity[] {
   const out: Entity[] = [];
-  const list = g_Runtime.entList;
+  const list = concreteEntityList();
   if (!list || !name) return out;
   let cur: Entity | null = null;
   for (;;) {
@@ -36,7 +45,7 @@ export function findAllByName(name: string): Entity[] {
 /** `gEntList.FindEntityByClassname` 的全部匹配。 */
 export function findAllByClassname(name: string): Entity[] {
   const out: Entity[] = [];
-  const list = g_Runtime.entList;
+  const list = concreteEntityList();
   if (!list || !name) return out;
   let cur: Entity | null = null;
   for (;;) {

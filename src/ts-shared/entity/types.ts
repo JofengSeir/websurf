@@ -9,21 +9,10 @@
  */
 
 import type { Variant } from './variant.js';
+import type { Color32, EntityRef, Vec3 } from './primitives.js';
 
-export type Vec3 = [number, number, number];
-
-export interface Color32 {
-  r: number;
-  g: number;
-  b: number;
-  a: number;
-}
-
-/** `variant_t` 里 `FIELD_EHANDLE` 值的可携带部分（避免与 Entity 类循环依赖）。 */
-export interface EntityRef {
-  readonly targetname: string;
-  readonly classname: string;
-}
+/** 叶层结构类型（见 `primitives.ts`）在旧路径上继续可用。 */
+export type { Color32, EntityRef, Vec3 };
 
 /** 引擎 `CBaseEntity` 的最小接口，供 I/O 层引用，不依赖具体类实现。 */
 export interface EntityLike extends EntityRef {

@@ -16,7 +16,7 @@
  * 4. 没有自定义 `operator=`，`m_VariantValue = Value` 是逐成员浅拷贝 ⇒ 这里用 `clone()`。
  */
 import { g_Runtime } from './runtime.js';
-import type { Color32, EntityRef, Vec3 } from './types.js';
+import type { Color32, EntityRef, Vec3 } from './primitives.js';
 
 export type FieldType =
   | 'void'

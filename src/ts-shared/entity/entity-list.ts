@@ -129,7 +129,8 @@ export class EntityList {
       case 'player':
       case 'pvsplayer':
       case 'picker':
-        return g_Runtime.player;
+        // 结构槽只能约束到 EntityRef；装配方放的是具体 Entity。
+        return g_Runtime.player as Entity | null;
       case 'activator':
         return (activator as Entity | null) ?? null;
       case 'caller':

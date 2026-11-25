@@ -17,6 +17,7 @@
  */
 import { g_Runtime } from './runtime.js';
 import type { EntityLike } from './types.js';
+import type { IEntityList } from './interfaces.js';
 import { Variant } from './variant.js';
 
 export interface QueuedEvent {
@@ -138,7 +139,8 @@ export class EventQueue {
   }
 
   private dispatch(pe: QueuedEvent): void {
-    const list = g_Runtime.entList;
+    // 结构槽只能约束到 EntityRef；装配方（EntitySystem）放的是具体 EntityList<Entity>。
+    const list = g_Runtime.entList as IEntityList<EntityLike> | null;
     let targetFound = false;
 
     if (pe.targetName !== null && list) {
