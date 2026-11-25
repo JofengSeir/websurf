@@ -57,49 +57,20 @@ md5 = "0.8"
 # JS ↔ Rust 结构化数据反序列化（export_glb_with_models 的入参）
 serde-wasm-bindgen = "0.6"
 
-# 模型解析（原三端 lib.rs 直接使用）
+# 模型解析：本 crate 只在 colliders_impl 直接引用 vmdl::Vector；vmdl / vtf / vmt-parser /
+# tf-asset-loader 的其余消费点都在 websurf-wasm-core（由其 Cargo.toml 声明）。
 vmdl = "0.2"
-vtf = "0.3"
-vmt-parser = "0.2"
-tf-asset-loader = { version = "0.1.7", features = ["zip"] }
 
-# GLB 导出与 glTF 类型
+# GLB 类型：本 crate 只在 glb_impl::glb_to_bytes 引用 gltf::Glb；BSP 解析、GLB 装配与
+# gltf-json 的 KHR_texture_transform/extras 特性都由 websurf-wasm-core 提供。
 gltf = "1.4.1"
-gltf-json = { version = "1.4.1", features = ["KHR_texture_transform", "extras"] }
-cgmath = "0.18.0"
-bytemuck = { version = "1.17.1", features = ["derive"] }
-miette = "7.2.0"
 
-# BSP 解析与容器读取
-arrayvec = "0.7.6"
-binrw = "0.14.0"
-bitflags = "2.6.0"
-bv = "0.11.1"
-itertools = "0.13.0"
-lzma-rs = "0.3.0"
-num_enum = "0.7.2"
-static_assertions = "1.1.0"
-thiserror = "2.0.11"
-vdf-reader = "0.2.0"
-zip = { version = "0.6.3", package = "zip-lzma", features = ["lzma"], default-features = false }
-
-# 纹理解码
-byteorder = "1.5.0"
-texpresso = "2.0.2"
-parse-display = "0.9.0"
-
-# getrandom：0.2 开 js feature，0.3（重命名为 getrandom_03）开 wasm_js feature
-getrandom = { version = "0.2", features = ["js"] }
-getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
-
-# path-dedot：由 tf-asset-loader 间接拉入，本 crate 直接声明以打开 use_unix_paths_on_wasm feature
-path-dedot = { version = "3", features = ["use_unix_paths_on_wasm"] }
-
-# ahash：default-features = false + compile-time-rng
-[dependencies.ahash]
-version = "0.8"
-default-features = false
-features = ["compile-time-rng"]
+# 已删除的旧直依赖（P4 迁移遗留，本 crate 源码无直接引用；所需特性统一由
+# websurf-wasm-core 的同名依赖声明保证：getrandom js / getrandom_03 wasm_js /
+# path-dedot use_unix_paths_on_wasm / ahash compile-time-rng / image png / zip-lzma lzma）：
+# vtf、vmt-parser、tf-asset-loader、gltf-json、cgmath、bytemuck、miette、arrayvec、binrw、
+# bitflags、bv、itertools、lzma-rs、num_enum、static_assertions、thiserror、vdf-reader、
+# zip、byteorder、texpresso、parse-display、getrandom、getrandom_03、path-dedot、ahash。
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false
