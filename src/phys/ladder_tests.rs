@@ -201,3 +201,116 @@ fn offset_translates_ladder_with_its_entity() {
     assert!(w.ladder_at(&[0.0, 110.0, 0.0], &hull_mins, &hull_maxs).is_some());
 }
 
+#[test]
+fn thin_solid_ladder_blocks_clip_and_climbs_via_build_world() {
+    use crate::phys::PhysWorld;
+
+    let to_planes_json = |min: [f32; 3], max: [f32; 3]| {
+        serde_json::json!([
+            { "normal": [1.0, 0.0, 0.0], "dist": max[0] },
+            { "normal": [-1.0, 0.0, 0.0], "dist": -min[0] },
+            { "normal": [0.0, 1.0, 0.0], "dist": max[1] },
+            { "normal": [0.0, -1.0, 0.0], "dist": -min[1] },
+            { "normal": [0.0, 0.0, 1.0], "dist": max[2] },
+            { "normal": [0.0, 0.0, -1.0], "dist": -min[2] },
+        ])
+    };
+
+    let brushes_json = serde_json::json!([
+        {
+            "planes": to_planes_json([-300.0, -32.0, -300.0], [300.0, 0.0, 300.0]),
+            "min": [-300.0, -32.0, -300.0],
+            "max": [300.0, 0.0, 300.0],
+            "is_ladder": false,
+            "is_solid": true,
+            "entity": -1,
+            "start_solid": true,
+        },
+        // 真实 BSP 梯子特征：1 HU 薄板且同时 is_ladder + is_solid
+        {
+            "planes": to_planes_json([-50.0, 0.0, 0.0], [50.0, 200.0, 1.0]),
+            "min": [-50.0, 0.0, 0.0],
+            "max": [50.0, 200.0, 1.0],
+            "is_ladder": true,
+            "is_solid": true,
+            "entity": -1,
+            "start_solid": true,
+        },
+    ])
+    .to_string();
+    let mut pw = PhysWorld::new();
+    pw.build_world(
+        &brushes_json,
+        "[]",
+        r#"{"teleports":[],"triggers":[]}"#,
+        0.0,
+        2.0,
+        32.0,
+        0.0,
+    )
+    .expect("build_world");
+    assert_eq!(pw.world.ladders.len(), 1);
+    assert_eq!(pw.world.solids.len(), 2, "实心梯子必须同时进入 solids 与 ladders");
+
+    let params = PhysParams::default();
+    let mut p = create_player([0.0, 2.0, 32.0], &params);
+    p.pitch = 45.0;
+    for _ in 0..10 {
+        player_tick(&mut pw.world, &mut p, &params, DT);
+    }
+    p.input.forward = true;
+    let mut grabbed = false;
+    for _ in 0..60 {
+        player_tick(&mut pw.world, &mut p, &params, DT);
+        grabbed |= p.on_ladder.is_some();
+    }
+    assert!(grabbed && p.on_ladder.is_some(), "贴到 1 HU 实心梯面外侧应能正常抓住梯子");
+    assert!(p.origin[1] > 40.0, "抓住后应顺利向上攀爬，实际 y={}", p.origin[1]);
+    assert!(
+        p.origin[2] >= 16.9,
+        "不应穿透 1 HU 实心梯子，实际 z={}",
+        p.origin[2]
+    );
+}
+
+#[test]
+fn strafing_near_ladder_edge_locks_facing_and_climbs() {
+    let min: V3 = [-10.0, 0.0, -2.0];
+    let max: V3 = [10.0, 200.0, 2.0];
+    let mut w = World::new();
+    w.solids.push(box_brush([-300.0, -32.0, -300.0], [300.0, 0.0, 300.0], -1));
+    w.solids.push(box_brush(min, max, -1));
+    w.ladders.push(LadderVolume {
+        planes: box_planes(min, max),
+        min,
+        max,
+        facing: [1.0, 0.0, 0.0],
+        entity: -1,
+    });
+    w.build_index();
+
+    let params = PhysParams::default();
+    let mut p = create_player([0.0, 2.0, 24.0], &params);
+    p.pitch = 45.0;
+    settle(&mut w, &mut p, &params);
+    p.input.forward = true;
+    for _ in 0..30 {
+        player_tick(&mut w, &mut p, &params, DT);
+    }
+    assert!(p.on_ladder.is_some(), "应已抓住窄梯");
+    assert!((p.ladder_facing[2] - 1.0).abs() < 1e-6);
+
+    // 贴着 +X 侧边斜向攀爬时，ladder_facing 应保持锁定，不会翻面卡死
+    p.input.right = true;
+    for _ in 0..40 {
+        player_tick(&mut w, &mut p, &params, DT);
+    }
+    assert!(
+        (p.ladder_facing[2] - 1.0).abs() < 1e-6,
+        "同梯攀爬期间不应翻面，实际 facing={:?}",
+        p.ladder_facing
+    );
+    assert!(p.origin[1] > 40.0, "边平移边爬应继续上升，实际 y={}", p.origin[1]);
+}
+
+

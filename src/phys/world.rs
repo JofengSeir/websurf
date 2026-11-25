@@ -149,10 +149,19 @@ impl LadderVolume {
             }
             return best;
         }
-        // 玩家水平落在 AABB 内：用中心指向玩家（可能仍退化），最后回退兜底 facing。
+        // 玩家水平落在 AABB 内：优先取薄轴方向（扁平梯子的宽攀爬面）指向玩家，最后回退兜底 facing。
         let cx = (self.min[0] + self.max[0]) * 0.5;
         let cz = (self.min[2] + self.max[2]) * 0.5;
+        let size_x = (self.max[0] - self.min[0]).abs();
+        let size_z = (self.max[2] - self.min[2]).abs();
         let mut dir = [origin[0] - cx, 0.0, origin[2] - cz];
+        if (size_x - size_z).abs() > 1.0 {
+            if size_x < size_z {
+                dir = [if origin[0] >= cx { 1.0 } else { -1.0 }, 0.0, 0.0];
+            } else {
+                dir = [0.0, 0.0, if origin[2] >= cz { 1.0 } else { -1.0 }];
+            }
+        }
         let len = (dir[0] * dir[0] + dir[2] * dir[2]).sqrt();
         if len > 1e-3 {
             dir[0] /= len;
@@ -1718,11 +1727,15 @@ impl World {
     /// 返回下标而不是引用，是为了让调用方（`player::check_ladder`）能在拿到结果后继续
     /// 以 `&mut world` 走移动流程；它再用下标去取 `facing` / `facing_toward`。
     pub fn ladder_at(&self, origin: &V3, mins: &V3, maxs: &V3) -> Option<usize> {
+        // 水平方向外扩 1 HU 贴面容差：实心梯子会让 trace_box 停在表面外侧 DIST_EPSILON(0.03125 HU)，
+        // 不加容差会擦面却判不到相交；竖直方向不外扩，避免踩在梯顶行走时误抓。
+        let touch_mins = [mins[0] - 1.0, mins[1], mins[2] - 1.0];
+        let touch_maxs = [maxs[0] + 1.0, maxs[1], maxs[2] + 1.0];
         for (i, ladder) in self.ladders.iter().enumerate() {
             if !ladder_is_active(ladder, &self.entity_solid) {
                 continue;
             }
-            if box_in_brush(origin, mins, maxs, &ladder.planes) {
+            if box_in_brush(origin, &touch_mins, &touch_maxs, &ladder.planes) {
                 return Some(i);
             }
         }

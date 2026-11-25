@@ -189,10 +189,8 @@ void main() {
 	vec2 ndc = clip.xy / clip.w;
 	vNdc = ndc;
 	float aimFactor = exp(-dot(ndc, ndc) * 1.4);
-	// 75°（sin 75° ≈ 0.965）之前保持克制，仅在 75°~90° 正对光轴区间非线性爬升炫光。
-	float preGlare = smoothstep(0.82, 0.965, vFacing);
-	float coreGlare = smoothstep(0.965, 0.999, vFacing);
-	float glareCurve = 0.10 * preGlare + 0.90 * pow(coreGlare, 1.5);
+	// 45°（sin 45° ≈ 0.707）起非线性爬升炫光，越正对光轴越明显。
+	float glareCurve = pow(smoothstep(0.707, 0.995, vFacing), 1.6);
 	vGlare = glareCurve * (0.28 + 0.72 * aimFactor);
 	float distScale = clamp(420.0 / (dist + 180.0), 0.45, 1.15);
 	float scale = mix(0.09 * distScale, 1.15, vGlare);

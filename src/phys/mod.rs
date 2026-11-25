@@ -365,6 +365,14 @@ impl PhysWorld {
             let max = [b.max[0] as f64, b.max[1] as f64, b.max[2] as f64];
             if b.is_ladder {
                 let facing = compute_ladder_facing(&planes);
+                if b.is_solid {
+                    self.world.solids.push(Brush {
+                        planes: planes.clone(),
+                        min,
+                        max,
+                        entity: b.entity,
+                    });
+                }
                 self.world.ladders.push(LadderVolume {
                     planes,
                     min,

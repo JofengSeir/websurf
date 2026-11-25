@@ -984,10 +984,10 @@ fn check_ladder(world: &World, p: &Player) -> Option<(usize, [f64; 3])> {
     let mins = p.mins();
     let maxs = p.maxs();
     let ladder_idx = world.ladder_at(&p.origin, &mins, &maxs)?;
-    let facing = world.ladders[ladder_idx].facing_toward(&p.origin);
-    if p.on_ladder.is_some() {
-        return Some((ladder_idx, facing)); // 已在梯上——保持
+    if p.on_ladder == Some(ladder_idx) {
+        return Some((ladder_idx, p.ladder_facing)); // 已在同一梯上——锁定附着面法线，避免侧移贴边翻面卡住
     }
+    let facing = world.ladders[ladder_idx].facing_toward(&p.origin);
     // 仅在空中、或主动走向梯子时抓住
     if !p.on_ground {
         return Some((ladder_idx, facing));
