@@ -193,7 +193,7 @@ void main() {
 	float glareCurve = pow(smoothstep(0.707, 0.995, vFacing), 1.6);
 	vGlare = glareCurve * (0.28 + 0.72 * aimFactor);
 	float distScale = clamp(420.0 / (dist + 180.0), 0.45, 1.15);
-	float scale = mix(0.09 * distScale, 1.15, vGlare);
+	float scale = mix(0.24 * distScale, 1.15, vGlare);
 	vec2 halfExt = vec2(scale / max(0.5, uAspect), scale);
 	gl_Position = vec4(ndc + position.xy * 2.0 * halfExt, 0.0, 1.0);
 }
@@ -218,8 +218,8 @@ void main() {
 	float edge = 1.0 - r2;
 	float edge2 = edge * edge;
 
-	float pinpoint = exp(-r2 * 260.0);
-	float innerHalo = exp(-r2 * 24.0) * 0.24 + exp(-r2 * 6.5) * edge2 * 0.12;
+	float pinpoint = exp(-r2 * 140.0);
+	float innerHalo = exp(-r2 * 9.0) * 0.24 + exp(-r2 * 3.2) * edge2 * 0.14;
 	float veiling = exp(-r2 * 1.35) * 0.11 * vGlare * edge;
 
 	float ang = atan(p.y, p.x) + uSeed + vNdc.x * 0.45 - vNdc.y * 0.35;
@@ -245,8 +245,8 @@ void main() {
 	) * 0.45;
 	vec3 rainbow = (arcPrimary + arcOuter) * sideMask * 0.40 * vGlare;
 
-	float backDim = mix(0.12, 0.40, smoothstep(-0.25, 0.35, vFacing));
-	float baseTerm = innerHalo * (backDim + 0.20 * vGlare) + pinpoint * (0.35 + 0.65 * vGlare) + veiling;
+	float backDim = mix(0.10, 0.26, smoothstep(-0.25, 0.40, vFacing));
+	float baseTerm = innerHalo * (backDim + 0.58 * vGlare) + pinpoint * (0.18 + 0.72 * vGlare) + veiling;
 	float opticalTerm = (rays * 0.46 + streak * 0.26) * vGlare;
 
 	vec3 baseTint = mix(uColor, vec3(1.0), clamp(pinpoint * 0.90 + veiling * 0.45, 0.0, 1.0));
