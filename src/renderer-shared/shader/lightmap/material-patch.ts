@@ -1088,7 +1088,7 @@ function applyAmbientCubeIfAny(mesh: THREE.Mesh, mat: THREE.MeshBasicMaterial): 
 			.replace('#include <common>', SPOT_FRAG_DECLS + '\n' + ambFn + '\n#include <common>')
 			.replace(
 				mulSrc,
-				mulSrc.slice(0, -1) + ' * vbspAmbientWeight();\n\treflectedLight.indirectDiffuse += vbspSpotLight(vbspSpotWPos) * diffuseColor.rgb;',
+				mulSrc.slice(0, -1) + ' * vbspAmbientWeight();\n\treflectedLight.indirectDiffuse += vbspSpotLight(vbspSpotWPos) * (diffuseColor.rgb + vec3(0.12));',
 			)
 			// 同上：`$envmap` 反射要被第 2 级 ambient 光照调制
 			.replace(ENVMAP_INCLUDE_SRC, ENVMAP_MODULATED('vbspAmbientWeight()'));

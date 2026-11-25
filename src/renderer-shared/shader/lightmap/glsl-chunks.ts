@@ -202,6 +202,7 @@ varying vec3 vbspSpotWPos;
 
 vec3 vbspSpotLight(vec3 P) {
 	vec3 N = normalize(cross(dFdx(P), dFdy(P)));
+	vec3 V = normalize(cameraPosition - P);
 	vec3 sum = vec3(0.0);
 	for (int i = 0; i < ${SPOT_MAX}; i++) {
 		if (i >= vbspSpotCount) break;
@@ -214,7 +215,14 @@ vec3 vbspSpotLight(vec3 P) {
 		att *= att;
 		float cd = dot(-L, vbspSpotDir[i]);
 		float cone = smoothstep(vbspSpotCosOuter[i], vbspSpotCosInner[i], cd);
-		sum += vbspSpotColor[i] * (att * cone * ndl);
+		// 近场散射/泛光：贴近车体或墙面安装的灯具对外照射时，对灯座周围表面仍有近距离漫反射与掠射反光。
+		float spillR = min(vbspSpotRange[i] * 0.22, 95.0);
+		float near = clamp(1.0 - d / spillR, 0.0, 1.0);
+		float spill = near * near * (0.28 + 0.52 * ndl) * 0.75;
+		float contrib = max(att * cone * ndl, spill);
+		vec3 H = normalize(L + V);
+		float sheen = pow(abs(dot(N, H)), 12.0) * 0.45;
+		sum += vbspSpotColor[i] * (contrib * (1.0 + sheen));
 	}
 	for (int i = 0; i < ${DLIGHT_MAX}; i++) {
 		if (i >= vbspDLightCount) break;
