@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 /**
- * pre-commit 机械检查（D-124，2026-10-27 owner 采用）。
+ * pre-commit 机械检查（D-124，2026-10-27 owner 采用；2026-11-25 扩展）。
  *
- * 只管两类已经发生过事故的机械问题，不做风格审查：
- * 1) staged 了生成物 / 本地目录：pkg/、dist/、web/*.wasm、.tmp/、.dsh/、.amh/；
- * 2) staged 的 .cmd / .bat / .ps1 必须是纯 CRLF + 纯 ASCII（曾出过 LF 行尾与 chcp 65001 非 ASCII 两次事故）。
+ * 只管高确定性的机械红线，不做风格/AMH 审查（D-125 保留不挂 commit-msg）：
+ * 1) 当前分支为 `main`：禁止直接往 main 提交（§0 红线，除非 PRECHECK_BYPASS=1）；
+ * 2) staged 了生成物 / 本地目录：pkg/、dist/、web/*.wasm、web/app.js、web/worker.js、.wasm-pack-cache/、.tmp/、.dsh/、.amh/；
+ * 3) staged 的 .cmd / .bat / .ps1 必须是纯 CRLF + 纯 ASCII（曾出过 LF 行尾与 chcp 65001 非 ASCII 两次事故）；
+ * 4) staged 的文本源码/配置（ts/js/mjs/cjs/json/rs/yml/yaml/md）不得带 UTF-8 BOM（EF BB BF）。
  *
- * 逃生门：PRECHECK_BYPASS=1 git commit ...（只用于确知无害的紧急提交；输出里会留痕）。
+ * 逃生门：PRECHECK_BYPASS=1 git commit ...（只用于确知无害或 owner 明确要求提交 main；输出里会留痕）。
  * 安装：npm run hooks:install（设置 core.hooksPath=.githooks）。
  */
 import { execFileSync } from 'node:child_process';
@@ -16,11 +18,25 @@ const GENERATED = [
   /(^|\/)pkg\//,
   /(^|\/)dist\//,
   /(^|\/)web\/[^/]+\.wasm$/,
+  /(^|\/)web\/(app|worker)\.js$/,
+  /(^|\/)\.wasm-pack-cache\//,
   /(^|\/)\.tmp\//,
   /(^|\/)\.dsh\//,
   /(^|\/)\.amh\//,
 ];
 const SCRIPT_EXT = /\.(cmd|bat|ps1)$/i;
+const NO_BOM_EXT = /\.(ts|tsx|js|mjs|cjs|json|rs|yml|yaml|md)$/i;
+
+const problems = [];
+
+try {
+  const branch = execFileSync('git', ['symbolic-ref', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
+  if (branch === 'main') {
+    problems.push('当前分支为 main：禁止直接往 main 提交（请切回 dev；owner 明确要求时用 PRECHECK_BYPASS=1）');
+  }
+} catch {
+  // detached HEAD（如 bisect/rebase）放行
+}
 
 let files = [];
 try {
@@ -30,19 +46,44 @@ try {
   process.exit(0);
 }
 
-const problems = [];
+function readStagedBytes(file) {
+  try {
+    return execFileSync('git', ['show', ':' + file], { maxBuffer: 64 * 1024 * 1024 });
+  } catch {
+    return readFileSync(file);
+  }
+}
+
 for (const f of files) {
   if (GENERATED.some((re) => re.test(f))) {
-    problems.push(f + ': 生成物 / 本地目录不得入库（pkg、dist、web/*.wasm、.tmp、.dsh、.amh）');
+    problems.push(f + ': 生成物 / 本地目录不得入库（pkg、dist、web/*.wasm、web/app.js、web/worker.js、.wasm-pack-cache、.tmp、.dsh、.amh）');
     continue;
   }
-  if (!SCRIPT_EXT.test(f)) continue;
+  const needScriptCheck = SCRIPT_EXT.test(f);
+  const needBomCheck = NO_BOM_EXT.test(f);
+  if (!needScriptCheck && !needBomCheck) continue;
+
+  if (needBomCheck) {
+    try {
+      const stagedBuf = readStagedBytes(f);
+      if (stagedBuf.length >= 3 && stagedBuf[0] === 0xef && stagedBuf[1] === 0xbb && stagedBuf[2] === 0xbf) {
+        problems.push(f + ': 含 UTF-8 BOM（EF BB BF），请改为无 BOM UTF-8（避免 PowerShell Set-Content 污染）');
+      }
+    } catch {
+      // ignore missing
+    }
+  }
+  if (!needScriptCheck) continue;
+
+  // .cmd/.bat/.ps1 在 core.autocrlf=true 下索引常为 LF、工作树才是实际运行的 CRLF，
+  // 因此 CRLF 与 ASCII 检查必须读工作树文件（与 cmd.exe/PowerShell 实际执行内容一致）。
   let buf;
   try {
     buf = readFileSync(f);
   } catch {
     continue;
   }
+
   let line = 1;
   for (let i = 0; i < buf.length; i++) {
     const b = buf[i];

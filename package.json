@@ -13,7 +13,11 @@
     "check:start-solid": "node src/scripts/check-entity-start-solid.mjs",
     "dev:check": "node src/scripts/dev-preflight.mjs --all",
     "hooks:install": "git config core.hooksPath .githooks",
-    "test:ts": "node src/scripts/test-ts-shared.mjs && node src/scripts/check-entity-io.mjs && node src/scripts/check-entity-start-solid.mjs"
+    "test:ts": "node src/scripts/test-ts-shared.mjs && node src/scripts/check-entity-io.mjs && node src/scripts/check-entity-start-solid.mjs",
+    "verify:fast": "node src/scripts/verify.mjs fast",
+    "verify:rust": "node src/scripts/verify.mjs rust",
+    "verify:ts": "node src/scripts/verify.mjs ts",
+    "verify:full": "node src/scripts/verify.mjs full"
   },
   "dependencies": {
     "three": "0.165.0"

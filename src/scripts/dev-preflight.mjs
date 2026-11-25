@@ -13,7 +13,7 @@
  *
  * 只读：不构建、不杀进程、不改文件。
  */
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -23,6 +23,68 @@ const APPS = ['debug', 'game', 'viewer'];
 const PORTS = { debug: 8080, game: 8090, viewer: 8100 };
 // viewer 的 wasm 胶水前缀与 game/debug 不同（websurf_viewer_wasm vs websurf_wasm）。
 const glueFor = (app) => (app === 'viewer' ? 'websurf_viewer_wasm' : 'websurf_wasm');
+
+const SKIP_DIRS = new Set(['node_modules', 'target', 'pkg', 'dist', '.tmp', '.git']);
+
+/** 计算给定目录/文件的最新源码 mtime（ms），只读忽略生成目录。 */
+function maxMtimeMs(paths) {
+  let latest = 0;
+  const stack = [...paths];
+  while (stack.length > 0) {
+    const p = stack.pop();
+    if (!existsSync(p)) continue;
+    let st;
+    try {
+      st = statSync(p);
+    } catch {
+      continue;
+    }
+    if (st.isFile()) {
+      if (st.mtimeMs > latest) latest = st.mtimeMs;
+      continue;
+    }
+    if (!st.isDirectory()) continue;
+    let entries;
+    try {
+      entries = readdirSync(p, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const ent of entries) {
+      if (SKIP_DIRS.has(ent.name)) continue;
+      stack.push(join(p, ent.name));
+    }
+  }
+  return latest;
+}
+
+function checkStaleArtifacts(app, root, glue) {
+  const stale = [];
+  const tsSrc = maxMtimeMs([
+    join(REPO, 'src', 'ts-shared'),
+    join(REPO, 'src', 'renderer-shared'),
+    join(root, 'src'),
+  ]);
+  for (const rel of ['web/app.js', 'web/worker.js']) {
+    const p = join(root, rel);
+    if (existsSync(p) && tsSrc > statSync(p).mtimeMs + 2000) {
+      stale.push(`${rel} <- npm run build:ts`);
+    }
+  }
+  const rustInputs = [
+    join(REPO, 'src', 'wasm-core'),
+    join(REPO, 'src', 'wasm-bindings'),
+    join(root, 'crates'),
+  ];
+  if (app !== 'viewer') rustInputs.push(join(REPO, 'src', 'phys'));
+  const rustSrc = maxMtimeMs(rustInputs);
+  const wasmRel = `web/${glue}_bg.wasm`;
+  const wasmPath = join(root, wasmRel);
+  if (existsSync(wasmPath) && rustSrc > statSync(wasmPath).mtimeMs + 2000) {
+    stale.push(`${wasmRel} <- npm run build:wasm`);
+  }
+  return stale;
+}
 
 function checkApp(app) {
   const root = join(REPO, 'apps', app);
@@ -46,7 +108,8 @@ function checkApp(app) {
       sizes.push(`${r.f}=${(statSync(p).size / 1024).toFixed(0)}KB`);
     }
   }
-  return { app, missing, sizes };
+  const stale = missing.length === 0 ? checkStaleArtifacts(app, root, glue) : [];
+  return { app, missing, sizes, stale };
 }
 
 /** 只读端口报告；与 dev-port.mjs 的判据一致（本地地址列 + LISTENING）。 */
@@ -82,6 +145,7 @@ for (const app of apps) {
   const r = checkApp(app);
   if (r.missing.length === 0) {
     console.log(`  OK   ${app}: ${r.sizes.join(' ')}`);
+    for (const s of r.stale) console.log(`  STALE ${app}: ${s}（产物落后源码，建议重建后再起服或截图）`);
   } else {
     bad++;
     console.log(`  MISS ${app}:`);

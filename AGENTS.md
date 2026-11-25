@@ -2,7 +2,7 @@
 
 > 本文件是 agent 进入仓库的**入口文档**，规则以本文为准。
 >
-> - **2026-10-18 起没有强制 agent 工作流**：无看板、无 claim / close-round、无记忆库同步门禁、无 docflow。**唯一的机械钩子是 D-124 的 pre-commit 检查**（生成物路径 / `.cmd/.bat/.ps1` 的 CRLF+ASCII，见 §7-0）。旧流程的完整文件与台账在 git 历史里（原 tag `checkpoint/pre-amh-reset-20261018` 已按 owner 要求于 2026-10-27 删除，其提交 `fec9810` 仍在 main 祖先链上，`git show fec9810` 可看）。
+> - **2026-10-18 起没有强制 agent 工作流**：无看板、无 claim / close-round、无记忆库同步门禁、无 docflow。**唯一的机械钩子是 D-124 的 pre-commit 检查**（`main` 分支误提交拦截 / 生成物路径 / UTF-8 BOM / `.cmd/.bat/.ps1` 的 CRLF+ASCII，见 §7-0）。旧流程的完整文件与台账在 git 历史里（原 tag `checkpoint/pre-amh-reset-20261018` 已按 owner 要求于 2026-10-27 删除，其提交 `fec9810` 仍在 main 祖先链上，`git show fec9810` 可看）。
 > - 仍然成立的是工程事实：**构建与测试要过，结论要有证据，提交信息要能独立读懂。**
 
 ## 0. 开工速览
@@ -11,7 +11,7 @@
 
 1. 加载技能 `websurf-env-traps`（见 §6）：本机 Windows 作业陷阱，开工前读。
 2. `git status --short -uall`：确认没有其他 agent 的在途改动。
-3. 按 §2 跑与改动相关的构建 / 类型检查，按 §4 取证据。
+3. 按 §2 跑 `npm run verify:fast` / `verify:rust` / `verify:ts` / `verify:full`（避开 PowerShell 5.1 无 `&&` 的坑），按 §4 取证据。
 4. 按 §7 提交；记忆写入（可选）按 §3。
 
 四条红线（违反会破坏别人的工作或得出错误结论）：
@@ -31,9 +31,9 @@
 | `src/wasm-bindings` | 三端共享的 wasm 绑定 / BSP 解析与 GLB 导出（Rust；三端 `crates/wasm` 已是薄壳 `pub use`） |
 | `src/ts-shared`、`src/renderer-shared` | 共享 TS 层；three 的单实例装在仓库根 `node_modules` |
 | `src/materials`、`src/web` | 材质包与共享 web 资产 |
-| `src/scripts` | 本地开发/构建/流程工具：`serve.mjs` 静态服务、`dev-preflight`/`dev-port`/`wait-for-server` 开发链、`copy-wasm-pkg`/`sync-web-assets`/`build-textures-mtz` 资产、`agent-memory`/`agent-audit` 记忆与统计、`check-*.mjs` 门禁、`capture-*` 取证；`serve.py` 仅旧脚本兼容 |
+| `src/scripts` | 本地开发/构建/流程工具：`verify.mjs` 一键验证、`serve.mjs` 静态服务、`dev-preflight`/`dev-port`/`wait-for-server` 开发链、`copy-wasm-pkg`/`sync-web-assets`/`build-textures-mtz` 资产、`agent-memory`/`agent-audit` 记忆与统计、`check-*.mjs` 门禁、`capture-*` 取证；`serve.py` 仅旧脚本兼容 |
 | `test/` | `maps/`、`replay/` 夹具（gitignore，本地自备）；`project/` 第三方 SDK 参考 |
-| `skills/websurf-env-traps` | 本仓 Windows 作业陷阱（开工前读） |
+| `skills/` | `websurf-env-traps`（Windows 作业陷阱，开工前读）、`websurf-handoff`（批量/跨模型接力规范，按需读） |
 | `.github/workflows` | `ci-gates.yml`（构建/测试）、`deploy-pages.yml`（部署） |
 | `TODO.md` | 可选的未结清单；不是门禁 |
 | `OWNER.md` | 需要 owner 拍板的决定（`D-###`） |
@@ -43,12 +43,19 @@
 
 ## 2. 构建与验证
 
-### 2.1 Node 侧（TS / 打包 / 本地服务）
+### 2.1 Node 侧与一键验证（`verify.mjs`）
 
 ```bash
+# 仓库根一键验证（跨 Shell，红灯即停，自动适配 .wasm-pack-cache 与 msvc 工具链）：
+npm run verify:fast            # 三端 typecheck + test:ts + 源码/着色器/配置契约门禁
+npm run verify:rust            # websurf-phys + websurf-wasm-core 宿主机单测
+npm run verify:ts              # 三端 build:ts + verify:fast + 共享产物指纹
+npm run verify:full            # rust + 三端 build:wasm + check:api + ts + 锁/导出/GLB 门禁
+
+# 常规构建与本地服务：
 npm ci                         # 仓库根：shared 层的 three
 cd apps/<app> && npm ci        # debug / game / viewer 各自装
-npm run build:wasm             # wasm-pack → pkg/，并复制到 web/
+npm run build:wasm             # wasm-pack → pkg/，并复制到 web/（离线需 PATH 含 .wasm-pack-cache/wasm-bindgen-*）
 npm run typecheck              # TS 类型检查
 npm run build:ts               # typecheck + esbuild（app + worker 两个 bundle）
 npm run build:app              # 只编 web/app.js；**prebuild 钩子会先重建 web/worker.js**
@@ -57,7 +64,7 @@ npm run dev                    # 起本地服务（Node serve.mjs；debug 8080 /
 ```
 
 > 静态服务是 `src/scripts/serve.mjs`（Node，不需要系统 Python）；`serve.py` 只为旧脚本兼容。
-> 根目录 `npm run dev:check` = `dev-preflight --all`（三端产物 / 端口自检）。
+> 根目录 `npm run dev:check` = `dev-preflight --all`（三端产物完整性 / mtime 过期提醒 / 端口自检）。
 
 > 两个 bundle：`web/app.js`（主线程）与 `web/worker.js`（权威物理 Worker）是**分开构建**的。
 > `build:app` 会自动先跑 `build:worker`（`prebuild:app` 钩子）；若手工跳过钩子只编 app，
@@ -70,7 +77,11 @@ npm run dev                    # 起本地服务（Node serve.mjs；debug 8080 /
 ```bash
 cargo check -p websurf-phys
 cargo test -p websurf-phys
+# Windows 默认 gnu 工具链缺 dlltool.exe；宿主机跑 wasm-core 单测必须切 msvc 工具链（或直接 npm run verify:rust）：
+cargo +stable-x86_64-pc-windows-msvc test -p websurf-wasm-core
 ```
+
+> **禁止**为了在 gnu 下强行通过而修改 `~/.cargo/registry` 里的 crate 源码（例如 `windows-sys` / `windows-link`）。
 
 ### 2.3 渲染归属（三端不得重写共享渲染步骤）
 
@@ -192,13 +203,16 @@ AMH: down            # gateway 不可用（正文说明）
 
 提交前 checklist（按序执行）：
 
-0. 首次克隆执行 `npm run hooks:install`（D-124：`core.hooksPath=.githooks`）；它拦两类机械问题——staged 生成物/本地目录（`pkg/`、`dist/`、`web/*.wasm`、`.tmp/`、`.dsh/`、`.amh/`），以及 `.cmd/.bat/.ps1` 的 LF 行尾/非 ASCII。确知无害时用 `PRECHECK_BYPASS=1` 并在提交信息里写明原因。
+0. 首次克隆执行 `npm run hooks:install`（D-124：`core.hooksPath=.githooks`）；它拦截 4 类机械问题——直接在 `main` 分支提交、staged 生成物/本地目录（`pkg/`、`dist/`、`web/*.wasm`、`web/app.js`、`web/worker.js`、`.wasm-pack-cache/`、`.tmp/`、`.dsh/`、`.amh/`）、文本源码/JSON 的 UTF-8 BOM（`EF BB BF`），以及 `.cmd/.bat/.ps1` 的 LF 行尾/非 ASCII。确知无害时用 `PRECHECK_BYPASS=1` 并在提交信息里写明原因。
 1. 确认当前分支是 `dev`（`git branch --show-current`）；**不要在 `main` 上提交**——它是发布/对照线（§0 红线）。
-2. `git status --short`：只 `git add` 自己改的文件；别人的在途改动原样保留。
-3. 验证与提交串成一步（`&&`），红灯即终止。
+2. `git status --short -uall`：只 `git add -- <files>` 自己改的文件；严禁 `git add .`/`-A`，别人的在途改动原样保留。
+3. 跑对应档位的 `npm run verify:fast|rust|ts|full`（或跨 Shell 脚本）验绿后再提交，红灯即终止；PowerShell 5.1 不支持 `&&` 时勿用 `;` 掩盖错误。
 4. 提交信息说清：**改了什么、为什么、怎么验证**；纯格式 / 注释改动写「无行为变化」。
 5. 行尾：仓库 `core.autocrlf=true`，索引是 LF、工作树是 CRLF；**不要顺手统一**。
-6. 多 agent 并行改代码时，**后开工的**用 `git worktree add ../websurf-wt-<task> <base>` 在独立工作树作业，主工作树留给收尾提交方（T-730 验收有先例）。
+6. 多 agent 并行改代码与跨档次接力（细则见 `skills/websurf-handoff/SKILL.md`）：
+   - 推荐 `git worktree add ../websurf-wt-<task> dev`（可共享 `CARGO_TARGET_DIR` 与 junction `node_modules` 省空间）；
+   - 若共用主工作树分 lane 并行，必须满足**文件归属严格互斥**且**提交闸门串行**（工作区有他方导致的 `typecheck` 红灯时禁止提交）；
+   - 多卡委派/跨模型交接时，在 `.tmp/<主题>/PROGRESS.md` 顶部填 `Closeout for Reviewer` 信封交接，严禁在方案书与进度表双写台账。
 
 ## 8. 约束变更留痕（元规则）
 
