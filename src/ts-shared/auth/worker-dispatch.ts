@@ -567,6 +567,7 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
           velY: number;
           velZ: number;
           onGround: boolean;
+          onLadder?: boolean;
         };
         teleport?: boolean;
       };
@@ -591,11 +592,21 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
         //    再写回渲染」的正反馈。
         // 回归门禁：`apps/debug` 的 `test:jump-apex`（`apps/debug/scripts/jump-apex-verify.mjs`，已随 T-653 移除）
         // 与 `test:auth-clock`（`apps/debug/scripts/auth-clock-verify.mjs`，已随 T-653 移除）。
+        if (s.onLadder === true) {
+          env.phys.current.set_state(
+            s.posX, s.posY, s.posZ,
+            s.yaw, s.pitch,
+            s.velX, s.velY, s.velZ,
+            false,
+          );
+          return;
+        }
         const cur = env.phys.current.state() as {
           velX: number;
           velY: number;
           velZ: number;
           onGround: boolean;
+          onLadder?: boolean;
         };
         env.phys.current.set_state(
           s.posX, s.posY, s.posZ,

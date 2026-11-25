@@ -115,6 +115,7 @@ export interface SyncRenderState {
   velY: number;
   velZ: number;
   onGround: boolean;
+  onLadder?: boolean;
   eyeHeight: number;
 }
 
@@ -126,9 +127,7 @@ export interface SyncRenderState {
  * 状态」，`SyncRenderState` 指「要发给权威的同步载荷」。本类用它作 `emitTeleportSync`
  * 与 `routineReanchor` 的形参类型，以及 `correctFromAuthority` 里两处 cast 的目标。
  */
-export type SyncPhysState = SyncRenderState & {
-  onLadder?: boolean;
-};
+export type SyncPhysState = SyncRenderState;
 
 /** 本类的全部外部依赖（构造函数注入，无默认实现、无缺省分支）。 */
 export interface CalibratorDeps {
@@ -361,7 +360,7 @@ export class AuthorityCalibrator {
         posX: st.posX, posY: st.posY, posZ: st.posZ,
         yaw: st.yaw, pitch: st.pitch,
         velX: st.velX, velY: st.velY, velZ: st.velZ,
-        onGround: st.onGround, eyeHeight: st.eyeHeight,
+        onGround: st.onGround, onLadder: st.onLadder === true, eyeHeight: st.eyeHeight,
       },
       true, // teleport = true：真位置突变口径（Worker 侧允许丢弃未消费输入增量）
     );
@@ -400,7 +399,7 @@ export class AuthorityCalibrator {
         posX: st.posX, posY: st.posY, posZ: st.posZ,
         yaw: st.yaw, pitch: st.pitch,
         velX: st.velX, velY: st.velY, velZ: st.velZ,
-        onGround: st.onGround, eyeHeight: st.eyeHeight,
+        onGround: st.onGround, onLadder: st.onLadder === true, eyeHeight: st.eyeHeight,
       },
       false, // teleport = false：常规重锚口径（Worker 侧保留未消费输入增量）
     );

@@ -731,7 +731,7 @@ function updateStatsUI(): void {
 	const text =
 		`<span class="v">${computeText}</span>  <span class="label">位置</span> <span class="v">${st.pos.x.toFixed(0)},${st.pos.y.toFixed(0)},${st.pos.z.toFixed(0)}</span>  ` +
 		camText +
-		`<span class="label">速度</span> <span class="v">${lateral.toFixed(0)}</span>  <span class="label">状态</span> <span class="v">${st.onGround ? '地面' : '空中'}</span>  <span class="label">cluster</span> <span class="v">${cluster >= 0 ? cluster : '—'}</span>`;
+		`<span class="label">速度</span> <span class="v">${lateral.toFixed(0)}</span>  <span class="label">状态</span> <span class="v">${(st as { onLadder?: boolean }).onLadder ? '梯子' : st.onGround ? '地面' : '空中'}</span>  <span class="label">cluster</span> <span class="v">${cluster >= 0 ? cluster : '—'}</span>`;
 	dom.statsEl.innerHTML = text;
 	if (dom.planeInfoEl) {
 		dom.planeInfoEl.textContent = formatPlaneInfo(rendererMain?.getPlaneInfo() ?? null);

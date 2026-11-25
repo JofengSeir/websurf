@@ -1072,36 +1072,29 @@ fn check_ladder(world: &mut World, p: &Player) -> Option<(usize, [f64; 3])> {
     })
     .or_else(|| world.trace_ladder(&p.origin, &end_3d, &mins, &maxs))
     .or_else(|| {
-        if !p.on_ground {
-            world
-                .ladder_at(&p.origin, &mins, &maxs)
-                .map(|idx| (idx, world.ladders[idx].facing_toward_3d(&p.origin, &mins, &maxs), true))
-        } else {
-            None
-        }
+        world
+            .ladder_at(&p.origin, &mins, &maxs)
+            .map(|idx| (idx, world.ladders[idx].facing_toward_3d(&p.origin, &mins, &maxs), true))
     });
     let (idx, normal, _) = hit?;
     if !p.on_ground {
         return Some((idx, normal));
     }
-    if move_len <= 0.0 && horiz_len <= 0.0 {
+    let pulling_away = (horiz_len > 0.0 && dot(&horiz_dir, &normal) > 0.25)
+        || (move_len > 0.0 && dot(&move_dir, &normal) > 0.25);
+    if pulling_away {
         return None;
     }
-    if (horiz_len > 0.0 && dot(&horiz_dir, &normal) < -0.15)
-        || (move_len > 0.0 && dot(&move_dir, &normal) < -0.15)
-    {
-        return Some((idx, normal));
-    }
-    if normal[1] > 0.7 {
+    if normal[1] > 0.99 {
         let lv = &world.ladders[idx];
         let sx = (lv.max[0] - lv.min[0]).abs();
         let sy = (lv.max[1] - lv.min[1]).abs();
         let sz = (lv.max[2] - lv.min[2]).abs();
-        if sy < sx.max(sz) * 0.5 {
-            return Some((idx, normal));
+        if sy >= sx.max(sz) * 0.5 {
+            return None;
         }
     }
-    None
+    Some((idx, normal))
 }
 
 /// 梯上移动。进入时先把 `on_ladder` 置位、`on_ground = false`、`fall_velocity = 0`。
