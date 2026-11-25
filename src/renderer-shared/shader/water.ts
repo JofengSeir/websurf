@@ -40,6 +40,14 @@
 import * as THREE from 'three';
 import { WATER_DUDV } from './water-dudv-data.js';
 import { optimizeFlag } from '../config/optimize-flags.js';
+import {
+  clampBudgetLevel,
+  clampLastFrameDt,
+  readBudgetLevelEscapeHatch,
+  readLastFrameDtEscapeHatch,
+  readWaterForcePassEscapeHatch,
+  type RenderFrameContext,
+} from '../scene/render-context.js';
 
 /** glTF extras `vbsp_water` 的形态（`gltf_builder.rs` 的 `push_material` 写）。 */
 interface WaterExtras {
@@ -87,8 +95,7 @@ const g = globalThis as {
   __vbspWaterFrameRate?: unknown;
   __vbspWaterOpacity?: unknown;
   __vbspWaterMirrorSize?: unknown;
-  /** 预热逃生舱（默认 undefined）：强制本帧只跑指定的那一趟整场景 RT（绕 cadence/优先级，
-   *  相机移动与水位门控仍生效）。仅载图期预热代码临时置位，见 render-session `prewarmPasses`。 */
+  /** 外部脚本逃生舱用；生产路径已改走 `RenderFrameContext.waterForcePass`（T-P2-1）。 */
   __vbspWaterForcePass?: 'refr' | 'mirror';
   /** 调试：把水面强制做**不透明**（判断波纹形状用，隔离水底/雾/反射的干扰）。 */
   __vbspWaterOpaque?: unknown;
@@ -734,7 +741,7 @@ function cullBeneathMaterials(camera: THREE.Camera): void {
  * 逃生舱：`__vbspWaterRefrCadence=1` 回全帧率，`=3` 更省（画质未验证）。
  */
 let refrSinceRender = 0;
-function refrCadence(): number {
+function refrCadence(level: number): number {
   const forced = (g as { __vbspWaterRefrCadence?: number }).__vbspWaterRefrCadence;
   if (typeof forced === 'number' && Number.isFinite(forced) && forced > 0) {
     return Math.max(1, Math.round(forced));
@@ -746,10 +753,8 @@ function refrCadence(): number {
   // frame 3.4~4.1ms > 3.125ms 槽），本机 CPU 降频 1.35× 的 A/B：cad4 丢槽 30.9%、
   // cad6 25.1%、cad8 22.2%，fps 236→263→268 ⇒ L2 取 6。
   const budgetOn = (g as { __vbspWaterRefrBudget?: boolean }).__vbspWaterRefrBudget !== false;
-  const level = (g as { __vbspBudgetLevel?: number }).__vbspBudgetLevel;
-  const budgetLevel = typeof level === 'number' && Number.isFinite(level)
-    ? Math.max(0, Math.min(2, Math.floor(level)))
-    : 0;
+  // 预算等级由调用方传（T-P2-1：不再从 globalThis 隐式读；没有上下文时调用方走逃生舱）。
+  const budgetLevel = clampBudgetLevel(level);
   if (budgetOn && budgetLevel >= 2) return 6;
   if (budgetOn && budgetLevel >= 1) return 4;
   return 2;
@@ -774,16 +779,14 @@ let mirrorSinceRender = 0;
  * 帧预算控制器升到 2 级时再降到每 3 帧（原有 L2 降级点）。
  * 逃生舱：`__vbspWaterMirrorCadence=1` 回每帧（A/B 或发现拖影时用）。
  */
-function mirrorCadence(): number {
+function mirrorCadence(level: number): number {
   const forced = (g as { __vbspWaterMirrorCadence?: number }).__vbspWaterMirrorCadence;
   if (typeof forced === 'number' && Number.isFinite(forced) && forced > 0) {
     return Math.max(1, Math.round(forced));
   }
   const budgetOn = (g as { __vbspWaterMirrorBudget?: boolean }).__vbspWaterMirrorBudget !== false;
-  const level = (g as { __vbspBudgetLevel?: number }).__vbspBudgetLevel;
-  const budgetLevel = typeof level === 'number' && Number.isFinite(level)
-    ? Math.max(0, Math.min(2, Math.floor(level)))
-    : 0;
+  // 预算等级由调用方传（T-P2-1，同 refrCadence）。
+  const budgetLevel = clampBudgetLevel(level);
   // 2026-11-19 慢机 A/B（CDP CPU 降频 rate 1.4，boreas 回放 38–46s 重载段，同机位 8s）：
   //   cadence 2（默认）frame p50 3.66ms、丢槽(dt>4.6) 52.4%、194.7fps
   //   cadence 4        frame p50 3.09ms、丢槽 38.4%、226.0fps
@@ -822,7 +825,13 @@ const waterBudgetStats = { skipped: 0, forced: 0, passes: 0, base: 0, cost: 0 };
 };
 
 /** 判断本帧该不该跳过水面更新（true = 跳过）。调用点：已确认本帧有 due 的 pass。 */
-function waterBudgetSaysSkip(refrAge: number, refrEvery: number, mirrorAge: number, mirrorEvery: number): boolean {
+function waterBudgetSaysSkip(
+  refrAge: number,
+  refrEvery: number,
+  mirrorAge: number,
+  mirrorEvery: number,
+  lastDtMs: number,
+): boolean {
   // 面板「优化处理」开关：默认关（owner 2026-11-19）。关着时零行为变化。
   if (!optimizeFlag('waterRtReuse')) return false;
   const off = (g as { __vbspWaterBudgetSkip?: boolean }).__vbspWaterBudgetSkip === false;
@@ -834,8 +843,8 @@ function waterBudgetSaysSkip(refrAge: number, refrEvery: number, mirrorAge: numb
   waterBudgetStats.base = +base.toFixed(2);
   waterBudgetStats.cost = +cost.toFixed(2);
   (g as { __vbspWaterBudget?: typeof waterBudgetStats }).__vbspWaterBudget = waterBudgetStats;
-  const lastDt = (g as { __vbspLastFrameDtMs?: number }).__vbspLastFrameDtMs;
-  const missedSlot = typeof lastDt === 'number' && Number.isFinite(lastDt) && lastDt > 4.8;
+  // 上一帧 dt 由调用方传（T-P2-1）；0 = 未知，按「没掉槽」处理。
+  const missedSlot = clampLastFrameDt(lastDtMs) > 4.8;
   if (!missedSlot && base + cost <= WATER_SLOT_BUDGET_MS) return false;
   // 强制兜底：太久没更新就让这一趟跑（之后如果还是超，就再等下一轮）。
   const forceRefr = refrAge >= Math.max(8, refrEvery * 2);
@@ -854,10 +863,17 @@ function recordWaterCost(ms: number): void {
   lastWaterCostMs = lastWaterCostMs > 0 ? lastWaterCostMs * 0.6 + ms * 0.4 : ms;
 }
 
+/**
+ * 跑本帧的水面整场景 RT pass（折射/镜面二选一）。
+ *
+ * @param frame 帧运行期上下文（T-P2-1）。`RenderSession` 传自己的实例；不传时回落
+ *   `globalThis.__vbsp*` 逃生舱（外部调试 / CDP 脚本的旧路径）。
+ */
 export function renderWaterFramePasses(
   renderer: THREE.WebGLRenderer,
   scene: THREE.Scene,
   camera: THREE.Camera,
+  frame?: RenderFrameContext,
 ): void {
   if (waterMaterials.size === 0 || refrOnUniform.value <= 0.5) return;
   // 水下底面（`*_beneath`，源 `$bottommaterial`）的面朝下：相机在水面之上时它们被背面剔除，
@@ -890,15 +906,19 @@ export function renderWaterFramePasses(
   // （owner 报的「走动时间歇掉到 160」）。所以用一个「超期比例更大者优先、相等时折射优先」
   // 的调度：本帧渲了折射，镜面就顺延到下一帧补渲（滞后最多 +1 帧，远小于 3 帧交错的可见阈值）。
   // 早期「每帧都重渲」的结论对**画质**成立（拖影主要来自倒影滞后），但代价是双趟帧扎堆。
-  const refrEvery = refrCadence();
-  const mirrorEvery = mirrorCadence();
+  // 上下文优先、globalThis 逃生舱兜底（T-P2-1）。
+  const budgetLevel = frame ? clampBudgetLevel(frame.budgetLevel) : readBudgetLevelEscapeHatch();
+  const lastDtMs = frame ? clampLastFrameDt(frame.lastFrameDtMs) : readLastFrameDtEscapeHatch();
+  const refrEvery = refrCadence(budgetLevel);
+  const mirrorEvery = mirrorCadence(budgetLevel);
   const refrDue = refrMoved && (refrEvery <= 1 || refrSinceRender >= refrEvery || !refrRT);
   const mirrorDue = mirrorMoved && (mirrorEvery <= 1 || mirrorSinceRender >= mirrorEvery);
-  // 预热逃生舱（默认 undefined）：`__vbspWaterForcePass` 强制本帧只跑指定的一趟整场景 RT，
-  // 绕过 cadence 与「超期比例」调度（相机移动/水位门控仍生效）。载图期预热帧的 frame() 只会
-  // 走折射分支（两计数同步 +1 ⇒ refrScore == mirrorScore、折射优先），镜面 RT 要等首飞第一个
-  // 移动帧才渲；预热代码在 frame() 之后再调一次本函数并置 'mirror'，把镜面首渲前移到载图期。
-  const forcedPass = g.__vbspWaterForcePass;
+  // 预热逃生舱（默认 undefined）：`frame.waterForcePass`（旧路径是 `__vbspWaterForcePass`）
+  // 强制本帧只跑指定的一趟整场景 RT，绕过 cadence 与「超期比例」调度（相机移动/水位门控仍生效）。
+  // 载图期预热帧的 frame() 只会走折射分支（两计数同步 +1 ⇒ refrScore == mirrorScore、折射优先），
+  // 镜面 RT 要等首飞第一个移动帧才渲；预热代码在 frame() 之后再调一次本函数并置 'mirror'，
+  // 把镜面首渲前移到载图期。
+  const forcedPass = frame ? frame.waterForcePass : readWaterForcePassEscapeHatch();
   let refrNow = refrDue;
   let mirrorNow = mirrorDue;
   if (forcedPass === 'refr') {
@@ -910,7 +930,7 @@ export function renderWaterFramePasses(
   }
   if (!refrNow && !mirrorNow) return;
   // 预算兜底：这一帧的水面更新会不会把整帧推出 3.125ms 槽？会就跳过（复用上一帧 RT）。
-  if (waterBudgetSaysSkip(refrSinceRender, refrEvery, mirrorSinceRender, mirrorEvery)) return;
+  if (waterBudgetSaysSkip(refrSinceRender, refrEvery, mirrorSinceRender, mirrorEvery, lastDtMs)) return;
   // 优先级按「超期比例」= 距上次真渲的帧数 ÷ 自己的 cadence（都刚渲过则相等、折射优先）。
   // 注意不能用「cadence<=1 时给固定分」：逃生舱 `__vbspWaterRefrCadence=1` 会让折射每帧
   // 都是固定高分，镜面永远排不到队、倒影被冻住。

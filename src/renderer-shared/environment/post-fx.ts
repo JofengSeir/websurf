@@ -23,6 +23,13 @@
  */
 import * as THREE from 'three';
 import { optimizeFlag } from '../config/optimize-flags.js';
+import {
+  clampBudgetLevel,
+  clampLastFrameDt,
+  readBudgetLevelEscapeHatch,
+  readLastFrameDtEscapeHatch,
+  type RenderFrameContext,
+} from '../scene/render-context.js';
 
 /** 光效专用渲染层：加色光效 mesh 会被切到这一层，泛光 pass 只画它。 */
 export const GLOW_LAYER = 2;
@@ -85,22 +92,19 @@ function envDisabled(name: string): boolean {
 
 /**
  * 帧预算控制器（task-33 方案 C1，`render-session.ts` 每帧写入）当前降级等级：
- * 0=不降级；1=bloom 光晕降频 + 水面折射/镜面放宽到 3 帧；2=再放宽到 4 帧（2026-11-19 慢机 A/B：
+ * 0=不降级；1=bloom 光晕降频 + 水面折射/镜面放宽；2=再放宽（2026-11-19 慢机 A/B：
  * 水面 pass 是重载区超槽主因，见 `water.ts` 的 refrCadence/mirrorCadence 注释）。
  *
- * 只读；res-session 是唯一写入方。缺失/非法值按 0 处理（控制器未加载时保持默认画质）。
+ * T-P2-1：等级改由调用方传 `RenderFrameContext`（`BloomPostFx.setFrameContext`）；
+ * 不传时回落 `globalThis.__vbspBudgetLevel` 逃生舱（外部调试 / CDP）。缺失/非法按 0。
  */
-function budgetLevel(): number {
-  const level = globalScope['__vbspBudgetLevel'];
-  if (typeof level !== 'number' || !Number.isFinite(level)) return 0;
-  return Math.max(0, Math.min(2, Math.floor(level)));
+function budgetLevel(frame?: RenderFrameContext | null): number {
+  return frame ? clampBudgetLevel(frame.budgetLevel) : readBudgetLevelEscapeHatch();
 }
 
-/** 上一帧到本帧的 rAF 间隔（ms）。`render-session.ts` 每帧写；缺失/非法按 0（视为未漏槽）。 */
-function lastFrameDt(): number {
-  const dt = globalScope['__vbspLastFrameDtMs'];
-  if (typeof dt !== 'number' || !Number.isFinite(dt) || dt <= 0) return 0;
-  return dt;
+/** 上一帧到本帧的 rAF 间隔（ms）。上下文优先、`__vbspLastFrameDtMs` 兜底；缺失/非法按 0。 */
+function lastFrameDt(frame?: RenderFrameContext | null): number {
+  return frame ? clampLastFrameDt(frame.lastFrameDtMs) : readLastFrameDtEscapeHatch();
 }
 
 /**
@@ -291,6 +295,11 @@ export class BloomPostFx {
   private skipBloomThisFrame = false;
   /** 连续走捷径的帧数；恢复帧据此清零 `glowTick` 强制重画，避免叠加陈旧光晕。 */
   private bloomDirectStreak = 0;
+  /**
+   * 帧运行期上下文（T-P2-1）。`RenderSession` 在构造后调 `setFrameContext` 注入；
+   * null = 还没接上，读预算/dt 时回落 `globalThis.__vbsp*` 逃生舱。
+   */
+  private frameCtx: RenderFrameContext | null = null;
 
   constructor(renderer: THREE.WebGLRenderer, params: BloomParams = DEFAULT_BLOOM_PARAMS) {
     this.renderer = renderer;
@@ -355,6 +364,11 @@ export class BloomPostFx {
     return rt;
   }
 
+  /** 接上帧运行期上下文（T-P2-1）。传 null 断开，回到 globalThis 逃生舱读法。 */
+  setFrameContext(ctx: RenderFrameContext | null): void {
+    this.frameCtx = ctx;
+  }
+
   /** 运行期改参数。 */
   setParams(params: Partial<BloomParams>): void {
     this.params = { ...this.params, ...params };
@@ -405,8 +419,8 @@ export class BloomPostFx {
     // 省掉的是本帧的深度预渲 + 光效层提交 + 下帧 `overlay()` 的 bright/blur/overlay 三趟。
     // 主画面已由 `renderSkyPass` 整幅重画（含 clear）在画布上，跳过 = 直出：不黑屏、无残留。
     // 触发/恢复见 `bloomDirectSkip` 注释；逃生舱 `__vbspBloomDirectForce=false`，开关默认关。
-    const level = budgetLevel();
-    const dt = lastFrameDt();
+    const level = budgetLevel(this.frameCtx);
+    const dt = lastFrameDt(this.frameCtx);
     bloomDirectStats.level = level;
     bloomDirectStats.dtMs = +dt.toFixed(3);
     this.skipBloomThisFrame = bloomDirectSkip({
@@ -440,7 +454,7 @@ export class BloomPostFx {
     // 关掉按等级降级；`__vbspBloomCadence` 数值仍可强制指定（仅测量用）。
     const budgetCadence = envDisabled('__vbspBloomBudgetCadence')
       ? 2
-      : budgetLevel() >= 1 ? 4 : 2;
+      : budgetLevel(this.frameCtx) >= 1 ? 4 : 2;
     const cadence = Math.max(1, Math.round(envPositiveNumber('__vbspBloomCadence', budgetCadence)));
     if (this.glowTick++ % cadence !== 0) return;
     const skipDepth = envFlag('__vbspBloomSkipDepth');

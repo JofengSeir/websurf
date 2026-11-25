@@ -103,6 +103,7 @@ import {
   markDynamicEntities,
   parseDynamicEntityIndices,
 } from './dynamic-entities.js';
+import { createRenderFrameContext, mirrorFrameContext, type RenderFrameContext } from './render-context.js';
 import { resetWorldTransitionTextures } from '../shader/world-transition.js';
 import { resetBumpTextures } from '../shader/bumpmap.js';
 import { collectLaserBeams, LaserBeams } from './lasers.js';
@@ -356,9 +357,16 @@ export class RenderSession {
   private glowDepthProxy: THREE.Mesh | null = null;
   /**
    * 帧预算控制器的状态（task-33 C1）：0=不降级，1=bloom 光晕降频，2=再叠加水面镜面降频。
-   * 由 `updateFrameBudget()` 每帧推进，通过 `globalThis.__vbspBudgetLevel` 暴露给各降级点。
+   * 由 `updateFrameBudget()` 每帧推进；等级经 `frameCtx` 显式下传（T-P2-1），
+   * 末梢镜像到 `globalThis.__vbspBudgetLevel` / `__vbspDebug` 供外部诊断读取（只写）。
    */
   private budgetLevel = 0;
+  /**
+   * 帧运行期上下文（T-P2-1）：预算等级 / 上一帧 dt / 水面强制 pass 的显式载体。
+   * 构造后传给 `renderWaterFramePasses(..., this.frameCtx)` 与 `BloomPostFx.setFrameContext`；
+   * 每帧末 `mirrorFrameContext` 只写镜像，生产逻辑不再从 globalThis 读回。
+   */
+  private readonly frameCtx: RenderFrameContext = createRenderFrameContext();
   private budgetUp = 0;
   private budgetDown = 0;
   private budgetLastMs = 0;
@@ -899,7 +907,6 @@ export class RenderSession {
       __vbspWaterRefrCadence?: number;
       __vbspWaterMirrorCadence?: number;
       __vbspBudgetOn?: boolean;
-      __vbspWaterForcePass?: 'refr' | 'mirror';
     };
     const savedWaterGate = gw.__vbspWaterFrustumGate;
     // 水面折射默认隔帧（`water.ts` `refrCadence` 默认 2），镜面在预算升到 2 级时每 3 帧一次；
@@ -907,11 +914,10 @@ export class RenderSession {
     // program 要等首飞第一次轮到它才编：实测预热帧被 cadence 跳过镜面 ⇒ 冷跑首飞补编 7 个
     // 1024² 镜面 RT 变体、单帧 28ms。这里临时强制全帧率 + 冻结预算档，finally 还原。
     // ⚠️ 只强制 cadence 不够：`frame()` 内两计数同步 +1、平票时 water.ts 恒选折射，镜面 RT
-    // 仍不会渲 —— 由下面的 `__vbspWaterForcePass` 在 frame() 之后补一趟，见 try 内注释。
+    // 仍不会渲 —— 由下面的 `frameCtx.waterForcePass = 'mirror'` 在 frame() 之后补一趟，见 try 内注释。
     const savedRefrCadence = gw.__vbspWaterRefrCadence;
     const savedMirrorCadence = gw.__vbspWaterMirrorCadence;
     const savedBudgetOn = gw.__vbspBudgetOn;
-    const savedForcePass = gw.__vbspWaterForcePass;
     // 预热帧内旁路粒子/光效的「距离 + 视锥」剔除（`particles.ts` `cullByCamera` 的
     // `__vbspParticleCullOff` 分支）：`frame()` 先跑 extras update，会按出生点相机把视锥外/
     // 超距的光效重新置 `visible=false`，覆盖上面 traverse 的放开 ⇒ 它们的材质进不了水面
@@ -971,10 +977,14 @@ export class RenderSession {
       // 恒选折射，镜面 RT 会拖到首飞第一个移动帧才渲。此刻粒子/光效还处于上面的 cullOff
       // 状态，随整场景 pass 一起进 program 缓存。失败只告警，不影响载图。
       try {
-        gw.__vbspWaterForcePass = 'mirror';
-        renderWaterFramePasses(this.renderer, this.scene, this.camera);
+        // T-P2-1：走上下文而不是写 `__vbspWaterForcePass` 全局（逃生舱仍保留给外部脚本）。
+        this.frameCtx.waterForcePass = 'mirror';
+        renderWaterFramePasses(this.renderer, this.scene, this.camera, this.frameCtx);
       } catch (err) {
         console.warn(`[${this.app}][prewarm] 镜面 RT 预热失败（不影响运行，首飞会补编）:`, err);
+      } finally {
+        // 无论成败都必须清掉：否则后续每帧都会被强制只跑镜面 pass。
+        this.frameCtx.waterForcePass = undefined;
       }
     } catch (err) {
       ok = false;
@@ -999,7 +1009,6 @@ export class RenderSession {
       gw.__vbspWaterRefrCadence = savedRefrCadence;
       gw.__vbspWaterMirrorCadence = savedMirrorCadence;
       gw.__vbspBudgetOn = savedBudgetOn;
-      gw.__vbspWaterForcePass = savedForcePass;
       gc.__vbspParticleCullOff = savedParticleCullOff;
       // 预热期间 `__vbspBudgetOn=false` 不采样；把起点清零，让预热后的第一帧 dt 记为 0。
       // 否则那帧间隔会跨整个载图/预热段（数百 ms），被预算当成一次双槽（审查 P1-3）。
@@ -1445,6 +1454,8 @@ export class RenderSession {
     try {
       this.bloomFx = new BloomPostFx(this.renderer, DEFAULT_BLOOM_PARAMS);
       this.bloomFx.setDepthProxy(this.glowDepthProxy);
+      // T-P2-1：泛光降级点从上下文读预算/dt，不再自己读 globalThis。
+      this.bloomFx.setFrameContext(this.frameCtx);
       return this.bloomFx;
     } catch (err) {
       console.warn('[render] 泛光初始化失败，回退直画：', err);
@@ -1563,7 +1574,7 @@ export class RenderSession {
     mark('sort');
     // 水面折射/深度 RT：必须在主渲染**之前**的干净上下文渲染（T-650 v4：原先嵌套在
     // 水面 onBeforeRender 里，嵌套 render 状态被外层半途状态污染且随视角变化，§12.9）。
-    renderWaterFramePasses(this.renderer, this.scene, this.camera);
+    renderWaterFramePasses(this.renderer, this.scene, this.camera, this.frameCtx);
     mark('water');
     // 泛光：场景先画进半浮点缓冲（天空两遍法也画进去），再统一合成到画布。
     // 没有 bloomFx（强度 0 / 上下文不支持）时走原来的直画路径。
@@ -1613,10 +1624,14 @@ export class RenderSession {
     // 供水面 RT 的「按预算跳过」判断用：上一帧的整帧 CPU 成本与 rAF 帧间隔（都含本帧之前的信息）。
     // 每帧都写，不依赖调试开关。`__vbspLastFrameDtMs` = 上一帧起点到本帧起点的墙钟间隔，
     // >4.8ms 说明上一帧漏了槽（单槽 3.125ms），这一帧适合把可选的整场景 pass 让出来。
-    const gLast = globalThis as { __vbspLastFrameMs?: number; __vbspLastFrameDtMs?: number };
+    // `__vbspLastFrameMs` 不在本卡收口范围（预算兜底的基准成本，只此一处写、只此一处读）。
+    const gLast = globalThis as { __vbspLastFrameMs?: number };
     gLast.__vbspLastFrameMs = frameCpuMs;
-    gLast.__vbspLastFrameDtMs = budgetDt;
+    // T-P2-1：dt 与等级走上下文（updateFrameBudget 的 write() 更新 `frameCtx.budgetLevel`），
+    // 帧末再镜像旧的全局键 + `__vbspDebug` 供外部诊断（只写）。
+    this.frameCtx.lastFrameDtMs = budgetDt;
     this.updateFrameBudget(frameCpuMs, budgetDt);
+    mirrorFrameContext(this.frameCtx);
     return this.lastVisibility;
   }
 
@@ -1668,7 +1683,9 @@ export class RenderSession {
       };
     };
     const write = (): void => {
-      g.__vbspBudgetLevel = this.budgetLevel;
+      // 等级写进上下文（唯一生产读点来源）；旧的 `__vbspBudgetLevel` 由帧末
+      // `mirrorFrameContext` 统一镜像，这里不再各写一份。
+      this.frameCtx.budgetLevel = this.budgetLevel;
       g.__vbspBudget = {
         level: this.budgetLevel,
         ms: +this.budgetLastMs.toFixed(3),

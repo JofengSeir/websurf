@@ -70,6 +70,7 @@
 import * as THREE from 'three';
 import type { GLTF, GLTFParser } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { hasInjection, registerInjection } from './injection-registry.js';
+import { outputGamma22Enabled } from '../scene/render-context.js';
 
 // ---------------------------------------------------------------------------
 // GLSL 片段：RGBExp32 解码 + 手写双线性采样
@@ -795,11 +796,9 @@ const COLORSPACE_CHUNK_NAME = 'colorspace_fragment';
 const GAMMA22_OUTPUT =
 	'gl_FragColor.rgb = pow(max(gl_FragColor.rgb, vec3(0.0)), vec3(1.0/2.2));';
 
-/** A/B 开关（排查用）：`globalThis.__vbspOutputGamma22 === false` ⇒ 保留 three 的分段 sRGB。 */
-function outputGamma22Enabled(): boolean {
-	const g = globalThis as { __vbspOutputGamma22?: unknown };
-	return g.__vbspOutputGamma22 !== false;
-}
+// A/B 开关（排查用）：`globalThis.__vbspOutputGamma22 === false` ⇒ 保留 three 的分段 sRGB。
+// 读函数在 `scene/render-context.ts`（T-P2-1：读点单一；这里是**载入期**逃生舱，
+// 早于 RenderSession 存在，所以不走运行期上下文传递）。
 
 /**
  * 全局安装 γ2.2 输出编码：把 three 的 `colorspace_fragment` **块内容**整体换掉。
