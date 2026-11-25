@@ -59,6 +59,28 @@ export const RENDER_REV = '2026-11-21.1-budget-recovery-window';
 
 /** 泄漏采样时沿面法线外推的距离（HU）：面本身是边界，重心必然贴着 brush。 */
 const CLUSTER_LEAK_PROBE_PUSH = [4, 16, 64, 192] as const;
+
+/**
+ * 每帧送给 lightmap 注入的 spot / dlight 上限，与 `lightmap-shader.ts` 的
+ * `SPOT_MAX` / `DLIGHT_MAX` 对齐（那边是模块私有常量，改动必须同步这两处）。
+ */
+const SPOT_TOP_N = 8;
+const DLIGHT_TOP_N = 2;
+
+/**
+ * 半透明逐面排序的比较：距离大在前；距离相等时**下标小的在前**。
+ *
+ * 等价于旧实现 `order.sort((a, b) => dists[b] - dists[a])` 的稳定排序结果
+ * （V8 的 Array#sort 稳定，等距元素保持插入顺序 = 三角形下标升序），
+ * 但可以在复用的 Int32Array 上做归并，完全不分配。
+ */
+function isFaceBefore(dists: Float64Array, a: number, b: number): boolean {
+  const da = dists[a];
+  const db = dists[b];
+  if (da > db) return true;
+  if (da < db) return false;
+  return a < b;
+}
 import {
 	getLightingMode,
 	setLightingMode as setLightingModeInShader,
@@ -67,6 +89,7 @@ import {
 	getVhvLinear,
 	setSpotLights,
 	setDLights,
+	type DLightInput,
 	type SpotLightInput,
 	type LightingMode,
 } from '../shader/lightmap-shader.js';
@@ -252,6 +275,43 @@ export class RenderSession {
   private skyGroup: THREE.Group | null = null;
   /** spot 光源的可见光柱（`point_spotlight`）；null = 本图没有 spot。 */
   private spotBeams: THREE.Group | null = null;
+  /**
+   * `updateSpotLights()` 的零分配 scratch。旧实现每帧
+   * `map → sort → slice → map`（spot 57 盏 + dlight）会分配约 130 个临时对象、
+   * 6 个临时数组并重算 16 次 `Math.cos`；120–240fps 下就是持续的 GC 压力。
+   * 现在只做单趟 O(N) 选前 8 / 前 2，结果写进固定槽位对象。
+   *
+   * 安全性：`setSpotLights` / `setDLights`（shader/lightmap-shader.ts）内部立刻把数值拷进
+   * uniform，不持有入参数组或元素引用，所以复用这些对象是安全的。
+   */
+  private readonly spotTopIdx = new Int32Array(SPOT_TOP_N);
+  private readonly spotTopDist = new Float64Array(SPOT_TOP_N);
+  private readonly spotOutSlots: SpotLightInput[] = Array.from({ length: SPOT_TOP_N }, () => ({
+    position: [0, 0, 0],
+    direction: [0, 0, 0],
+    color: [0, 0, 0],
+    intensity: 0,
+    range: 0,
+    cosOuter: 0,
+    cosInner: 0,
+  }));
+  private readonly spotOutList: SpotLightInput[] = [];
+  /**
+   * spot 圆锥角的 `Math.cos` 缓存：`spots` 数组只在载图时由 `spot-beams.ts` 重建，
+   * 锥角不逐帧变化，所以按「数组身份 + 长度」失效即可（旧实现每帧算 16 次）。
+   */
+  private spotCosRef: unknown = null;
+  private spotCosCount = -1;
+  private spotCosOuter = new Float64Array(0);
+  private spotCosInner = new Float64Array(0);
+  private readonly dlightTopIdx = new Int32Array(DLIGHT_TOP_N);
+  private readonly dlightTopDist = new Float64Array(DLIGHT_TOP_N);
+  private readonly dlightOutSlots: DLightInput[] = Array.from({ length: DLIGHT_TOP_N }, () => ({
+    position: [0, 0, 0],
+    color: [0, 0, 0],
+    range: 0,
+  }));
+  private readonly dlightOutList: DLightInput[] = [];
   /**
    * 场景扩展图元：`env_laser` 光束、PCF 粒子系统，以及「有数据、零消费者」的地图资产实体
    * （`env_sprite` / `env_sprite_clientside`、`point_worldtext`、`move_rope`+`keyframe_rope`、
@@ -1189,48 +1249,120 @@ export class RenderSession {
         }[]
       | undefined;
     if (!spots || spots.length === 0) {
-      setSpotLights([]);
+      // 与旧实现一致：无 spot 时**提前返回**，dlight uniform 保持上一帧的值。
+      this.spotOutList.length = 0;
+      setSpotLights(this.spotOutList);
       return;
     }
+    const len = spots.length;
+    if (this.spotCosRef !== spots || this.spotCosCount !== len) {
+      if (this.spotCosOuter.length !== len) {
+        this.spotCosOuter = new Float64Array(len);
+        this.spotCosInner = new Float64Array(len);
+      }
+      for (let i = 0; i < len; i++) {
+        this.spotCosOuter[i] = Math.cos(spots[i].outerConeAngle);
+        this.spotCosInner[i] = Math.cos(spots[i].innerConeAngle);
+      }
+      this.spotCosRef = spots;
+      this.spotCosCount = len;
+    }
     const cam = this.camera.position;
-    const ranked = spots
-      .map((s) => {
-        const dx = s.position[0] - cam.x;
-        const dy = s.position[1] - cam.y;
-        const dz = s.position[2] - cam.z;
-        return { s, d2: dx * dx + dy * dy + dz * dz };
-      })
-      .sort((a, b) => a.d2 - b.d2)
-      .slice(0, 8)
-      .map(({ s }) => ({
-        position: s.position,
-        direction: s.direction,
-        color: s.color,
-        intensity: s.intensity,
-        range: s.range,
-        cosOuter: Math.cos(s.outerConeAngle),
-        cosInner: Math.cos(s.innerConeAngle),
-      }) satisfies SpotLightInput);
-    setSpotLights(ranked);
-    // 命中点的 dlight：宽而软的光斑，按距离取最近 2 个。
+    const topIdx = this.spotTopIdx;
+    const topDist = this.spotTopDist;
+    // 单趟 O(N) 选最近 SPOT_TOP_N 盏：插入位置在「所有距离相同者之后」，因此同距离时
+    // 下标小的仍在前 —— 与旧实现「稳定 sort 升序 + slice(0, 8)」逐位同序。
+    let count = 0;
+    for (let i = 0; i < len; i++) {
+      const s = spots[i];
+      const dx = s.position[0] - cam.x;
+      const dy = s.position[1] - cam.y;
+      const dz = s.position[2] - cam.z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (count < SPOT_TOP_N) {
+        let pos = count;
+        while (pos > 0 && topDist[pos - 1] > d2) pos--;
+        for (let j = count; j > pos; j--) {
+          topDist[j] = topDist[j - 1];
+          topIdx[j] = topIdx[j - 1];
+        }
+        topDist[pos] = d2;
+        topIdx[pos] = i;
+        count++;
+      } else if (d2 < topDist[SPOT_TOP_N - 1]) {
+        // 并列第 8 远时旧实现保留先出现的下标，这里同样不替换。
+        let pos = SPOT_TOP_N - 1;
+        while (pos > 0 && topDist[pos - 1] > d2) pos--;
+        for (let j = SPOT_TOP_N - 1; j > pos; j--) {
+          topDist[j] = topDist[j - 1];
+          topIdx[j] = topIdx[j - 1];
+        }
+        topDist[pos] = d2;
+        topIdx[pos] = i;
+      }
+    }
+    const out = this.spotOutList;
+    for (let j = 0; j < count; j++) {
+      const oi = topIdx[j];
+      const s = spots[oi];
+      const slot = this.spotOutSlots[j];
+      slot.position = s.position;
+      slot.direction = s.direction;
+      slot.color = s.color;
+      slot.intensity = s.intensity;
+      slot.range = s.range;
+      slot.cosOuter = this.spotCosOuter[oi];
+      slot.cosInner = this.spotCosInner[oi];
+      out[j] = slot;
+    }
+    out.length = count;
+    setSpotLights(out);
+    // 命中点的 dlight：宽而软的光斑，按距离取最近 2 个（同上的零分配选法）。
     const dlights = this.spotBeams?.userData.dlights as
       | { position: [number, number, number]; color: [number, number, number]; range: number }[]
       | undefined;
-    if (dlights && dlights.length > 0) {
-      const rankedD = dlights
-        .map((d) => {
-          const dx = d.position[0] - cam.x;
-          const dy = d.position[1] - cam.y;
-          const dz = d.position[2] - cam.z;
-          return { d, d2: dx * dx + dy * dy + dz * dz };
-        })
-        .sort((a, b) => a.d2 - b.d2)
-        .slice(0, 2)
-        .map(({ d }) => d);
-      setDLights(rankedD);
-    } else {
-      setDLights([]);
+    const dTopIdx = this.dlightTopIdx;
+    const dTopDist = this.dlightTopDist;
+    const dLen = dlights ? dlights.length : 0;
+    let dCount = 0;
+    for (let i = 0; i < dLen; i++) {
+      const d = dlights![i];
+      const dx = d.position[0] - cam.x;
+      const dy = d.position[1] - cam.y;
+      const dz = d.position[2] - cam.z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (dCount < DLIGHT_TOP_N) {
+        let pos = dCount;
+        while (pos > 0 && dTopDist[pos - 1] > d2) pos--;
+        for (let j = dCount; j > pos; j--) {
+          dTopDist[j] = dTopDist[j - 1];
+          dTopIdx[j] = dTopIdx[j - 1];
+        }
+        dTopDist[pos] = d2;
+        dTopIdx[pos] = i;
+        dCount++;
+      } else if (d2 < dTopDist[DLIGHT_TOP_N - 1]) {
+        let pos = DLIGHT_TOP_N - 1;
+        while (pos > 0 && dTopDist[pos - 1] > d2) pos--;
+        for (let j = DLIGHT_TOP_N - 1; j > pos; j--) {
+          dTopDist[j] = dTopDist[j - 1];
+          dTopIdx[j] = dTopIdx[j - 1];
+        }
+        dTopDist[pos] = d2;
+        dTopIdx[pos] = i;
+      }
     }
+    const outD = this.dlightOutList;
+    for (let j = 0; j < dCount; j++) {
+      const d = dlights![dTopIdx[j]];
+      const slot = this.dlightOutSlots[j];
+      slot.position = d.position;
+      slot.color = d.color;
+      slot.range = d.range;
+      outD[j] = slot;
+    }
+    outD.length = dCount;
+    setDLights(outD);
   }
 
   /** PVS 区域着色开关（debug 面板用；开启期间不按 PVS/距离剔除，只上色，才能看清「不可见的区域」）。 */
@@ -2253,7 +2385,22 @@ export class RenderSession {
     const pos = geom.attributes.position as THREE.BufferAttribute | undefined;
     if (!pos) return;
     type Tri = { a: number; b: number; c: number; group: number };
-    type Cache = { positionCount: number; indexCount: number; tris: Tri[]; dists: Float64Array; prevIdx: number[] | null };
+    type Cache = {
+      positionCount: number;
+      indexCount: number;
+      /** `geom.groups.length` 快照（0 = 没有材质组，按单组处理）；变了就重建索引缓存。 */
+      groupCount: number;
+      tris: Tri[];
+      dists: Float64Array;
+      prevIdx: Uint32Array | null;
+      /** 复用 scratch（长度随三角形数固定），逐面排序每帧 0 分配。 */
+      order: Int32Array;
+      orderTmp: Int32Array;
+      bucketCounts: Int32Array;
+      bucketOffsets: Int32Array;
+      bucketCursors: Int32Array;
+      bucketSorted: Int32Array;
+    };
     let cache = mesh.userData.__vbspFaceSort as Cache | undefined;
     let idx = geom.index;
     if (!idx) {
@@ -2264,18 +2411,37 @@ export class RenderSession {
       idx = geom.index;
     }
     if (!idx) return;
-    if (!cache || cache.positionCount !== pos.count || cache.indexCount !== idx.count) {
-      const groups = geom.groups.length > 0
-        ? geom.groups
-        : [{ start: 0, count: idx.count, materialIndex: 0 }];
+    if (
+      !cache ||
+      cache.positionCount !== pos.count ||
+      cache.indexCount !== idx.count ||
+      cache.groupCount !== geom.groups.length
+    ) {
+      const groupsEmpty = geom.groups.length === 0;
+      const groupCount = groupsEmpty ? 1 : geom.groups.length;
       const tris: Tri[] = [];
-      for (let gi = 0; gi < groups.length; gi++) {
-        const g = groups[gi];
-        for (let i = g.start; i + 2 < g.start + g.count; i += 3) {
+      for (let gi = 0; gi < groupCount; gi++) {
+        const gStart = groupsEmpty ? 0 : geom.groups[gi].start;
+        const gCount = groupsEmpty ? idx.count : geom.groups[gi].count;
+        for (let i = gStart; i + 2 < gStart + gCount; i += 3) {
           tris.push({ a: idx.getX(i), b: idx.getX(i + 1), c: idx.getX(i + 2), group: gi });
         }
       }
-      cache = { positionCount: pos.count, indexCount: idx.count, tris, dists: new Float64Array(tris.length), prevIdx: null };
+      const triCount = tris.length;
+      cache = {
+        positionCount: pos.count,
+        indexCount: idx.count,
+        groupCount: groupsEmpty ? 0 : geom.groups.length,
+        tris,
+        dists: new Float64Array(triCount),
+        prevIdx: null,
+        order: new Int32Array(triCount),
+        orderTmp: new Int32Array(triCount),
+        bucketCounts: new Int32Array(groupCount),
+        bucketOffsets: new Int32Array(groupCount),
+        bucketCursors: new Int32Array(groupCount),
+        bucketSorted: new Int32Array(triCount),
+      };
       mesh.userData.__vbspFaceSort = cache;
     }
     const c = cache;
@@ -2291,27 +2457,70 @@ export class RenderSession {
       c.dists[i] = p.distanceToSquared(cam);
     }
     const idxArr = idx.array as unknown as number[];
-    const order: number[] = [];
-    for (let i = 0; i < c.tris.length; i++) order.push(i);
-    order.sort((a, b) => c.dists[b] - c.dists[a]);
+    const triCount = c.tris.length;
+    // 原地归并（稳定、0 分配）：旧的 `order: number[]` + `order.sort` 每帧都要建一个数组，
+    // V8 的 TimSort 还要再分配一份工作副本；这里只复用两根 Int32Array，语义见 `isFaceBefore`。
+    let src = c.order;
+    let dst = c.orderTmp;
+    for (let i = 0; i < triCount; i++) src[i] = i;
+    for (let width = 1; width < triCount; width <<= 1) {
+      const step = width << 1;
+      for (let lo = 0; lo < triCount; lo += step) {
+        const mid = Math.min(lo + width, triCount);
+        const hi = Math.min(lo + step, triCount);
+        let i = lo;
+        let j = mid;
+        let k = lo;
+        while (i < mid && j < hi) {
+          const a = src[i];
+          const b = src[j];
+          if (isFaceBefore(c.dists, a, b)) {
+            dst[k++] = a;
+            i++;
+          } else {
+            dst[k++] = b;
+            j++;
+          }
+        }
+        while (i < mid) dst[k++] = src[i++];
+        while (j < hi) dst[k++] = src[j++];
+      }
+      const swap = src;
+      src = dst;
+      dst = swap;
+    }
+    const sorted = src;
     // 组内写回：每组 `start/count` 不变，组顺序仍是材质组顺序。
-    const groups = geom.groups.length > 0
-      ? geom.groups
-      : [{ start: 0, count: idx.count, materialIndex: 0 }];
-    // 先把排序结果按材质组分桶（一次 O(tris)），再逐组连续写回；
-    // 原写法对每个组都把 order 全扫一遍（O(groups×tris)），多材质大块时是纯浪费。
-    const buckets: number[][] = groups.map(() => []);
-    for (const oi of order) buckets[c.tris[oi].group].push(oi);
+    // 计数分桶替代 `groups.map(() => [])` 的嵌套数组：两趟 O(tris) 得到「按组、组内已排序」。
+    const groupsEmpty = c.groupCount === 0;
+    const groupCount = groupsEmpty ? 1 : c.groupCount;
+    const counts = c.bucketCounts;
+    const offsets = c.bucketOffsets;
+    const cursors = c.bucketCursors;
+    const bucketSorted = c.bucketSorted;
+    for (let gi = 0; gi < groupCount; gi++) counts[gi] = 0;
+    for (let i = 0; i < triCount; i++) counts[c.tris[i].group]++;
+    let acc = 0;
+    for (let gi = 0; gi < groupCount; gi++) {
+      offsets[gi] = acc;
+      cursors[gi] = acc;
+      acc += counts[gi];
+    }
+    for (let i = 0; i < triCount; i++) {
+      const oi = sorted[i];
+      bucketSorted[cursors[c.tris[oi].group]++] = oi;
+    }
     let changed = false;
     const prevIdx = c.prevIdx;
     if (!prevIdx || prevIdx.length !== idxArr.length) {
       changed = true;
     }
     let k = 0;
-    for (let gi = 0; gi < groups.length; gi++) {
-      let cursor = groups[gi].start;
-      for (const oi of buckets[gi]) {
-        const t = c.tris[oi];
+    for (let gi = 0; gi < groupCount; gi++) {
+      let cursor = groupsEmpty ? 0 : geom.groups[gi].start;
+      const end = offsets[gi] + counts[gi];
+      for (let j = offsets[gi]; j < end; j++) {
+        const t = c.tris[bucketSorted[j]];
         if (!changed && (prevIdx![k] !== t.a || prevIdx![k + 1] !== t.b || prevIdx![k + 2] !== t.c)) changed = true;
         idxArr[cursor] = t.a;
         idxArr[cursor + 1] = t.b;
@@ -2322,7 +2531,8 @@ export class RenderSession {
     }
     // 只有排列真的变了才重传（three 的 WebGLAttributes.update 会整块 bufferSubData）。
     if (changed) {
-      c.prevIdx = Array.from(idxArr as ArrayLike<number>);
+      if (!c.prevIdx || c.prevIdx.length !== idxArr.length) c.prevIdx = new Uint32Array(idxArr.length);
+      c.prevIdx.set(idxArr as unknown as ArrayLike<number>);
       idx.needsUpdate = true;
     }
   }
