@@ -186,6 +186,11 @@ const NUMERIC_RENAME_ALLOW = new Set([
   // 归一化后 debug/game 文本逐字相同（同一份源码、同一套导出），非实现分叉。
   'src/renderer-shared/config/render-panel-ui.ts',
   'src/ts-shared/entity/variant.ts',
+  // P2-2a 把 renderMirrorPlane / renderRefraction 拆进独立子模块后，esbuild 顶层命名空间
+  // 变化使这两个模块内的 renderer 参数在 debug/game 分别取 renderer / renderer2；
+  // 数字后缀归一化后逐字相同，同一份源码、同一套导出，非实现分叉。
+  'src/renderer-shared/shader/water/planar-reflect.ts',
+  'src/renderer-shared/shader/water/refract-underwater.ts',
 ]);
 
 /**
