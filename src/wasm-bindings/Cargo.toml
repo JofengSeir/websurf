@@ -10,7 +10,8 @@
 # - phys：PhysWorld 再导出（debug/game；实现仍在共享 src/phys/mod.rs）
 # - glb：debug/game 相同的 BspProcessor GLB 方法
 # - glb-lite：game 使用的 GLB 变体集合（依赖 glb）
-# - debug-tools：debug 独有的 BSP/PAKFILE 诊断、模型材质审计、.phy bevel 可视化
+# - debug-tools：debug 独有的 BSP/PAKFILE 诊断、模型材质审计、.phy bevel 可视化；
+#   并打开 websurf-phys 的 phys-debug（12 个仅 debug 的 PhysWorld 诊断/种子面导出）
 # - viewer-export：viewer 独有的 GLB 变体与 probeMissingResources
 #
 # 注意（.tmp/wasmspike/RESULT.md）：包装 crate 必须引用/再导出要导出的符号，否则 DCE；
@@ -36,8 +37,10 @@ phys = ["dep:websurf-phys"]
 glb = ["core"]
 # game 使用的 GLB 变体集合（含 glb 中两端相同的方法）
 glb-lite = ["glb"]
-# debug 独有导出（BSP/PAKFILE 诊断、模型材质审计、.phy bevel 可视化）
-debug-tools = ["core", "phys"]
+# debug 独有导出（BSP/PAKFILE 诊断、模型材质审计、.phy bevel 可视化）。
+# 同时向 websurf-phys 转发 phys-debug：那 12 个仅 debug 的导出只在 debug 产物里存在，
+# game / viewer 不开本 feature，因此拿不到 `physworld_debug_hull` 之类的方法。
+debug-tools = ["core", "phys", "websurf-phys?/phys-debug"]
 # viewer 独有导出（GLB 变体、probeMissingResources）
 viewer-export = ["core"]
 

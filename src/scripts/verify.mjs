@@ -69,6 +69,13 @@ function detectWasmCoreCargoArgs() {
 function buildSteps(name) {
   const rustSteps = [
     { kind: 'cargo', label: 'cargo test -p websurf-phys', args: ['test', '-p', 'websurf-phys'] },
+    // T-D134a：12 个仅 debug 的 PhysWorld 导出与 `phys::seed` 都在 `phys-debug` feature 后。
+    // 默认构建不再编译它们 —— 少了这一遍，门控代码与 seed 面在 CI/本地就永远没有编译证据。
+    {
+      kind: 'cargo',
+      label: 'cargo test -p websurf-phys --features phys-debug',
+      args: ['test', '-p', 'websurf-phys', '--features', 'phys-debug'],
+    },
     {
       kind: 'cargo',
       label: 'cargo test -p websurf-wasm-core (host)',

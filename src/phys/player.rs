@@ -1466,6 +1466,7 @@ fn check_stuck(world: &mut World, p: &mut Player) -> bool {
 /// 为什么要它：`STUCK_DIRS[0]` 就是上方向，所以"被推向侧面"这一症状本身已经说明
 /// **上方向在所试的距离上都不空闲** —— 但到底卡在第几个距离、横向又是第几个距离才通，
 /// 原先只能靠猜。本函数把这张表直接打出来。
+#[cfg(feature = "phys-debug")]
 pub(crate) fn stuck_probe(world: &mut World, p: &Player, at: Option<V3>) -> [f64; 13] {
     let mins = p.mins();
     let maxs = p.maxs();

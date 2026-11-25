@@ -13,6 +13,16 @@ license = "MIT"
 crate-type = ["rlib"]
 path = "lib.rs"
 
+[features]
+default = []
+# 仅 debug 宿主使用：打开后 `src/phys/mod.rs` 末尾那个 `#[cfg(feature = "phys-debug")] impl`
+# 里的 12 个诊断/种子面导出才存在（set_state_ex / state_full_json / gate_veto_count 与
+# debug_trace / debug_position_probe / debug_collide_attrib / debug_tri_mesh_name /
+# debug_stuck_probe / debug_hull_stats / debug_hull / debug_free_table / debug_normal_escape）。
+# apps/debug 经 `websurf-wasm-bindings` 的 `debug-tools` 打开；apps/game / apps/viewer 不开，
+# 产物里因此没有这 12 个导出（`debug_line_trace` 不在其中，无条件保留）。
+phys-debug = []
+
 [dependencies]
 wasm-bindgen = "0.2"
 js-sys = "0.3"

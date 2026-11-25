@@ -23,10 +23,16 @@
 //!   都以 `path = "../../../../src"` 指到本目录。`apps/viewer` 是纯查看器，
 //!   其 `crates/wasm` 只依赖 `websurf-wasm-core`，不含 `websurf-phys`。
 //!
-//! 导出面：本文件 `#[wasm_bindgen] impl PhysWorld`共 **41 个 `pub fn`**（含 `new`）。
+//! 导出面：本文件 `#[wasm_bindgen] impl PhysWorld`共 **41 个 `pub fn`**（含 `new`）；默认构建
+//! （不开 `phys-debug`）**29 个**。另外 12 个仅 debug 的导出放在文件末尾的
+//! `#[cfg(feature = "phys-debug")] impl` 块里（`set_state_ex` / `state_full_json` /
+//! `gate_veto_count` / `debug_trace` / `debug_position_probe` / `debug_collide_attrib` /
+//! `debug_tri_mesh_name` / `debug_stuck_probe` / `debug_hull_stats` / `debug_hull` /
+//! `debug_free_table` / `debug_normal_escape`）：只有 `apps/debug` 经 `websurf-wasm-bindings`
+//! 的 `debug-tools` 打开，`apps/game` / `apps/viewer` 的产物不含这 12 个。
 //! 其中 `set_jump_height`只由 debug 宿主在「跳跃增幅区」（surf_null 的 `autohop_zone`）内调用；
-//! `gate_veto_count`与 `debug_trace`只服务脚本；
-//! `debug_hull_stats`是 `.phy` 凸体转 brush 的统计出口（核对接线量级，只读）。
+//! `debug_line_trace`（env_laser 射线截断）是 `apps/game` 运行期唯一使用的 `debug_` 导出，
+//! 因此无条件保留在公共块；`debug_hull_stats`是 `.phy` 凸体转 brush 的统计出口（核对接线量级，只读）。
 //!
 //! 边界：本模块只做状态推进与读取。不做 BSP 解析、不导出 GLB、不碰渲染；
 //! 实例与实例之间不共享可变状态，唯一跨实例可变量是诊断计数器
@@ -50,6 +56,7 @@ pub mod phy_hulls;
 
 /// 种子面 v2：实例状态的可序列化投影（`src/phys/seed.rs` 的 `SEED_SCHEMA_VERSION = 2`），
 /// 供 scratch 实例从权威实例单向播种，不做任何反向写入。
+#[cfg(feature = "phys-debug")]
 mod seed;
 
 /// 门校验回归（4 项）：端帽 / 起始实心 / 悬浮滑行三类幽灵面被否决，贴地落地被保留。
@@ -173,6 +180,10 @@ pub struct PhysWorld {
     ready: bool,
     /// `build_world` 里 `.phy` 凸体转 brush 的统计（只读诊断，`debug_hull_stats` 出口）：
     /// `[转成 brush 的块数, 生成的 box bevel 张数, 生成的 edge bevel 张数, 退回三角形路径的块数]`。
+    ///
+    /// 关闭 `phys-debug` 时没有读取方（`debug_hull_stats` 被门控掉），但 `build_world` 照常
+    /// 记账 —— 成本是 4 个 `usize`，换来返回 `debug_hull_stats` 时无需重扫；此处只消告警。
+    #[cfg_attr(not(feature = "phys-debug"), allow(dead_code))]
     hull_stats: [usize; 4],
     /// 最近一次物理事件（传送/死亡）。一次 `step_core` 至多产生一个，
     /// 由 `take_event` 取走后置空；不取则被下一次事件覆盖。
@@ -421,46 +432,6 @@ impl PhysWorld {
         Ok(self.state_js())
     }
 
-    // -----------------------------------------------------------------------
-    // 种子面 v2：整实例状态的可序列化投影，实现在 `phys::seed`
-    // （`extract_seed` / `apply_seed` 互逆一对）。本文件只负责 JSON 边界与借用规则。
-    // -----------------------------------------------------------------------
-
-    /// 用一份种子 JSON 覆盖本实例状态（scratch 实例的单向写入入口）。
-    ///
-    /// `v` 必须等于 `seed::SEED_SCHEMA_VERSION`（= 2），否则 `Err`；
-    /// NaN / Inf 一律拒绝（FAIL LOUD），不做静默夹取。
-    /// `triggers_inside` 的长度必须与本实例的触发器数量一致，否则 `Err`。
-    /// 事件槽不参与播种——事件不可播种。
-    ///
-    /// 只写本实例：不读自身其余状态做决策、不触碰其他实例。
-    /// 9 参 `set_state`的签名与语义不受本方法影响。
-    pub fn set_state_ex(&mut self, json: &str) -> Result<(), JsValue> {
-        let s: seed::SeedState =
-            serde_json::from_str(json).map_err(|e| to_js_err(e, "set_state_ex"))?;
-        self.apply_seed(&s).map_err(|e| JsValue::from_str(&e))
-    }
-
-    /// 导出本实例的全量状态 JSON，与 `set_state_ex` 同一 schema。
-    ///
-    /// `include_event = false`：不导出事件槽。种子链必须用 `false`，因为事件不可播种。
-    /// `include_event = true`：附带当前待取事件，供审计/调试导出。
-    ///
-    /// f64 经 serde_json 往返位级精确，因此"导出 → 写回"不引入数值漂移。
-    /// 非有限值会被序列化成 `null` 且**不在此报错**，由写回侧 `set_state_ex` 拒绝。
-    pub fn state_full_json(&self, include_event: bool) -> Result<String, JsValue> {
-        serde_json::to_string(&self.extract_seed(include_event))
-            .map_err(|e| to_js_err(e, "state_full_json"))
-    }
-
-    /// 诊断计数：盒-AABB 门校验被否决的次数（进程内单调递增，无复位入口）。
-    /// 计数点在 `src/phys/world.rs` 的 `clip_planes` 的两个否决分支，
-    /// 计数器是 `world::GATE_VETO_COUNT` —— **同一 wasm 模块内所有实例共享一份**，
-    /// 因此它不是"本实例的"统计。消费方只有 `apps/game/scripts` 的三个排查脚本。
-    pub fn gate_veto_count(&self) -> u32 {
-        world::GATE_VETO_COUNT.load(std::sync::atomic::Ordering::Relaxed)
-    }
-
     /// 诊断/表现用**零体积线段**扫掠（等价源引擎 `UTIL_TraceLine` + `MASK_SOLID`），
     /// 返回 `[fraction, normal_x, normal_y, normal_z]`；未命中时法线回填 `[0,0,0]`。
     ///
@@ -472,264 +443,6 @@ impl PhysWorld {
         let r = self.world.trace(&[sx, sy, sz], &[ex, ey, ez], &zero, &zero);
         let n = r.normal.unwrap_or([0.0, 0.0, 0.0]);
         vec![r.fraction, n[0], n[1], n[2]]
-    }
-
-    /// 诊断：对给定线段做一次扫掠，返回 `[fraction, normal_x, normal_y, normal_z]`。
-    ///
-    /// 扫掠盒取玩家**当前**碰撞箱（`self.player.mins()` / `maxs()`）——
-    /// 蹲伏时用的是蹲箱，所以同一线段在站/蹲两态下结果不同。未命中时法线回填 `[0,0,0]`。
-    /// 不推进物理、不改任何状态。消费方只有 `apps/game/scripts/phys-gate-probe2.mjs`（已移除）。
-    pub fn debug_trace(&mut self, sx: f64, sy: f64, sz: f64, ex: f64, ey: f64, ez: f64) -> Vec<f64> {
-        let mins = self.player.mins();
-        let maxs = self.player.maxs();
-        let r = self.world.trace(
-            &[sx, sy, sz],
-            &[ex, ey, ez],
-            &mins,
-            &maxs,
-        );
-        let n = r.normal.unwrap_or([0.0, 0.0, 0.0]);
-        vec![r.fraction, n[0], n[1], n[2]]
-    }
-
-    /// 诊断：**在给定点上并置两种碰撞查询**，判定它们是否一致。
-    ///
-    /// 返回 6 个数：
-    /// `[0] is_position_free（true=1 / false=0）`、
-    /// `[1] 原地向下扫掠 1 HU 的 fraction`、
-    /// `[2..4] 该扫掠命中的法线`、
-    /// `[5] stuck_ticks`。
-    ///
-    /// 为什么要并置：移动走 `World::trace`，而 `player::check_stuck` 走
-    /// `World::is_position_free` —— **两个不同的查询**。若某处 `is_position_free` 说
-    /// 「不空」而 `trace` 说「通畅」，`check_stuck` 就会把玩家判成卡死：60 个挤出候选
-    /// 全失败 → `stuck_ticks` 自增、速度清零、返回 true → `player_tick` **跳过本 tick
-    /// 全部移动与落地判定**，表现为「有速度、周围无障碍、却完全不动」。
-    ///
-    /// 实测触发场景（`surf_666`，`models/props/666/s1_ramp1b.mdl` 的 .phy 三角网格）：
-    /// 玩家在 `(x=-13536.41, y=14560.03, z=-9786.37)` 卡住 3.5 秒，同位置 60 HU 的水平
-    /// 扫掠 `debug_trace` 全部 `fraction = 1.0`（畅通），但本方法会报
-    /// `is_position_free = 0` ⇒ 卡死分支。
-    ///
-    /// 扫掠盒取玩家**当前**碰撞箱，与 [`PhysWorld::debug_trace`] 同口径。不推进物理、
-    /// 不改任何状态。
-    #[wasm_bindgen]
-    pub fn debug_position_probe(&mut self, x: f64, y: f64, z: f64) -> Vec<f64> {
-        let mins = self.player.mins();
-        let maxs = self.player.maxs();
-        let free = self.world.is_position_free(&[x, y, z], &mins, &maxs);
-        let r = self.world.trace(&[x, y, z], &[x, y - 1.0, z], &mins, &maxs);
-        let n = r.normal.unwrap_or([0.0, 0.0, 0.0]);
-        vec![
-            if free { 1.0 } else { 0.0 },
-            r.fraction,
-            n[0],
-            n[1],
-            n[2],
-            self.player.stuck_ticks as f64,
-        ]
-    }
-
-    /// 归属诊断：报"哪些碰撞体把这个盒体判成实心"。
-    ///
-    /// 返回 18 个数：
-    ///
-    /// ```text
-    /// [0]     空闲（1）/ 不空闲（0）—— 与 debug_position_probe[0] 同义，便于单看本表
-    /// [1]     brush 命中数
-    /// [2]     三角形命中数
-    /// [3..5]  第一个实心 brush 的 AABB min xyz；无 brush 命中时全为 0
-    /// [6..8]  第一个实心 brush 的 AABB max xyz；无 brush 命中时全为 0
-    /// [9]     有三角形命中（1/0）
-    /// [10]    三角形所属网格在 tri_meshes 的下标（`TriEntry::mesh_index`）；无命中时为 -1
-    /// [11..13] 第一个实心三角形的 AABB min xyz
-    /// [14..16] 第一个实心三角形的 AABB max xyz
-    /// [17]    该三角形在网格 indices 里的首个顶点下标（b / c 未导出，定位靠 AABB）
-    /// ```
-    ///
-    /// 两个计数都是**逐个候选**判实心的数量，不是 broadphase 候选数。
-    /// 碰撞箱取玩家**当前**箱，与 [`PhysWorld::debug_trace`] 同口径；不推进物理、不改状态。
-    /// 名字经 [`PhysWorld::debug_tri_mesh_name`] 按下标 10 取。
-    ///
-    /// 用途：看板 `T-065` 的待裁决第 ① 条 —— 查明把玩家判成实心的到底是
-    /// 世界 brush 还是某个模型的 .phy 三角网格，以及是哪一个模型。
-    #[wasm_bindgen]
-    pub fn debug_collide_attrib(&mut self, x: f64, y: f64, z: f64) -> Vec<f64> {
-        let mins = self.player.mins();
-        let maxs = self.player.maxs();
-        let a = self.world.collide_attrib(&[x, y, z], &mins, &maxs);
-        let mut out = vec![if a.free { 1.0 } else { 0.0 }, a.brush_hits as f64, a.tri_hits as f64];
-        match a.first_brush_aabb {
-            Some((lo, hi)) => {
-                out.extend_from_slice(&lo);
-                out.extend_from_slice(&hi);
-            }
-            // 无 brush 命中：补 6 个 0（与 Some 分支的 3+3 等长，保持返回长度恒为 18）
-            None => out.extend(std::iter::repeat_n(0.0, 6)),
-        }
-        match a.first_tri {
-            Some(t) => {
-                out.push(1.0);
-                out.push(t.mesh_index as f64);
-                out.extend_from_slice(&t.aabb.0);
-                out.extend_from_slice(&t.aabb.1);
-                out.push(t.verts[0] as f64);
-            }
-            // 同上：9 个占位（1 + 1 + 3 + 3 + 1）
-            None => out.extend_from_slice(&[0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
-        }
-        out
-    }
-
-    /// 取 `World::tri_meshes` 第 `index` 个网格的模型名；下标越界返回空串。
-    ///
-    /// 供 [`PhysWorld::debug_collide_attrib`] 的下标 12 配套使用。名字来自 tri JSON 的
-    /// `name` 字段（形如 `models/props/666/s1_ramp1b.mdl`）。
-    #[wasm_bindgen]
-    pub fn debug_tri_mesh_name(&self, index: usize) -> String {
-        self.world
-            .tri_meshes
-            .get(index)
-            .map(|m| m.name.clone())
-            .unwrap_or_default()
-    }
-
-    /// 卡死挤出的只读重放（见 [`player::stuck_probe`] 的完整文档）。
-    ///
-    /// 返回 13 个数：`[0]` 该点是否空闲；`[1..4]` 会选中候选的位移 dx/dy/dz
-    /// （无胜出为 -999）；`[5]` 该候选的 dist（无胜出为 -1）；`[6]` 该候选在
-    /// `STUCK_DIRS` 里的下标（无胜出为 -1）；`[7]` 试了几个候选才成功；
-    /// `[8..12]` dist=1 时 +y / +x / -x / +z / -z 各自是否空闲（1/0）。
-    ///
-    /// 三个坐标就是试探点，**不需要先把玩家挪过去**；碰撞箱仍取玩家**当前**箱。
-    /// 省略三个坐标则等价于用玩家当前 `origin`（与 `check_stuck` 的输入一致）。
-    ///
-    /// **纯诊断，不改任何状态** —— 不挪 `origin`、不写 `stuck_ticks`、不动 `velocity`，
-    /// 因此可以在任意 tick 上反复调用。它复用的枚举顺序与 `check_stuck` 完全一致，
-    /// 所以它选中什么就是 `check_stuck` 会选中什么。
-    #[wasm_bindgen]
-    pub fn debug_stuck_probe(&mut self, x: Option<f64>, y: Option<f64>, z: Option<f64>) -> Vec<f64> {
-        let at = match (x, y, z) {
-            (Some(a), Some(b), Some(c)) => Some([a, b, c]),
-            _ => None,
-        };
-        player::stuck_probe(&mut self.world, &self.player, at).to_vec()
-    }
-
-    /// `.phy` 凸体转 brush 的只读诊断：JSON 数组 `[块数, box bevel, edge bevel, 退回三角形路径的块数]`。
-    ///
-    /// 数据源是 `build_world` 第 2.5 步的统计（每次 `build_world` 覆盖）。存在的理由：`eprintln!`
-    /// 在 wasm 侧不落到 JS 控制台，而"接线后到底有多少块走了 brush 平面表、补面量级多大"需要可查。
-    #[wasm_bindgen]
-    pub fn debug_hull_stats(&self) -> String {
-        format!(
-            "[{},{},{},{}]",
-            self.hull_stats[0], self.hull_stats[1], self.hull_stats[2], self.hull_stats[3]
-        )
-    }
-
-    /// 取玩家**当前**碰撞箱的六个分量：`[min_x, min_y, min_z, max_x, max_y, max_z]`。
-    ///
-    /// 只读诊断。存在的理由：`set_hull(half_width, stand_height, duck_height)` 的**第三个
-    /// 参数是蹲下高度，不是 z 向伸长** —— `player::apply_hull` 把 z 半伸直接取成
-    /// `half_width`，所以 `set_hull(16, 72, 54)` 的站立盒是 **32 × 72 × 32**（x × y × z），
-    /// 蹲下盒是 32 × 54 × 32。这个参数含义容易被误读成「向前探 54 HU」，本绑定给出真值。
-    #[wasm_bindgen]
-    pub fn debug_hull(&self) -> Vec<f64> {
-        let mins = self.player.mins();
-        let maxs = self.player.maxs();
-        vec![
-            mins[0], mins[1], mins[2], maxs[0], maxs[1], maxs[2],
-        ]
-    }
-
-    /// 卡死判据的盒尺寸敏感性扫描：给定脚底位置，把盒高与 z 半伸扫成一张表。
-    ///
-    /// 每个格子是一次独立的 `World::is_position_free`。盒的**底面**钉在 `feet_y`：
-    /// `origin` 取 `[x, feet_y, z]`，`mins = [-half_x, 0, -hz]`、`maxs = [half_x, h, hz]`，
-    /// 于是盒恰好跨 y 从 `feet_y` 到 `feet_y + h`。**不推进物理、不改任何状态。**
-    ///
-    /// 返回 `(max_h + 1) * (max_hz + 1)` 个 0/1，**行优先**：
-    /// 第 `hi * (max_hz + 1) + zi` 格 = 盒高 `hi`、z 半伸 `zi` 时是否空闲（1 = 空）。
-    /// JS 侧按下式还原坐标轴：`hi = floor(i / (max_hz + 1))`、`zi = i % (max_hz + 1)`。
-    ///
-    /// **为什么需要它**：`player::check_stuck` 判"卡住"用的是**整个身体盒**
-    /// （`set_hull(16, 72, 54)` ⇒ 高 72、z 半伸 54）。而玩家盒 z 半伸 54 意味着身体向前
-    /// 探出 54 HU —— 在任何一个"前方地面比脚下高"的坡上，那 54 HU 内的坡面都会落进身体盒，
-    /// 于是判据必然报"卡在实体里"。本表把"多小的盒才不误报"直接量出来，
-    /// 使看板 `T-065` §7 第 ④ 条（判据是否选错盒）可裁决。
-    #[wasm_bindgen]
-    pub fn debug_free_table(
-        &mut self,
-        x: f64,
-        feet_y: f64,
-        z: f64,
-        half_x: f64,
-        max_h: usize,
-        max_hz: usize,
-    ) -> Vec<f64> {
-        let cols = max_hz + 1;
-        let mut out = Vec::with_capacity((max_h + 1) * cols);
-        for hi in 0..=max_h {
-            let h = hi as f64;
-            let mins = [-half_x, 0.0, 0.0];
-            let maxs = [half_x, h, 0.0];
-            for zi in 0..=max_hz {
-                let hz = zi as f64;
-                let mut mm = mins;
-                let mut xx = maxs;
-                mm[2] = -hz;
-                xx[2] = hz;
-                let ok = self
-                    .world
-                    .is_position_free(&[x, feet_y, z], &mm, &xx);
-                out.push(if ok { 1.0 } else { 0.0 });
-            }
-        }
-        out
-    }
-
-    /// 「沿指定方向能否脱身」的扫描：看板 `T-065` §8 修法 **E** 的实测入口。
-    ///
-    /// 对 `d = 1 ..= max_d` 每个整数距离，逐步做两件事并各记一个数：
-    /// ① 用 `World::trace` 把当前盒体沿 `(nx,ny,nz)` 扫 `d` HU，取 `fraction`；
-    /// ② 扫掠终点用 `World::is_position_free` 判是否空闲（1/0）。
-    ///
-    /// 返回 `2 * max_d` 个数，成对存放：**第 `2*(d-1)` 项是 fraction、第 `2*(d-1)+1` 项是
-    /// 终点空闲标记**。`fraction = 1.0` 表示这一步**没被任何东西挡住**。
-    ///
-    /// 盒取玩家**当前**箱；不推进物理、不改任何状态。
-    ///
-    /// **为什么两个数都要**：只有 fraction = 1 不够 —— 沿法线抬起来可能仍落在实体里
-    /// （看板 `T-065` §7 实测：卡死点沿 +y 抬 1~8 HU 全部仍不空闲）。
-    /// 只有终点空闲也不够 —— 终点可能恰好在实体的另一侧，中间隔着材料。
-    /// **两个同时成立**才等于「这一步真的能脱身」。
-    // 7 个入参是调试探针的 JS 契约（坐标 3 + 法线 3 + 步数），收成结构体反而让
-    // 控制台/测试调用点全部改写；函数体是纯循环，没有内部复杂度。
-    #[allow(clippy::too_many_arguments)]
-    #[wasm_bindgen]
-    pub fn debug_normal_escape(
-        &mut self,
-        x: f64,
-        y: f64,
-        z: f64,
-        nx: f64,
-        ny: f64,
-        nz: f64,
-        max_d: usize,
-    ) -> Vec<f64> {
-        let mins = self.player.mins();
-        let maxs = self.player.maxs();
-        let start = [x, y, z];
-        let mut out = Vec::with_capacity(2 * max_d);
-        for d in 1..=max_d {
-            let end = [x + nx * d as f64, y + ny * d as f64, z + nz * d as f64];
-            let tr = self.world.trace(&start, &end, &mins, &maxs);
-            let free = self.world.is_position_free(&end, &mins, &maxs);
-            out.push(tr.fraction);
-            out.push(if free { 1.0 } else { 0.0 });
-        }
-        out
     }
 
     /// `tick` 的核心步进：
@@ -1262,6 +975,315 @@ impl PhysWorld {
             }
             None => JsValue::NULL,
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// phys-debug 专属导出（feature = "phys-debug"）
+//
+// 只有 apps/debug 经 websurf-wasm-bindings 的 debug-tools 打开本 feature；apps/game 与
+// apps/viewer 的产物里没有下面这 12 个导出。apps/game 运行期唯一用到的 debug_ 导出是
+// PhysWorld::debug_line_trace（env_laser 射线截断），它留在上面的公共 impl 里。
+// ---------------------------------------------------------------------------
+#[cfg(feature = "phys-debug")]
+#[wasm_bindgen]
+impl PhysWorld {
+    // -----------------------------------------------------------------------
+    // 种子面 v2：整实例状态的可序列化投影，实现在 `phys::seed`（phys-debug 专属）
+    // （`extract_seed` / `apply_seed` 互逆一对）。本文件只负责 JSON 边界与借用规则。
+    // -----------------------------------------------------------------------
+
+    /// 用一份种子 JSON 覆盖本实例状态（scratch 实例的单向写入入口）。
+    ///
+    /// `v` 必须等于 `seed::SEED_SCHEMA_VERSION`（= 2），否则 `Err`；
+    /// NaN / Inf 一律拒绝（FAIL LOUD），不做静默夹取。
+    /// `triggers_inside` 的长度必须与本实例的触发器数量一致，否则 `Err`。
+    /// 事件槽不参与播种——事件不可播种。
+    ///
+    /// 只写本实例：不读自身其余状态做决策、不触碰其他实例。
+    /// 9 参 `set_state`的签名与语义不受本方法影响。
+    pub fn set_state_ex(&mut self, json: &str) -> Result<(), JsValue> {
+        let s: seed::SeedState =
+            serde_json::from_str(json).map_err(|e| to_js_err(e, "set_state_ex"))?;
+        self.apply_seed(&s).map_err(|e| JsValue::from_str(&e))
+    }
+
+    /// 导出本实例的全量状态 JSON，与 `set_state_ex` 同一 schema。
+    ///
+    /// `include_event = false`：不导出事件槽。种子链必须用 `false`，因为事件不可播种。
+    /// `include_event = true`：附带当前待取事件，供审计/调试导出。
+    ///
+    /// f64 经 serde_json 往返位级精确，因此"导出 → 写回"不引入数值漂移。
+    /// 非有限值会被序列化成 `null` 且**不在此报错**，由写回侧 `set_state_ex` 拒绝。
+    pub fn state_full_json(&self, include_event: bool) -> Result<String, JsValue> {
+        serde_json::to_string(&self.extract_seed(include_event))
+            .map_err(|e| to_js_err(e, "state_full_json"))
+    }
+
+    /// 诊断计数：盒-AABB 门校验被否决的次数（进程内单调递增，无复位入口）。
+    /// 计数点在 `src/phys/world.rs` 的 `clip_planes` 的两个否决分支，
+    /// 计数器是 `world::GATE_VETO_COUNT` —— **同一 wasm 模块内所有实例共享一份**，
+    /// 因此它不是"本实例的"统计。消费方只有 `apps/game/scripts` 的三个排查脚本。
+    pub fn gate_veto_count(&self) -> u32 {
+        world::GATE_VETO_COUNT.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// 诊断：对给定线段做一次扫掠，返回 `[fraction, normal_x, normal_y, normal_z]`。
+    ///
+    /// 扫掠盒取玩家**当前**碰撞箱（`self.player.mins()` / `maxs()`）——
+    /// 蹲伏时用的是蹲箱，所以同一线段在站/蹲两态下结果不同。未命中时法线回填 `[0,0,0]`。
+    /// 不推进物理、不改任何状态。消费方只有 `apps/game/scripts/phys-gate-probe2.mjs`（已移除）。
+    pub fn debug_trace(&mut self, sx: f64, sy: f64, sz: f64, ex: f64, ey: f64, ez: f64) -> Vec<f64> {
+        let mins = self.player.mins();
+        let maxs = self.player.maxs();
+        let r = self.world.trace(
+            &[sx, sy, sz],
+            &[ex, ey, ez],
+            &mins,
+            &maxs,
+        );
+        let n = r.normal.unwrap_or([0.0, 0.0, 0.0]);
+        vec![r.fraction, n[0], n[1], n[2]]
+    }
+
+    /// 诊断：**在给定点上并置两种碰撞查询**，判定它们是否一致。
+    ///
+    /// 返回 6 个数：
+    /// `[0] is_position_free（true=1 / false=0）`、
+    /// `[1] 原地向下扫掠 1 HU 的 fraction`、
+    /// `[2..4] 该扫掠命中的法线`、
+    /// `[5] stuck_ticks`。
+    ///
+    /// 为什么要并置：移动走 `World::trace`，而 `player::check_stuck` 走
+    /// `World::is_position_free` —— **两个不同的查询**。若某处 `is_position_free` 说
+    /// 「不空」而 `trace` 说「通畅」，`check_stuck` 就会把玩家判成卡死：60 个挤出候选
+    /// 全失败 → `stuck_ticks` 自增、速度清零、返回 true → `player_tick` **跳过本 tick
+    /// 全部移动与落地判定**，表现为「有速度、周围无障碍、却完全不动」。
+    ///
+    /// 实测触发场景（`surf_666`，`models/props/666/s1_ramp1b.mdl` 的 .phy 三角网格）：
+    /// 玩家在 `(x=-13536.41, y=14560.03, z=-9786.37)` 卡住 3.5 秒，同位置 60 HU 的水平
+    /// 扫掠 `debug_trace` 全部 `fraction = 1.0`（畅通），但本方法会报
+    /// `is_position_free = 0` ⇒ 卡死分支。
+    ///
+    /// 扫掠盒取玩家**当前**碰撞箱，与 [`PhysWorld::debug_trace`] 同口径。不推进物理、
+    /// 不改任何状态。
+    #[wasm_bindgen]
+    pub fn debug_position_probe(&mut self, x: f64, y: f64, z: f64) -> Vec<f64> {
+        let mins = self.player.mins();
+        let maxs = self.player.maxs();
+        let free = self.world.is_position_free(&[x, y, z], &mins, &maxs);
+        let r = self.world.trace(&[x, y, z], &[x, y - 1.0, z], &mins, &maxs);
+        let n = r.normal.unwrap_or([0.0, 0.0, 0.0]);
+        vec![
+            if free { 1.0 } else { 0.0 },
+            r.fraction,
+            n[0],
+            n[1],
+            n[2],
+            self.player.stuck_ticks as f64,
+        ]
+    }
+
+    /// 归属诊断：报"哪些碰撞体把这个盒体判成实心"。
+    ///
+    /// 返回 18 个数：
+    ///
+    /// ```text
+    /// [0]     空闲（1）/ 不空闲（0）—— 与 debug_position_probe[0] 同义，便于单看本表
+    /// [1]     brush 命中数
+    /// [2]     三角形命中数
+    /// [3..5]  第一个实心 brush 的 AABB min xyz；无 brush 命中时全为 0
+    /// [6..8]  第一个实心 brush 的 AABB max xyz；无 brush 命中时全为 0
+    /// [9]     有三角形命中（1/0）
+    /// [10]    三角形所属网格在 tri_meshes 的下标（`TriEntry::mesh_index`）；无命中时为 -1
+    /// [11..13] 第一个实心三角形的 AABB min xyz
+    /// [14..16] 第一个实心三角形的 AABB max xyz
+    /// [17]    该三角形在网格 indices 里的首个顶点下标（b / c 未导出，定位靠 AABB）
+    /// ```
+    ///
+    /// 两个计数都是**逐个候选**判实心的数量，不是 broadphase 候选数。
+    /// 碰撞箱取玩家**当前**箱，与 [`PhysWorld::debug_trace`] 同口径；不推进物理、不改状态。
+    /// 名字经 [`PhysWorld::debug_tri_mesh_name`] 按下标 10 取。
+    ///
+    /// 用途：看板 `T-065` 的待裁决第 ① 条 —— 查明把玩家判成实心的到底是
+    /// 世界 brush 还是某个模型的 .phy 三角网格，以及是哪一个模型。
+    #[wasm_bindgen]
+    pub fn debug_collide_attrib(&mut self, x: f64, y: f64, z: f64) -> Vec<f64> {
+        let mins = self.player.mins();
+        let maxs = self.player.maxs();
+        let a = self.world.collide_attrib(&[x, y, z], &mins, &maxs);
+        let mut out = vec![if a.free { 1.0 } else { 0.0 }, a.brush_hits as f64, a.tri_hits as f64];
+        match a.first_brush_aabb {
+            Some((lo, hi)) => {
+                out.extend_from_slice(&lo);
+                out.extend_from_slice(&hi);
+            }
+            // 无 brush 命中：补 6 个 0（与 Some 分支的 3+3 等长，保持返回长度恒为 18）
+            None => out.extend(std::iter::repeat_n(0.0, 6)),
+        }
+        match a.first_tri {
+            Some(t) => {
+                out.push(1.0);
+                out.push(t.mesh_index as f64);
+                out.extend_from_slice(&t.aabb.0);
+                out.extend_from_slice(&t.aabb.1);
+                out.push(t.verts[0] as f64);
+            }
+            // 同上：9 个占位（1 + 1 + 3 + 3 + 1）
+            None => out.extend_from_slice(&[0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+        }
+        out
+    }
+
+    /// 取 `World::tri_meshes` 第 `index` 个网格的模型名；下标越界返回空串。
+    ///
+    /// 供 [`PhysWorld::debug_collide_attrib`] 的下标 12 配套使用。名字来自 tri JSON 的
+    /// `name` 字段（形如 `models/props/666/s1_ramp1b.mdl`）。
+    #[wasm_bindgen]
+    pub fn debug_tri_mesh_name(&self, index: usize) -> String {
+        self.world
+            .tri_meshes
+            .get(index)
+            .map(|m| m.name.clone())
+            .unwrap_or_default()
+    }
+
+    /// 卡死挤出的只读重放（见 [`player::stuck_probe`] 的完整文档）。
+    ///
+    /// 返回 13 个数：`[0]` 该点是否空闲；`[1..4]` 会选中候选的位移 dx/dy/dz
+    /// （无胜出为 -999）；`[5]` 该候选的 dist（无胜出为 -1）；`[6]` 该候选在
+    /// `STUCK_DIRS` 里的下标（无胜出为 -1）；`[7]` 试了几个候选才成功；
+    /// `[8..12]` dist=1 时 +y / +x / -x / +z / -z 各自是否空闲（1/0）。
+    ///
+    /// 三个坐标就是试探点，**不需要先把玩家挪过去**；碰撞箱仍取玩家**当前**箱。
+    /// 省略三个坐标则等价于用玩家当前 `origin`（与 `check_stuck` 的输入一致）。
+    ///
+    /// **纯诊断，不改任何状态** —— 不挪 `origin`、不写 `stuck_ticks`、不动 `velocity`，
+    /// 因此可以在任意 tick 上反复调用。它复用的枚举顺序与 `check_stuck` 完全一致，
+    /// 所以它选中什么就是 `check_stuck` 会选中什么。
+    #[wasm_bindgen]
+    pub fn debug_stuck_probe(&mut self, x: Option<f64>, y: Option<f64>, z: Option<f64>) -> Vec<f64> {
+        let at = match (x, y, z) {
+            (Some(a), Some(b), Some(c)) => Some([a, b, c]),
+            _ => None,
+        };
+        player::stuck_probe(&mut self.world, &self.player, at).to_vec()
+    }
+
+    /// `.phy` 凸体转 brush 的只读诊断：JSON 数组 `[块数, box bevel, edge bevel, 退回三角形路径的块数]`。
+    ///
+    /// 数据源是 `build_world` 第 2.5 步的统计（每次 `build_world` 覆盖）。存在的理由：`eprintln!`
+    /// 在 wasm 侧不落到 JS 控制台，而"接线后到底有多少块走了 brush 平面表、补面量级多大"需要可查。
+    #[wasm_bindgen]
+    pub fn debug_hull_stats(&self) -> String {
+        format!(
+            "[{},{},{},{}]",
+            self.hull_stats[0], self.hull_stats[1], self.hull_stats[2], self.hull_stats[3]
+        )
+    }
+
+    /// 取玩家**当前**碰撞箱的六个分量：`[min_x, min_y, min_z, max_x, max_y, max_z]`。
+    ///
+    /// 只读诊断。存在的理由：`set_hull(half_width, stand_height, duck_height)` 的**第三个
+    /// 参数是蹲下高度，不是 z 向伸长** —— `player::apply_hull` 把 z 半伸直接取成
+    /// `half_width`，所以 `set_hull(16, 72, 54)` 的站立盒是 **32 × 72 × 32**（x × y × z），
+    /// 蹲下盒是 32 × 54 × 32。这个参数含义容易被误读成「向前探 54 HU」，本绑定给出真值。
+    #[wasm_bindgen]
+    pub fn debug_hull(&self) -> Vec<f64> {
+        let mins = self.player.mins();
+        let maxs = self.player.maxs();
+        vec![
+            mins[0], mins[1], mins[2], maxs[0], maxs[1], maxs[2],
+        ]
+    }
+
+    /// 卡死判据的盒尺寸敏感性扫描：给定脚底位置，把盒高与 z 半伸扫成一张表。
+    ///
+    /// 每个格子是一次独立的 `World::is_position_free`。盒的**底面**钉在 `feet_y`：
+    /// `origin` 取 `[x, feet_y, z]`，`mins = [-half_x, 0, -hz]`、`maxs = [half_x, h, hz]`，
+    /// 于是盒恰好跨 y 从 `feet_y` 到 `feet_y + h`。**不推进物理、不改任何状态。**
+    ///
+    /// 返回 `(max_h + 1) * (max_hz + 1)` 个 0/1，**行优先**：
+    /// 第 `hi * (max_hz + 1) + zi` 格 = 盒高 `hi`、z 半伸 `zi` 时是否空闲（1 = 空）。
+    /// JS 侧按下式还原坐标轴：`hi = floor(i / (max_hz + 1))`、`zi = i % (max_hz + 1)`。
+    ///
+    /// **为什么需要它**：`player::check_stuck` 判"卡住"用的是**整个身体盒**
+    /// （`set_hull(16, 72, 54)` ⇒ 高 72、z 半伸 54）。而玩家盒 z 半伸 54 意味着身体向前
+    /// 探出 54 HU —— 在任何一个"前方地面比脚下高"的坡上，那 54 HU 内的坡面都会落进身体盒，
+    /// 于是判据必然报"卡在实体里"。本表把"多小的盒才不误报"直接量出来，
+    /// 使看板 `T-065` §7 第 ④ 条（判据是否选错盒）可裁决。
+    #[wasm_bindgen]
+    pub fn debug_free_table(
+        &mut self,
+        x: f64,
+        feet_y: f64,
+        z: f64,
+        half_x: f64,
+        max_h: usize,
+        max_hz: usize,
+    ) -> Vec<f64> {
+        let cols = max_hz + 1;
+        let mut out = Vec::with_capacity((max_h + 1) * cols);
+        for hi in 0..=max_h {
+            let h = hi as f64;
+            let mins = [-half_x, 0.0, 0.0];
+            let maxs = [half_x, h, 0.0];
+            for zi in 0..=max_hz {
+                let hz = zi as f64;
+                let mut mm = mins;
+                let mut xx = maxs;
+                mm[2] = -hz;
+                xx[2] = hz;
+                let ok = self
+                    .world
+                    .is_position_free(&[x, feet_y, z], &mm, &xx);
+                out.push(if ok { 1.0 } else { 0.0 });
+            }
+        }
+        out
+    }
+
+    /// 「沿指定方向能否脱身」的扫描：看板 `T-065` §8 修法 **E** 的实测入口。
+    ///
+    /// 对 `d = 1 ..= max_d` 每个整数距离，逐步做两件事并各记一个数：
+    /// ① 用 `World::trace` 把当前盒体沿 `(nx,ny,nz)` 扫 `d` HU，取 `fraction`；
+    /// ② 扫掠终点用 `World::is_position_free` 判是否空闲（1/0）。
+    ///
+    /// 返回 `2 * max_d` 个数，成对存放：**第 `2*(d-1)` 项是 fraction、第 `2*(d-1)+1` 项是
+    /// 终点空闲标记**。`fraction = 1.0` 表示这一步**没被任何东西挡住**。
+    ///
+    /// 盒取玩家**当前**箱；不推进物理、不改任何状态。
+    ///
+    /// **为什么两个数都要**：只有 fraction = 1 不够 —— 沿法线抬起来可能仍落在实体里
+    /// （看板 `T-065` §7 实测：卡死点沿 +y 抬 1~8 HU 全部仍不空闲）。
+    /// 只有终点空闲也不够 —— 终点可能恰好在实体的另一侧，中间隔着材料。
+    /// **两个同时成立**才等于「这一步真的能脱身」。
+    // 7 个入参是调试探针的 JS 契约（坐标 3 + 法线 3 + 步数），收成结构体反而让
+    // 控制台/测试调用点全部改写；函数体是纯循环，没有内部复杂度。
+    #[allow(clippy::too_many_arguments)]
+    #[wasm_bindgen]
+    pub fn debug_normal_escape(
+        &mut self,
+        x: f64,
+        y: f64,
+        z: f64,
+        nx: f64,
+        ny: f64,
+        nz: f64,
+        max_d: usize,
+    ) -> Vec<f64> {
+        let mins = self.player.mins();
+        let maxs = self.player.maxs();
+        let start = [x, y, z];
+        let mut out = Vec::with_capacity(2 * max_d);
+        for d in 1..=max_d {
+            let end = [x + nx * d as f64, y + ny * d as f64, z + nz * d as f64];
+            let tr = self.world.trace(&start, &end, &mins, &maxs);
+            let free = self.world.is_position_free(&end, &mins, &maxs);
+            out.push(tr.fraction);
+            out.push(if free { 1.0 } else { 0.0 });
+        }
+        out
     }
 }
 

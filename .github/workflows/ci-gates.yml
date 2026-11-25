@@ -6,6 +6,7 @@
 #
 # 本文件实际跑的清单：
 #   rust-unit-tests — `cargo test -p websurf-phys`（共享层物理单测；含蹲姿/surf 回归、P2 幻影门）
+#                     与 `--features phys-debug`（12 个仅 debug 的 PhysWorld 导出 + phys::seed 面，D-134a）
 #   wasm-core-tests — `cargo test -p websurf-wasm-core`（宿主单测，2026-10-24 起第一次有 CI 覆盖；
 #                     test/maps 缺失时夹具类测试自行跳过，详见该 job 注释）
 #   source-contract — `apps/viewer` 的 `check-wasm-api.mjs --source-only`（Rust serde 键名 ↔ TS 接口键名；
@@ -65,6 +66,11 @@ jobs:
 
       - name: cargo test -p websurf-phys
         run: cargo test -p websurf-phys
+
+      # T-D134a：12 个仅 debug 的 PhysWorld 导出与 `phys::seed` 都在 `phys-debug` feature 后，
+      # 默认构建不再编译它们；第二遍保证门控面在 CI 里也有编译/测试证据（否则静默漏跑）。
+      - name: cargo test -p websurf-phys --features phys-debug
+        run: cargo test -p websurf-phys --features phys-debug
 
   # ── wasm-core 宿主单测（2026-10-24 加；host 构建含完整依赖树，冷构建 12~18 min ⇒ 必须带缓存）──
   wasm-core-tests:

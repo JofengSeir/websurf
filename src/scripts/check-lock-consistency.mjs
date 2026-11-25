@@ -195,6 +195,9 @@ if (existsSync(viewerToml)) {
 //   feature 闭包与 src/wasm-bindings/Cargo.toml 保持一致（glb-lite→glb→core 等）
 //   解析规则：`#[wasm_bindgen] impl BspProcessor { pub fn foo }` → bspprocessor_<js_name|foo>；
 //            `#[wasm_bindgen(js_name = X)] pub fn bar` → X；其余 `#[wasm_bindgen] pub fn f` → f。
+//   `physworld_*` 不走这条推导：它们的唯一闸门是 websurf-phys 的 `phys-debug` feature
+//   （12 个仅 debug 的导出），名字只出现在 pkg 的 .d.ts 里，由下面 ⑤ 的白名单逐名精确判
+//   （③ 因此跳过 `physworld_*`，不是豁免）。
 const BINDINGS_SRC = join(ROOT, 'src', 'wasm-bindings', 'src');
 const FEATURE_MODULES = {
   core: ['bsp/common.rs', 'texture.rs'],
@@ -222,13 +225,14 @@ const FEATURE_CLOSURE = {
 const DEP_GRAPH_EXPORTS = { debug: ['ChromaSampling'], game: [], viewer: [] };
 /** `.wasm` 体积真基线（字节；D-131 在 wt/t-d131 的干净构建实测）与容忍度（±3% 区间）。
  *  下界与上界都判：体积异常变小通常意味着导出面/feature 被误删，与 ⑥ 的逐名基线互为补充。 */
-const WASM_SIZE_BASELINE = { debug: 4241462, game: 4083001, viewer: 3669980 };
+const WASM_SIZE_BASELINE = { debug: 4241462, game: 4032115, viewer: 3669980 };
 const WASM_SIZE_TOLERANCE = 0.03;
 /** pkg 导出面逐名基线（task-85 B4）。
  *  来源：task-81 在 36cf19a 的干净构建（`.tmp/verifyA/baseline-real/exports-real.json`），
  *  并在 HEAD 7c938b1 的当次 pkg 上复核一致（自由函数 11/6/5，wasm 契约导出 82/68/17；
  *  D-131 移除 debug/game 两侧各 5 个零调用 PhysWorld 导出后，由当次构建实测复核；
- *  移除前为 87/73）。
+ *  移除前为 87/73）；T-D134a 把 12 个仅 debug 的 PhysWorld 导出移到 `phys-debug` feature 后，
+ *  debug 仍 82（差集 41 vs 29 个物理导出），game 68 → 56（`wasmExports` 逐名基线同批删这 12 项）。
  *  - fns：`pkg/*.d.ts` 的 `export function` 名集；
  *  - wasmExports：`WebAssembly.Module.exports` 名集，剔除 `memory` 与 `__*`（wasm-bindgen
  *    内部脚手架，随工具链版本可能变化，不属于契约面）。
@@ -275,16 +279,15 @@ const PKG_EXPORT_BASELINE = {
       'bspprocessor_parse_pvs_data', 'bspprocessor_parse_spawn_points', 'bspprocessor_parse_teleports', 'bspprocessor_read_pakfile_file',
       'bspprocessor_setVmtFallback', 'bspprocessor_take_mosaic_manifest', 'decode_vtf_to_png', 'decompress_mtz',
       'export_displacement_colliders', 'mosaic_decode', 'mosaic_encode', 'physworld_add_velocity',
-      'physworld_brush_offset', 'physworld_brush_solid', 'physworld_build_world', 'physworld_debug_collide_attrib', 'physworld_debug_free_table', 'physworld_debug_hull',
-      'physworld_debug_hull_stats', 'physworld_debug_line_trace', 'physworld_debug_normal_escape', 'physworld_debug_position_probe',
-      'physworld_debug_stuck_probe', 'physworld_debug_trace', 'physworld_debug_tri_mesh_name', 'physworld_gate_veto_count',
+      'physworld_brush_offset', 'physworld_brush_solid', 'physworld_build_world',
+      'physworld_debug_line_trace',
       'physworld_new', 'physworld_respawn',
       'physworld_set_auto_restore_hull', 'physworld_set_brush_offset', 'physworld_set_brush_solid', 'physworld_set_death_y', 'physworld_set_hull', 'physworld_set_jump_height',
       'physworld_set_max_horizontal_speed', 'physworld_set_noclip', 'physworld_set_params', 'physworld_set_push_velocity',
-      'physworld_set_spawn_points', 'physworld_set_state', 'physworld_set_state_ex', 'physworld_set_teleport_enabled',
+      'physworld_set_spawn_points', 'physworld_set_state', 'physworld_set_teleport_enabled',
       'physworld_set_teleport_filter_enabled',
       'physworld_set_teleport_player_name', 'physworld_set_velocity', 'physworld_state',
-      'physworld_state_full_json', 'physworld_take_event', 'physworld_teleport_enabled',
+      'physworld_take_event', 'physworld_teleport_enabled',
       'physworld_teleport_to',
       'physworld_teleport_to_spawn', 'physworld_tick',
     ],
@@ -529,13 +532,16 @@ if (pkgPresent > 0 && exportSets.debug && exportSets.game && exportSets.viewer) 
   for (const n of gameOnly) fail(`wasm 导出面越界：game 有而 debug 没有 ${n}（game 必须是 debug 子集）`);
 
   // ③ debug-only：features 推导差集严格逐名；依赖图偶然导出为「可选登记」（出现必须已登记，消失不报错）
+  //     `physworld_*` 由 websurf-phys 的 `phys-debug` feature 决定（不从本 crate 源码推导），
+  //     其 debug-only 差集由 ⑤ 按 12 项白名单精确比对，故 ③ 不重复判。
   const debugOnly = sorted(exportSets.debug).filter((n) => !exportSets.game.has(n));
   const derivedDebugOnly = sorted([...derived.debug].filter((n) => !derived.game.has(n)));
   const missingDebugOnly = derivedDebugOnly.filter((n) => !debugOnly.includes(n));
   for (const n of missingDebugOnly) {
     fail(`features 推导的 debug-only 导出在 pkg 中缺失：${n}（推导差集必须逐名命中；DEP_GRAPH_EXPORTS 不豁免）`);
   }
-  const extraDebugOnly = debugOnly.filter((n) => !derivedDebugOnly.includes(n) && !DEP_GRAPH_EXPORTS.debug.includes(n));
+  const extraDebugOnly = debugOnly.filter((n) => !derivedDebugOnly.includes(n) && !DEP_GRAPH_EXPORTS.debug.includes(n)
+    && !/^physworld_/.test(n));
   for (const n of extraDebugOnly) {
     fail(`debug-only 出现 features 推导外的导出：${n}（新差异必须先落到 bindings feature/源码，或登记 DEP_GRAPH_EXPORTS）`);
   }
@@ -557,12 +563,41 @@ if (pkgPresent > 0 && exportSets.debug && exportSets.game && exportSets.viewer) 
   };
 
   // ⑤ 物理导出面（physworld_* / PhysWorld；未被 bindings 源码推导覆盖，单独判据）
+  //    T-D134a 起 game 是 debug 的**真子集**：差集必须**精确等于**下面 12 个 phys-debug 门控导出
+  //    （websurf-phys 的 `phys-debug` feature，只有 apps/debug 的 `debug-tools` 打开）；
+  //    多于或少于 12 项都 FAIL —— 少一项说明门控没生效/误删了公共导出，多一项说明有人把
+  //    公共导出也塞进了 cfg，或把 game 在用的方法门控掉。
+  //    `physworld_debug_line_trace` 不在差集里：apps/game 的 env_laser 射线截断在调它
+  //    （apps/game/src/renderer/renderer-main.ts），它必须两端都有。
+  const PHYS_DEBUG_ONLY_EXPORTS = [
+    'physworld_debug_collide_attrib',
+    'physworld_debug_free_table',
+    'physworld_debug_hull',
+    'physworld_debug_hull_stats',
+    'physworld_debug_normal_escape',
+    'physworld_debug_position_probe',
+    'physworld_debug_stuck_probe',
+    'physworld_debug_trace',
+    'physworld_debug_tri_mesh_name',
+    'physworld_gate_veto_count',
+    'physworld_set_state_ex',
+    'physworld_state_full_json',
+  ];
   const phys = (app) => sorted(exportSets[app]).filter((n) => PHYS_EXPORT_RE.test(n));
   const physDebug = phys('debug');
   const physGame = phys('game');
   const physViewer = phys('viewer');
   if (physDebug.length === 0) fail('debug wasm 没有 physworld_* 导出（物理内核判据空转）');
-  if (JSON.stringify(physDebug) !== JSON.stringify(physGame)) fail(`debug/game 物理导出面不一致：debug=${physDebug.length} game=${physGame.length}`);
+  for (const n of physGame.filter((x) => !physDebug.includes(x))) {
+    fail(`wasm 导出面越界：game 有而 debug 没有物理导出 ${n}（game 必须是 debug 子集）`);
+  }
+  const physDebugOnly = physDebug.filter((n) => !physGame.includes(n));
+  for (const n of PHYS_DEBUG_ONLY_EXPORTS.filter((x) => !physDebugOnly.includes(x))) {
+    fail(`debug 缺 phys-debug 门控导出 ${n}（差集必须精确等于 12 项；检查 phys-debug 是否启用、是否误门控）`);
+  }
+  for (const n of physDebugOnly.filter((x) => !PHYS_DEBUG_ONLY_EXPORTS.includes(x))) {
+    fail(`debug/game 物理导出差集多出 ${n}（差集必须精确等于 T-D134a 的 12 项门控面；除 debug_line_trace 外的公共导出不得只在一端）`);
+  }
   if (physViewer.length !== 0) fail(`viewer wasm 出现物理导出（${physViewer.slice(0, 5).join(',')}…）`);
 
   // ⑥ .wasm 体积预算（task-81 真基线 ±3% 区间；上下界都判）
