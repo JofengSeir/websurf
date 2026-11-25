@@ -992,6 +992,7 @@ fn check_ladder(world: &mut World, p: &Player) -> Option<(usize, [f64; 3])> {
     let pitch_rad = p.pitch * DEG2RAD;
     let cp = pitch_rad.cos();
     let fwd = [-yaw_rad.sin() * cp, pitch_rad.sin(), -yaw_rad.cos() * cp];
+    let fwd_flat = [-yaw_rad.sin(), 0.0, -yaw_rad.cos()];
     let right = [yaw_rad.cos(), 0.0, -yaw_rad.sin()];
     let fmove = (if p.input.forward { 1.0 } else { 0.0 }) - (if p.input.back { 1.0 } else { 0.0 });
     let smove = (if p.input.right { 1.0 } else { 0.0 }) - (if p.input.left { 1.0 } else { 0.0 });
@@ -1001,6 +1002,12 @@ fn check_ladder(world: &mut World, p: &Player) -> Option<(usize, [f64; 3])> {
         fwd[2] * fmove + right[2] * smove,
     ];
     let move_len = normalize(&mut move_dir);
+    let mut horiz_dir = [
+        fwd_flat[0] * fmove + right[0] * smove,
+        0.0,
+        fwd_flat[2] * fmove + right[2] * smove,
+    ];
+    let horiz_len = normalize(&mut horiz_dir);
 
     if let Some(cur_idx) = p.on_ladder {
         let end = [
@@ -1008,10 +1015,12 @@ fn check_ladder(world: &mut World, p: &Player) -> Option<(usize, [f64; 3])> {
             p.origin[1] - p.ladder_facing[1] * 2.0,
             p.origin[2] - p.ladder_facing[2] * 2.0,
         ];
+        let pulling_away = (horiz_len > 0.0 && dot(&horiz_dir, &p.ladder_facing) > 0.25)
+            || (move_len > 0.0 && dot(&move_dir, &p.ladder_facing) > 0.25);
         if let Some((hit_idx, hit_normal, start_solid)) =
             world.trace_ladder(&p.origin, &end, &mins, &maxs)
         {
-            if move_len > 0.0 && dot(&move_dir, &p.ladder_facing) > 0.25 {
+            if pulling_away {
                 let down = [p.origin[0], p.origin[1] - 2.0, p.origin[2]];
                 let tr_ground = world.trace(&p.origin, &down, &mins, &maxs);
                 if tr_ground.fraction < 1.0
@@ -1031,7 +1040,7 @@ fn check_ladder(world: &mut World, p: &Player) -> Option<(usize, [f64; 3])> {
             return Some((hit_idx, hit_normal));
         }
         if world.ladder_at(&p.origin, &mins, &maxs) == Some(cur_idx) {
-            if move_len > 0.0 && dot(&move_dir, &p.ladder_facing) > 0.25 {
+            if pulling_away {
                 let down = [p.origin[0], p.origin[1] - 2.0, p.origin[2]];
                 let tr_ground = world.trace(&p.origin, &down, &mins, &maxs);
                 if tr_ground.fraction < 1.0
@@ -1045,13 +1054,24 @@ fn check_ladder(world: &mut World, p: &Player) -> Option<(usize, [f64; 3])> {
         return None;
     }
 
+    let end_horiz = [
+        p.origin[0] + horiz_dir[0] * 2.0,
+        p.origin[1] + horiz_dir[1] * 2.0,
+        p.origin[2] + horiz_dir[2] * 2.0,
+    ];
     let probe = if move_len > 0.0 { move_dir } else { fwd };
-    let end = [
+    let end_3d = [
         p.origin[0] + probe[0] * 2.0,
         p.origin[1] + probe[1] * 2.0,
         p.origin[2] + probe[2] * 2.0,
     ];
-    let hit = world.trace_ladder(&p.origin, &end, &mins, &maxs).or_else(|| {
+    let hit = (if horiz_len > 0.0 {
+        world.trace_ladder(&p.origin, &end_horiz, &mins, &maxs)
+    } else {
+        None
+    })
+    .or_else(|| world.trace_ladder(&p.origin, &end_3d, &mins, &maxs))
+    .or_else(|| {
         if !p.on_ground {
             world
                 .ladder_at(&p.origin, &mins, &maxs)
@@ -1064,10 +1084,12 @@ fn check_ladder(world: &mut World, p: &Player) -> Option<(usize, [f64; 3])> {
     if !p.on_ground {
         return Some((idx, normal));
     }
-    if move_len <= 0.0 {
+    if move_len <= 0.0 && horiz_len <= 0.0 {
         return None;
     }
-    if dot(&move_dir, &normal) < -0.2 {
+    if (horiz_len > 0.0 && dot(&horiz_dir, &normal) < -0.15)
+        || (move_len > 0.0 && dot(&move_dir, &normal) < -0.15)
+    {
         return Some((idx, normal));
     }
     if normal[1] > 0.7 {
@@ -1181,6 +1203,37 @@ fn ladder_move(world: &mut World, p: &mut Player, params: &PhysParams, dt: f64, 
         let h_raw = normalize(&mut h_wish);
         let h_speed = h_raw.min(LADDER_SPEED * std::f64::consts::SQRT_2);
         p.velocity = [h_wish[0] * h_speed, 0.0, h_wish[2] * h_speed];
+    }
+
+    // 若玩家盒当前已嵌入梯体内部（如移动 func_door 梯子推入玩家），先沿 +ladder_facing 推出到梯面外侧，
+    // 防止 try_player_move 因 start_solid=true 原地卡死或挤穿背面。
+    let mins = p.mins();
+    let maxs = p.maxs();
+    if crate::phys::world::box_in_brush(&p.origin, &mins, &maxs, &world.ladders[ladder_idx].planes) {
+        let mut best_dot = 0.8f64;
+        let mut push = 0.0f64;
+        for plane in &world.ladders[ladder_idx].planes {
+            let pd = dot(&plane.normal, &p.ladder_facing);
+            if pd > best_dot {
+                best_dot = pd;
+                let offset = (if plane.normal[0] < 0.0 { maxs[0] } else { mins[0] }) * plane.normal[0]
+                    + (if plane.normal[1] < 0.0 { maxs[1] } else { mins[1] }) * plane.normal[1]
+                    + (if plane.normal[2] < 0.0 { maxs[2] } else { mins[2] }) * plane.normal[2];
+                let signed_d = dot(&plane.normal, &p.origin) - (plane.dist - offset);
+                push = -signed_d;
+            }
+        }
+        if push > 0.0 && push <= 32.0 {
+            let step_out = push + DIST_EPSILON;
+            let ejected = [
+                p.origin[0] + p.ladder_facing[0] * step_out,
+                p.origin[1] + p.ladder_facing[1] * step_out,
+                p.origin[2] + p.ladder_facing[2] * step_out,
+            ];
+            if world.is_position_free(&ejected, &mins, &maxs) {
+                p.origin = ejected;
+            }
+        }
     }
 
     try_player_move(world, p, params, dt);

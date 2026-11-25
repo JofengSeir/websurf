@@ -470,5 +470,49 @@ fn pressing_back_on_ground_detaches_from_ladder() {
     assert!(p.on_ladder.is_none(), "在地面按 S 远离梯子后应脱离梯子");
 }
 
+#[test]
+fn steep_upward_pitch_grabs_ladder_and_embedded_ladder_ejects_cleanly() {
+    let min: V3 = [10974.0, 880.0, -2932.0];
+    let max: V3 = [10975.0, 1536.0, -2892.0];
+    let mut w = World::new();
+    w.solids.push(box_brush([10800.0, 848.0, -3100.0], [11100.0, 880.0, -2800.0], -1));
+    w.solids.push(box_brush(min, max, -1));
+    w.ladders.push(LadderVolume {
+        planes: box_planes(min, max),
+        min,
+        max,
+        facing: [-1.0, 0.0, 0.0],
+        entity: -1,
+    });
+    w.build_index();
+
+    // 1. 复现用户截图视角：yaw = -28.4, pitch = 73.7 仰视，站在地面按 W 走进梯面
+    let params = PhysParams::default();
+    let mut p = create_player([10950.0, 882.0, -2901.0], &params);
+    p.yaw = -28.4;
+    p.pitch = 73.7;
+    settle(&mut w, &mut p, &params);
+    p.input.forward = true;
+    for _ in 0..50 {
+        player_tick(&mut w, &mut p, &params, DT);
+    }
+    assert!(p.on_ladder.is_some(), "大仰角仰视（pitch=73.7°）按 W 走进梯子应能抓住");
+    assert!(p.origin[1] > 900.0, "抓住后应顺利攀爬，实际 y={}", p.origin[1]);
+    assert!(p.origin[0] <= 10958.5, "不应穿透梯面，实际 x={}", p.origin[0]);
+
+    // 2. 轻微嵌入 1 HU 梯体 6 HU（例如移动门推入玩家）时，应自动推出至正面并正常攀爬
+    let mut p2 = create_player([10964.0, 920.0, -2912.0], &params);
+    p2.yaw = -90.0;
+    p2.pitch = 45.0;
+    p2.on_ground = false;
+    p2.input.forward = true;
+    for _ in 0..40 {
+        player_tick(&mut w, &mut p2, &params, DT);
+    }
+    assert!(p2.on_ladder.is_some(), "嵌入梯体后仍应保持抓梯");
+    assert!(p2.origin[0] <= 10958.5, "嵌入后应被推出到梯前而非挤穿背面，实际 x={}", p2.origin[0]);
+    assert!(p2.origin[1] > 960.0, "推出后应继续攀爬上升，实际 y={}", p2.origin[1]);
+}
+
 
 
