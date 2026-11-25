@@ -83,7 +83,7 @@ node src/scripts/check-render-parity.mjs
 
 ### 2.4 CI
 
-CI 跑 `.github/workflows/ci-gates.yml`：`cargo test -p websurf-phys`、`cargo test -p websurf-wasm-core`（宿主；缺夹具时相关测试自行跳过）、viewer `check-wasm-api --source-only` 源码契约、`check-render-parity.mjs`、`check-shader-anchors.mjs`（three 0.165.0 的 GLSL 锚点 + 反空洞守卫；three 锁**精确版本**，不再吃 `^` 浮动）、三端 typecheck、三端 wasm 构建 + `check:api` + 共享产物指纹 / 锁一致性 / GLB 一致性（**GLB 在 CI 无 `test/maps` 夹具时 SKIP**）；debug/game 各有一份 wasm+TS 构建冒烟。CI 只随 push `main` 与 PR 跑（推 `dev` 不触发、纯 `*.md` 改动不触发）。
+CI 跑 `.github/workflows/ci-gates.yml`：`cargo test -p websurf-phys`、`cargo test -p websurf-wasm-core`（宿主；缺夹具时相关测试自行跳过）、viewer `check-wasm-api --source-only` 源码契约、`check-render-parity.mjs`、`check-shader-anchors.mjs`（three 0.165.0 的 GLSL 锚点 + 反空洞守卫；three 锁**精确版本**，不再吃 `^` 浮动）、三端 typecheck、`test-ts-shared.mjs`（node:test：`sim-clock` / `shared-state` / `config-sync` 纯逻辑单测）+ `check-entity-io.mjs`（实体 I/O 合成自测；CI 无 `test/maps` 夹具时地图组 SKIP 并 exit 0）、三端 wasm 构建 + `check:api` + 共享产物指纹 / 锁一致性 / GLB 一致性（**GLB 在 CI 无 `test/maps` 夹具时 SKIP**）；debug/game 各有一份 wasm+TS 构建冒烟。CI 只随 push `main` 与 PR 跑（推 `dev` 不触发、纯 `*.md` 改动不触发）。
 
 **提交前**至少跑与改动相关的构建 / 类型检查；**没跑成功的项要在提交信息里写清楚**。
 

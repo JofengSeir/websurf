@@ -1,0 +1,21 @@
+{
+  // 三端共享编译选项（T-P2-4）。apps/debug、apps/game、apps/viewer 的 tsconfig.json
+  // 通过 "extends": "../../tsconfig.base.json" 继承本文件，只保留各端差异项
+  // （noEmit、types、verbatimModuleSyntax、resolveJsonModule、baseUrl/paths、include 等）。
+  //
+  // 口径：仅放三端原本就一致的交集；noFallthroughCasesInSwitch 对三端都是零存量报错，
+  // 因此统一开启。noUnusedLocals / noUnusedParameters 暂不进入基座（存量报错过多，
+  // 见 T-P2-4 卡片 OUT-OF-SCOPE），仍由需要的端自行开启。
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
+    "strict": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true
+  }
+}

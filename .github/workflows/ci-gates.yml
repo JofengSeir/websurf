@@ -15,6 +15,8 @@
 #                     锚点必须真实存在于 three 0.165.0 的 ShaderChunk 且被某个 ShaderLib 模板 include，
 #                     否则运行时字符串替换静默失效（不抛错、只是效果没了）；带反空洞守卫（2026-11-25）
 #   ts-typecheck    — 三端 `npm run typecheck`（tsc；此前 TS 类型错误只在合并后的 deploy-pages 才暴露）
+#                     + `test-ts-shared.mjs`（node:test：sim-clock / shared-state / config-sync 纯逻辑单测）
+#                     + `check-entity-io.mjs`（实体 I/O 合成自测 20 例；无 `test/maps` 时地图组 SKIP，2026-11-25）
 #   glb-parity      — 三端 `npm run build:wasm` + `build:ts`（产物）+ 三端 `check:api`（wasm 导出 ↔ TS 导入契约）
 #                     + `check-shared-artifacts.mjs`（产物内共享模块指纹，缺产物 SKIP）
 #                     + `check-lock-consistency.mjs`（Cargo.lock 归属/版本 + wasm 导出面）
@@ -185,6 +187,16 @@ jobs:
             echo "== apps/$app =="
             (cd "apps/$app" && npm ci && npm run typecheck)
           done
+
+      # 纯逻辑单测（node:test / node:assert，Node 内置，不引第三方测试框架）。
+      # esbuild 由 test-ts-shared.mjs 从 apps/*/node_modules 解析，故必须排在上一步 npm ci 之后。
+      - name: TS shared unit tests (node:test)
+        run: node src/scripts/test-ts-shared.mjs
+
+      # 实体 I/O 合成自测（A 组 20 例不依赖地图夹具）；test/maps 缺失时 B/C 组自行 SKIP 并 exit 0，
+      # 与 check-glb-parity.mjs 的缺夹具约定一致。
+      - name: Entity I/O selftest (synthetic; map groups SKIP without fixtures)
+        run: node src/scripts/check-entity-io.mjs
 
   # ── debug：wasm 构建冒烟（T-653 削减验证层后，本 job 只剩 build:wasm）────────
   debug-gates:
