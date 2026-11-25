@@ -120,6 +120,7 @@ const pendingChanged: number[] = [];
 let pendingFull = true;
 /** 增量翻位去重用的 epoch（每帧 +1，避免每帧清 marks 数组）。 */
 let flipEpoch = 0;
+let lastCullAll = false;
 /** 装载期建倒排用的 cluster→局部下标临时表（65536 项，建完复位，避免每块 256KB 常驻）。 */
 const probeIndex = new Int32Array(0x10000).fill(-1);
 
@@ -168,17 +169,18 @@ function locateCluster(keys: Uint16Array, id: number): number {
   return -1;
 }
 
-/** 单个三角形在当前可见行下是否要画（三来源任一可见 / 全定不到位照画）。 */
+/** 单个三角形在当前可见行下是否要画（三来源任一可见 / 全定不到位照画，全剔除时除外）。 */
 function triVisible(
   st: ClusterIndexState,
   t: number,
   row: Uint8Array | null,
   pvs: PvsFilterQuery,
+  cullAll: boolean,
 ): boolean {
   const ca = st.triClusters[t];
   const cn = st.triClustersN[t];
   const cn2 = st.triClustersN2[t];
-  if (ca === 0xffff && cn === 0xffff && cn2 === 0xffff) return true;
+  if (ca === 0xffff && cn === 0xffff && cn2 === 0xffff) return !cullAll;
   if (row) {
     return (
       (ca !== 0xffff && ca < row.length && row[ca] === 1) ||
@@ -288,6 +290,7 @@ function rebuildIncrementalFull(
   st: ClusterIndexState,
   row: Uint8Array | null,
   pvs: PvsFilterQuery,
+  cullAll: boolean,
 ): void {
   const inc = st.incremental;
   if (!inc) return;
@@ -297,7 +300,7 @@ function rebuildIncrementalFull(
   inc.slotTri.fill(-1);
   let n = 0;
   for (let t = 0; t < tris; t++) {
-    if (!triVisible(st, t, row, pvs)) continue;
+    if (!triVisible(st, t, row, pvs, cullAll)) continue;
     const s = t * 3;
     outIndex[n * 3] = origIndex[s];
     outIndex[n * 3 + 1] = origIndex[s + 1];
@@ -316,6 +319,7 @@ function flipChangedClusters(
   pvs: PvsFilterQuery,
   changed: readonly number[],
   epoch: number,
+  cullAll: boolean,
 ): void {
   const inc = st.incremental;
   if (!inc) return;
@@ -329,7 +333,7 @@ function flipChangedClusters(
       const t = inc.triIds[k];
       if (inc.marks[t] === epoch) continue;
       inc.marks[t] = epoch;
-      const on = triVisible(st, t, row, pvs);
+      const on = triVisible(st, t, row, pvs, cullAll);
       const pos = inc.posOfTri[t];
       if (on) {
         if (pos < 0) visTris = insertTri(inc, outIndex, origIndex, t, visTris);
@@ -368,7 +372,7 @@ function normalSideCluster(
   n.set(0, 1, 0);
   if (nrm) {
     const vi = index ? index.getX(t * 3) : t * 3;
-    n.fromBufferAttribute(nrm, vi);
+    n.fromBufferAttribute(nrm, vi).transformDirection(mw);
     if (n.lengthSq() < 1e-6) n.set(0, 1, 0); else n.normalize();
   } else {
     // 合并后的世界块大多没有 `normal`（它们是无光照的 BasicMaterial）。不能默认朝上：
@@ -480,7 +484,7 @@ export function prepareClusterIndex(
         n.set(0, 1, 0);
         if (nrm) {
           const vi = index ? index.getX(t * 3) : t * 3;
-          n.fromBufferAttribute(nrm, vi);
+          n.fromBufferAttribute(nrm, vi).transformDirection(mw);
           if (n.lengthSq() < 1e-6) n.set(0, 1, 0); else n.normalize();
         } else {
           // 合并块没有 normal 属性：用三角形叉积，不能默认朝上（竖直面会全落进天花/实体）。
@@ -588,6 +592,13 @@ export function applyClusterIndex(
   const row = pvs.visibleRow ? pvs.visibleRow() : null;
   // 每帧更新一次可见行快照 + 差分（换房间时真正翻位的 cluster 通常只有几十个）。
   refreshRowDiff(row);
+  const cullAll = (globalThis as { __vbspPvsCullAll?: boolean }).__vbspPvsCullAll === true;
+  const cullAllChanged = cullAll !== lastCullAll;
+  if (cullAllChanged) {
+    lastCullAll = cullAll;
+    pendingFull = true;
+    rowVersion++;
+  }
   const epoch = ++flipEpoch;
   for (const item of items) {
     const st = (item.mesh.userData as { clusterIndex?: ClusterIndexState }).clusterIndex;
@@ -607,10 +618,10 @@ export function applyClusterIndex(
       const canFlip =
         row !== null && !pendingFull && st.lastCluster !== -1 && st.rowVersion === rowVersion - 1;
       if (canFlip) {
-        flipChangedClusters(st, row, pvs, pendingChanged, epoch);
+        flipChangedClusters(st, row, pvs, pendingChanged, epoch, cullAll);
         flipped++;
       } else {
-        rebuildIncrementalFull(st, row, pvs);
+        rebuildIncrementalFull(st, row, pvs, cullAll);
         rebuilt++;
       }
       st.lastCluster = camCluster;
@@ -626,7 +637,7 @@ export function applyClusterIndex(
     // 多 group 块：保留原来的「块可见签名」快路径 + 全量重排。
     // 快路径：本块用到的 cluster 可见性没变 ⇒ 上次写进 index 的三组三角形集合仍然是正确的，
     // 直接跳过（换房间时绝大多数块都属于这一类；全量重排 123 万三角实测 15–25ms）。
-    if (row && st.lastCluster !== -1 && st.clusters.length > 0) {
+    if (!cullAllChanged && row && st.lastCluster !== -1 && st.clusters.length > 0) {
       let sig = 0x811c9dc5;
       const cl = st.clusters;
       for (let i = 0; i < cl.length; i++) {
@@ -657,7 +668,7 @@ export function applyClusterIndex(
         // 三个来源全定不到位（都在实体/虚空里，比如薄斜柱的中段三角形）时**照画**：
         // 判据是「已知不可见才剔」，不是「没查清就剔」。没查清就剔的代价是直接看穿到后面的
         // 砖墙（用户报的缺三角面），而多画的代价只是几个三角形。
-        const unknown = ca === 0xffff && cn === 0xffff && cn2 === 0xffff;
+        const unknown = !cullAll && ca === 0xffff && cn === 0xffff && cn2 === 0xffff;
         const on = row
           ? unknown ||
             (ca !== 0xffff && ca < row.length && row[ca] === 1) ||

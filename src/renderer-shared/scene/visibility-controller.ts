@@ -531,12 +531,16 @@ export class VisibilityController {
     // Source 的对应行为是「leaf 0 没有 PVS，引擎整帧不做可见性剔除」；这里照此处理——若改用
     // `getClusterNear` 找到的隔壁房间来剔，隔墙看过去真实可见的面会被整片/按三角形剔掉
     // （用户报的「穿透状态下几何缺失」）。`camLeafCluster` 保留给日志与诊断。
+    const cullAll = (globalThis as { __vbspPvsCullAll?: boolean }).__vbspPvsCullAll === true;
     let pvsClusterValid = camDirectCluster >= 0;
     if (pvsClusterValid && pvs && pvs.updateToCluster) {
       if (!pvs.updateToCluster(camLeafCluster)) {
         // 该行数据缺失/全零（部分第三方编译器留空）：本帧 PVS 无从判定，退回不剔。
         pvsClusterValid = false;
       }
+    }
+    if (pvsActive && cullAll) {
+      pvsClusterValid = true;
     }
     if (pvsActive && !pvsClusterValid && !this.pvsUnlocated) {
       // 相机点在实体里（穿墙）或在图外：这一帧 PVS 无从判定。
@@ -588,8 +592,22 @@ export class VisibilityController {
         && typeof (parent.userData as { vbspDynamicEntityGroup?: unknown }).vbspDynamicEntityGroup === 'number'
         && (parent.position.x !== 0 || parent.position.y !== 0 || parent.position.z !== 0);
       let willCull = false;
-      if (!beyond && !triFiltered && pvsActive && pvsClusterValid) {
-        if (isDynamicMoved) {
+      if (!beyond && pvsActive && cullAll) {
+        willCull = true;
+      } else if (!beyond && pvsActive && pvsClusterValid) {
+        if (triFiltered) {
+          const triClusters = (item.mesh.userData.clusterIndex as { clusters?: Uint16Array } | undefined)?.clusters;
+          let anyVisible = item.clusterIds.some((c) => pvs!.isVisible(c));
+          if (!anyVisible && triClusters) {
+            for (let i = 0; i < triClusters.length; i++) {
+              if (pvs!.isVisible(triClusters[i])) {
+                anyVisible = true;
+                break;
+              }
+            }
+          }
+          willCull = !anyVisible;
+        } else if (isDynamicMoved) {
           // 动态实体离开出生位置后，装载期烘焙的 clusterIds 属于旧房间；改查当前世界中心
           // 所在 cluster，中心落进固体（-1）时放行，避免移动平台/门跨 PVS 门户消失。
           const liveCluster = pvs!.getClusterAt(item.center);

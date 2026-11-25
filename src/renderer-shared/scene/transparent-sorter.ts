@@ -95,7 +95,8 @@ export class TransparentSorter {
       groupCount: number;
       tris: Tri[];
       dists: Float64Array;
-      triClusters: Int32Array | null;
+      triClustersA: Int32Array | null;
+      triClustersB: Int32Array | null;
       prevIdx: Uint32Array | null;
       /** 复用 scratch（长度随三角形数固定），逐面排序每帧 0 分配。 */
       order: Int32Array;
@@ -138,7 +139,8 @@ export class TransparentSorter {
         groupCount: groupsEmpty ? 0 : geom.groups.length,
         tris,
         dists: new Float64Array(triCount),
-        triClusters: null,
+        triClustersA: null,
+        triClustersB: null,
         prevIdx: null,
         order: new Int32Array(triCount),
         orderTmp: new Int32Array(triCount),
@@ -150,8 +152,9 @@ export class TransparentSorter {
       mesh.userData.__vbspFaceSort = cache;
     }
     const c = cache;
-    if (pvs && !c.triClusters) {
-      const tc = new Int32Array(c.tris.length);
+    if (pvs && (!c.triClustersA || !c.triClustersB)) {
+      const tcA = new Int32Array(c.tris.length).fill(-1);
+      const tcB = new Int32Array(c.tris.length).fill(-1);
       const mw = mesh.matrixWorld;
       const va = this.pvsTmpA;
       const vb = this.pvsTmpB;
@@ -167,23 +170,33 @@ export class TransparentSorter {
         const cy = (va.y + vb.y + vc.y) / 3;
         const cz = (va.z + vb.z + vc.z) / 3;
         vp.set(cx, cy, cz);
-        let cl = pvs.getClusterAt(vp);
-        if (cl < 0) {
-          vb.sub(va);
-          vc.sub(va);
-          vn.crossVectors(vb, vc);
-          if (vn.lengthSq() >= 1e-12) {
-            vn.normalize();
-            for (const off of [8, -8, 32, -32]) {
-              vp.set(cx + vn.x * off, cy + vn.y * off, cz + vn.z * off);
-              cl = pvs.getClusterAt(vp);
-              if (cl >= 0) break;
-            }
+        const centerCl = pvs.getClusterAt(vp);
+        vb.sub(va);
+        vc.sub(va);
+        vn.crossVectors(vb, vc);
+        const hasNorm = vn.lengthSq() >= 1e-12;
+        if (hasNorm) vn.normalize();
+        let clA = centerCl;
+        if (clA < 0 && hasNorm) {
+          for (const off of [8, 32]) {
+            vp.set(cx + vn.x * off, cy + vn.y * off, cz + vn.z * off);
+            clA = pvs.getClusterAt(vp);
+            if (clA >= 0) break;
           }
         }
-        tc[i] = cl;
+        let clB = -1;
+        if (hasNorm) {
+          for (const off of [-8, -32]) {
+            vp.set(cx + vn.x * off, cy + vn.y * off, cz + vn.z * off);
+            clB = pvs.getClusterAt(vp);
+            if (clB >= 0) break;
+          }
+        }
+        tcA[i] = clA;
+        tcB[i] = clB;
       }
-      c.triClusters = tc;
+      c.triClustersA = tcA;
+      c.triClustersB = tcB;
     }
     const cam = camera.position;
     const p = this.sortPoint;
@@ -255,6 +268,7 @@ export class TransparentSorter {
     if (!prevIdx || prevIdx.length !== idxArr.length) {
       changed = true;
     }
+    const cullAll = (globalThis as { __vbspPvsCullAll?: boolean }).__vbspPvsCullAll === true;
     let k = 0;
     for (let gi = 0; gi < groupCount; gi++) {
       let cursor = groupsEmpty ? 0 : geom.groups[gi].start;
@@ -262,8 +276,17 @@ export class TransparentSorter {
       for (let j = offsets[gi]; j < end; j++) {
         const ti = bucketSorted[j];
         const t = c.tris[ti];
-        const hidden =
-          pvs !== null && c.triClusters !== null && c.triClusters[ti] >= 0 && !pvs.isVisible(c.triClusters[ti]);
+        let hidden = false;
+        if (pvs !== null && c.triClustersA !== null && c.triClustersB !== null) {
+          if (cullAll) {
+            hidden = true;
+          } else {
+            const ca = c.triClustersA[ti];
+            const cb = c.triClustersB[ti];
+            const hasAny = ca >= 0 || cb >= 0;
+            hidden = hasAny && !(ca >= 0 && pvs.isVisible(ca)) && !(cb >= 0 && pvs.isVisible(cb));
+          }
+        }
         const ia = t.a;
         const ib = hidden ? t.a : t.b;
         const ic = hidden ? t.a : t.c;

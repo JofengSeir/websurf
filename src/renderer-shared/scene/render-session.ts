@@ -1048,6 +1048,9 @@ export class RenderSession {
       this.clusterIndex = prepareClusterIndex(this.visibility.items, this.pvs, 2);
       this.visibility.chunkIndexActive = this.clusterIndex.prepared > 0;
     }
+    if (this.visibility.enablePvs && this.clusterIndex && this.clusterIndex.prepared > 0) {
+      this.visibility.chunkIndexActive = true;
+    }
     this.lastVisibility = this.visibility.update(this.camera, this.pvs);
     // 相机换房间才重建 index（PVS 与视角无关）：可见三角形集合一次算好，逐帧零成本。
     // ⚠ 必须用本帧**真正定位到**的 `clusterAtCamera`，不能用 `pvs.currentClusterId`：相机嵌进
