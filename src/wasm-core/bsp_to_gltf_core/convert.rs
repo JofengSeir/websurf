@@ -25,13 +25,10 @@
 //! 边界：只做装配与导出。不解析 BSP 细节（`vbsp`）、不构建 GLTF 材质（`gltf_builder`）、
 //! 不算图集（`lightmap`）、不加载模型（`model_integrator`）。
 //!
-//! 死代码说明：[`merge_model_into_root`] / [`create_new_gltf_structure`] /
-//! [`merge_gltf_structures_improved`] 三函数在本仓**无调用点**（各带 `#[allow(dead_code)]`）。
-//!
 //! 测试归属：本文件无 `#[test]`。
 
 use gltf_json as json;
-use crate::bsp_to_gltf_core::gltf_builder::push_or_get_material_bsp;
+use crate::bsp_to_gltf_core::gltf_builder::{push_or_get_material_bsp, GltfIndexCache};
 use crate::bsp_to_gltf_core::{ConvertOptions, Error, ExportResult, MissingResource};
 use bytemuck::{Pod, Zeroable};
 use cgmath::{Deg, Quaternion, Rotation3};
@@ -112,6 +109,10 @@ pub fn export_bsp(bsp: std::sync::Arc<Bsp>, options: ConvertOptions) -> Result<E
     // 见 `lightmap::effective_max_atlas_area`。
     let lightmap = build_lightmap_export(&bsp, &mut buffer, &mut root, options.lightmap_max_atlas_area)?;
 
+    // 材质 / 纹理名 → glTF 下标缓存：世界面阶段一次建表，逐面查重 O(1)。
+    // lightmap 纹理已在上一步追加，必须在它之后建；模型材质在模型阶段才追加，不参与本阶段查重。
+    let mut index_cache = GltfIndexCache::new(&root);
+
     // BSP 内嵌结构：世界模型 + 可见 brush 实体（不含 ModelIntegrator 的外部模型）。
     // 实体遍历只做一次：世界模型 + 可见 brush 实体都从这一次 `bsp_models` 收集结果来。
     let models = bsp_models(&bsp)?;
@@ -120,6 +121,7 @@ pub fn export_bsp(bsp: std::sync::Arc<Bsp>, options: ConvertOptions) -> Result<E
         let node = push_bsp_model_bsp(
             &mut buffer,
             &mut root,
+            &mut index_cache,
             &bsp,
             &entry.model,
             entry.offset,
@@ -221,6 +223,10 @@ pub fn export_bsp_with_models(bsp: std::sync::Arc<Bsp>, options: ConvertOptions,
     // 光照图集（无光照 lump 时为 None）。
     let lightmap = build_lightmap_export(&bsp, &mut buffer, &mut root, options.lightmap_max_atlas_area)?;
 
+    // 材质 / 纹理名 → glTF 下标缓存：世界面阶段一次建表，逐面查重 O(1)。
+    // lightmap 纹理已在上一步追加，必须在它之后建；模型材质在模型阶段才追加，不参与本阶段查重。
+    let mut index_cache = GltfIndexCache::new(&root);
+
     // 1. 处理BSP结构
     // 实体遍历只做一次：世界模型 + 可见 brush 实体都从这一次 `bsp_models` 收集结果来。
     let models = bsp_models(&bsp)?;
@@ -229,6 +235,7 @@ pub fn export_bsp_with_models(bsp: std::sync::Arc<Bsp>, options: ConvertOptions,
         let node = push_bsp_model_bsp(
             &mut buffer,
             &mut root,
+            &mut index_cache,
             &bsp,
             &entry.model,
             entry.offset,
@@ -416,520 +423,6 @@ fn build_export_result(
         textures,
         mosaic,
     })
-}
-
-/// 把模型数据**原地**并进 `root`：`root` 与 `buffer` 是 BSP 侧已建好的产物，
-/// `model_root` 与 `model_buffer` 作为输入被读走，返回 `()`。
-///
-/// **死代码**：本仓无调用点，仅靠 `#[allow(dead_code)]` 保留。线上合并路径不是本文件这三个
-/// 合并函数，而是 `model_integrator` 的 `ModelIntegrator::add_models_to_gltf`。
-#[allow(dead_code)]
-fn merge_model_into_root(
-    root: &mut Root,
-    buffer: &mut Vec<u8>,
-    model_root: Root,
-    model_buffer: Vec<u8>
-) {
-    // 记录当前计数
-    let bsp_mesh_count = root.meshes.len();
-    let bsp_material_count = root.materials.len();
-    let bsp_texture_count = root.textures.len();
-    let bsp_image_count = root.images.len();
-    let bsp_buffer_view_count = root.buffer_views.len();
-    let model_node_start = root.nodes.len();
-    let bsp_buffer_size = buffer.len();
-
-    // 合并缓冲区数据
-    buffer.extend(model_buffer);
-
-    // 处理模型的缓冲区视图
-    for mut view in model_root.buffer_views {
-        if let Some(offset) = &mut view.byte_offset {
-            *offset = USize64(offset.0 + bsp_buffer_size as u64);
-        } else {
-            view.byte_offset = Some(USize64(bsp_buffer_size as u64));
-        }
-        root.buffer_views.push(view);
-    }
-
-    // 处理模型的访问器
-    for mut accessor in model_root.accessors {
-        if let Some(buffer_view) = &mut accessor.buffer_view {
-            let new_index = (buffer_view.value() as usize + bsp_buffer_view_count) as u32;
-            *buffer_view = Index::new(new_index);
-        }
-        root.accessors.push(accessor);
-    }
-
-    // 处理模型的图像
-    root.images.extend(model_root.images);
-
-    // 处理模型的纹理
-    for mut texture in model_root.textures {
-        let new_index = (texture.source.value() as usize + bsp_image_count) as u32;
-        texture.source = Index::new(new_index);
-        root.textures.push(texture);
-    }
-
-    // 处理模型的材质
-    for mut material in model_root.materials {
-        // 修复 PBR 材质中的纹理索引
-        if let Some(base_color_texture) = &mut material.pbr_metallic_roughness.base_color_texture {
-            let new_index = (base_color_texture.index.value() as usize + bsp_texture_count) as u32;
-            base_color_texture.index = Index::new(new_index);
-        }
-        if let Some(metallic_roughness_texture) = &mut material.pbr_metallic_roughness.metallic_roughness_texture {
-            let new_index = (metallic_roughness_texture.index.value() as usize + bsp_texture_count) as u32;
-            metallic_roughness_texture.index = Index::new(new_index);
-        }
-        
-        // 修复法线纹理索引
-        if let Some(normal_texture) = &mut material.normal_texture {
-            let new_index = (normal_texture.index.value() as usize + bsp_texture_count) as u32;
-            normal_texture.index = Index::new(new_index);
-        }
-        
-        // 修复 occlusion 纹理索引
-        if let Some(occlusion_texture) = &mut material.occlusion_texture {
-            let new_index = (occlusion_texture.index.value() as usize + bsp_texture_count) as u32;
-            occlusion_texture.index = Index::new(new_index);
-        }
-        
-        // 修复 emissive 纹理索引
-        if let Some(emissive_texture) = &mut material.emissive_texture {
-            let new_index = (emissive_texture.index.value() as usize + bsp_texture_count) as u32;
-            emissive_texture.index = Index::new(new_index);
-        }
-        root.materials.push(material);
-    }
-
-    // 处理模型的网格
-    for mut mesh in model_root.meshes {
-        for primitive in &mut mesh.primitives {
-            if let Some(material) = &mut primitive.material {
-                let new_index = (material.value() as usize + bsp_material_count) as u32;
-                *material = Index::new(new_index);
-            }
-        }
-        root.meshes.push(mesh);
-    }
-
-    // 处理模型的节点
-    let mut model_nodes = Vec::new();
-    
-    // 首先收集所有模型节点
-    for mut node in model_root.nodes {
-        // 调整网格索引
-        if let Some(mesh) = &mut node.mesh {
-            let new_index = (mesh.value() as usize + bsp_mesh_count) as u32;
-            *mesh = Index::new(new_index);
-        }
-        
-        model_nodes.push(node);
-    }
-    
-    // 调整模型节点的子节点索引
-    for (_i, node) in model_nodes.iter_mut().enumerate() {
-        if let Some(children) = &mut node.children {
-            for child in children {
-                let new_index = (child.value() as usize + model_node_start) as u32;
-                *child = Index::new(new_index);
-            }
-        }
-    }
-    
-    // 添加所有模型节点
-    root.nodes.extend(model_nodes);
-}
-
-/// 构建一个**全新**的根结构：BSP 侧与模型侧都作为输入，索引重映射后合并，返回
-/// `(Root, Vec<u8>)`。与 [`merge_model_into_root`] 的「原地修改」口径相反。
-///
-/// **死代码**：本仓无调用点，仅靠 `#[allow(dead_code)]` 保留。
-#[allow(dead_code)]
-fn create_new_gltf_structure(
-    bsp_root: Root,
-    model_root: Root,
-    bsp_buffer: Vec<u8>,
-    model_buffer: Vec<u8>
-) -> Result<(Root, Vec<u8>), Error> {
-    // 创建新的GLTF根结构
-    let mut new_root = Root::default();
-    
-    // 记录BSP结构的各种计数
-    let bsp_mesh_count = bsp_root.meshes.len();
-    let bsp_material_count = bsp_root.materials.len();
-    let bsp_texture_count = bsp_root.textures.len();
-    let bsp_image_count = bsp_root.images.len();
-    let bsp_buffer_view_count = bsp_root.buffer_views.len();
-    let _bsp_accessor_count = bsp_root.accessors.len();
-    
-    // 复制BSP的所有数据到新结构
-    new_root.meshes.extend(bsp_root.meshes);
-    new_root.materials.extend(bsp_root.materials);
-    new_root.textures.extend(bsp_root.textures);
-    new_root.images.extend(bsp_root.images);
-    new_root.buffer_views.extend(bsp_root.buffer_views);
-    new_root.accessors.extend(bsp_root.accessors);
-    
-    // 处理模型数据，调整索引
-    let mut model_nodes = Vec::new();
-    let bsp_buffer_size = bsp_buffer.len();
-    
-    // 调整模型缓冲区视图的偏移量
-    for mut view in model_root.buffer_views {
-        if let Some(offset) = &mut view.byte_offset {
-            *offset = USize64(offset.0 + bsp_buffer_size as u64);
-        } else {
-            view.byte_offset = Some(USize64(bsp_buffer_size as u64));
-        }
-        new_root.buffer_views.push(view);
-    }
-    
-    // 调整模型访问器的缓冲区视图索引
-    for mut accessor in model_root.accessors {
-        if let Some(buffer_view) = &mut accessor.buffer_view {
-            let buffer_view_value: usize = buffer_view.value() as usize;
-            let new_buffer_view_index = (buffer_view_value + bsp_buffer_view_count) as u32;
-            *buffer_view = Index::new(new_buffer_view_index);
-        }
-        new_root.accessors.push(accessor);
-    }
-    
-    // 调整模型纹理的图像索引
-    for mut texture in model_root.textures {
-        let image_value: usize = texture.source.value() as usize;
-        let new_image_index = (image_value + bsp_image_count) as u32;
-        texture.source = Index::new(new_image_index);
-        new_root.textures.push(texture);
-    }
-    
-    // 调整模型材质的纹理索引
-    for mut material in model_root.materials {
-        // 修复 PBR 材质中的纹理索引
-        if let Some(base_color_texture) = &mut material.pbr_metallic_roughness.base_color_texture {
-            let texture_value: usize = base_color_texture.index.value() as usize;
-            let new_texture_index = (texture_value + bsp_texture_count) as u32;
-            base_color_texture.index = Index::new(new_texture_index);
-        }
-        if let Some(metallic_roughness_texture) = &mut material.pbr_metallic_roughness.metallic_roughness_texture {
-            let texture_value: usize = metallic_roughness_texture.index.value() as usize;
-            let new_texture_index = (texture_value + bsp_texture_count) as u32;
-            metallic_roughness_texture.index = Index::new(new_texture_index);
-        }
-        
-        // 修复法线纹理索引
-        if let Some(normal_texture) = &mut material.normal_texture {
-            let texture_value: usize = normal_texture.index.value() as usize;
-            let new_texture_index = (texture_value + bsp_texture_count) as u32;
-            normal_texture.index = Index::new(new_texture_index);
-        }
-        
-        // 修复 occlusion 纹理索引
-        if let Some(occlusion_texture) = &mut material.occlusion_texture {
-            let texture_value: usize = occlusion_texture.index.value() as usize;
-            let new_texture_index = (texture_value + bsp_texture_count) as u32;
-            occlusion_texture.index = Index::new(new_texture_index);
-        }
-        
-        // 修复 emissive 纹理索引
-        if let Some(emissive_texture) = &mut material.emissive_texture {
-            let texture_value: usize = emissive_texture.index.value() as usize;
-            let new_texture_index = (texture_value + bsp_texture_count) as u32;
-            emissive_texture.index = Index::new(new_texture_index);
-        }
-        new_root.materials.push(material);
-    }
-    
-    // 调整模型网格的材质索引
-    for mut mesh in model_root.meshes {
-        for primitive in &mut mesh.primitives {
-            if let Some(material) = &mut primitive.material {
-                let material_value: usize = material.value() as usize;
-                let new_material_index = (material_value + bsp_material_count) as u32;
-                *material = Index::new(new_material_index);
-            }
-        }
-        new_root.meshes.push(mesh);
-    }
-    
-    // 记录BSP节点数量
-    let bsp_node_count = bsp_root.nodes.len();
-    
-    // 调整模型节点的网格索引并收集节点
-    for mut node in model_root.nodes {
-        // 不要跳过任何节点，包括根节点
-        if let Some(mesh) = &mut node.mesh {
-            let mesh_value: usize = mesh.value() as usize;
-            let new_mesh_index = (mesh_value + bsp_mesh_count) as u32;
-            *mesh = Index::new(new_mesh_index);
-        }
-        
-        // 调整子节点索引
-        if let Some(children) = &mut node.children {
-            for child in children {
-                let child_value: usize = child.value() as usize;
-                let new_child_index = (child_value + bsp_node_count) as u32;
-                *child = Index::new(new_child_index);
-            }
-        }
-        
-        model_nodes.push(node);
-    }
-    
-    // 复制BSP的节点到新结构
-    new_root.nodes.extend(bsp_root.nodes);
-    
-    // 添加模型节点到新结构
-    new_root.nodes.extend(model_nodes);
-    
-    // 合并缓冲区数据
-    let mut combined_buffer = bsp_buffer;
-    combined_buffer.extend(model_buffer);
-    
-    // 创建新的根节点
-    let root_rotation = Quaternion::<f32>::from_angle_y(Deg(90.0));
-    let root_node = Node {
-        camera: None,
-        children: Some(Vec::new()),
-        extensions: Default::default(),
-        extras: Default::default(),
-        matrix: None,
-        mesh: None,
-        name: Some("Complete Root".to_string()),
-        rotation: Some(UnitQuaternion([
-            root_rotation.v.x,
-            root_rotation.v.y,
-            root_rotation.v.z,
-            root_rotation.s,
-        ])),
-        scale: None,
-        translation: None,
-        skin: None,
-        weights: None,
-    };
-    
-    // 添加根节点
-    let root_index = new_root.nodes.len();
-    new_root.nodes.push(root_node);
-    
-    // 更新根节点的子节点，包含所有BSP和模型节点
-    let node_indices = 0..new_root.nodes.len();
-    if let Some(ref mut children) = new_root.nodes[root_index].children {
-        *children = node_indices
-            .filter(|&i| i != root_index) // 排除根节点自身
-            .map(|index| Index::new(index as u32))
-            .collect();
-    }
-    
-    // 更新场景
-    new_root.scenes = vec![Scene {
-        name: Some("Complete Scene".to_string()),
-        extensions: None,
-        extras: Default::default(),
-        nodes: vec![Index::new(root_index as u32)],
-    }];
-    
-    // 更新缓冲区信息
-    new_root.buffers.push(Buffer {
-        byte_length: USize64(combined_buffer.len() as u64),
-        extensions: Default::default(),
-        extras: Default::default(),
-        name: None,
-        uri: None,
-    });
-    
-    Ok((new_root, combined_buffer))
-}
-
-/// 与 [`create_new_gltf_structure`] **签名相同**（同样吃 BSP 侧与模型侧的 `Root` / `Vec<u8>`，
-/// 同样返回 `(Root, Vec<u8>)`），是「构建新根」口径的另一份实现。
-///
-/// **死代码**：本仓无调用点，仅靠 `#[allow(dead_code)]` 保留。
-#[allow(dead_code)]
-fn merge_gltf_structures_improved(
-    bsp_root: Root,
-    model_root: Root,
-    bsp_buffer: Vec<u8>,
-    model_buffer: Vec<u8>
-) -> Result<(Root, Vec<u8>), Error> {
-    // 创建新的GLTF根结构
-    let mut new_root = Root::default();
-    
-    // 记录BSP结构的各种计数
-    let bsp_mesh_count = bsp_root.meshes.len();
-    let bsp_material_count = bsp_root.materials.len();
-    let bsp_texture_count = bsp_root.textures.len();
-    let bsp_image_count = bsp_root.images.len();
-    let bsp_buffer_view_count = bsp_root.buffer_views.len();
-    let _bsp_node_count = bsp_root.nodes.len();
-    
-    // 合并缓冲区数据
-    let mut combined_buffer = bsp_buffer;
-    let bsp_buffer_size = combined_buffer.len();
-    combined_buffer.extend(model_buffer);
-    
-    // 复制BSP的所有数据
-    new_root.meshes.extend(bsp_root.meshes);
-    new_root.materials.extend(bsp_root.materials);
-    new_root.textures.extend(bsp_root.textures);
-    new_root.images.extend(bsp_root.images);
-    new_root.buffer_views.extend(bsp_root.buffer_views);
-    new_root.accessors.extend(bsp_root.accessors);
-    new_root.nodes.extend(bsp_root.nodes);
-    
-    // 处理模型的缓冲区视图
-    for mut view in model_root.buffer_views {
-        if let Some(offset) = &mut view.byte_offset {
-            *offset = USize64(offset.0 + bsp_buffer_size as u64);
-        } else {
-            view.byte_offset = Some(USize64(bsp_buffer_size as u64));
-        }
-        new_root.buffer_views.push(view);
-    }
-    
-    // 处理模型的访问器
-    for mut accessor in model_root.accessors {
-        if let Some(buffer_view) = &mut accessor.buffer_view {
-            let new_index = (buffer_view.value() as usize + bsp_buffer_view_count) as u32;
-            *buffer_view = Index::new(new_index);
-        }
-        new_root.accessors.push(accessor);
-    }
-    
-    // 处理模型的图像
-    new_root.images.extend(model_root.images);
-    
-    // 处理模型的纹理
-    for mut texture in model_root.textures {
-        let new_index = (texture.source.value() as usize + bsp_image_count) as u32;
-        texture.source = Index::new(new_index);
-        new_root.textures.push(texture);
-    }
-    
-    // 处理模型的材质
-    for mut material in model_root.materials {
-        // 修复 PBR 材质中的纹理索引
-        if let Some(base_color_texture) = &mut material.pbr_metallic_roughness.base_color_texture {
-            let new_index = (base_color_texture.index.value() as usize + bsp_texture_count) as u32;
-            base_color_texture.index = Index::new(new_index);
-        }
-        if let Some(metallic_roughness_texture) = &mut material.pbr_metallic_roughness.metallic_roughness_texture {
-            let new_index = (metallic_roughness_texture.index.value() as usize + bsp_texture_count) as u32;
-            metallic_roughness_texture.index = Index::new(new_index);
-        }
-        
-        // 修复法线纹理索引
-        if let Some(normal_texture) = &mut material.normal_texture {
-            let new_index = (normal_texture.index.value() as usize + bsp_texture_count) as u32;
-            normal_texture.index = Index::new(new_index);
-        }
-        
-        // 修复 occlusion 纹理索引
-        if let Some(occlusion_texture) = &mut material.occlusion_texture {
-            let new_index = (occlusion_texture.index.value() as usize + bsp_texture_count) as u32;
-            occlusion_texture.index = Index::new(new_index);
-        }
-        
-        // 修复 emissive 纹理索引
-        if let Some(emissive_texture) = &mut material.emissive_texture {
-            let new_index = (emissive_texture.index.value() as usize + bsp_texture_count) as u32;
-            emissive_texture.index = Index::new(new_index);
-        }
-        new_root.materials.push(material);
-    }
-    
-    // 处理模型的网格
-    for mut mesh in model_root.meshes {
-        for primitive in &mut mesh.primitives {
-            if let Some(material) = &mut primitive.material {
-                let new_index = (material.value() as usize + bsp_material_count) as u32;
-                *material = Index::new(new_index);
-            }
-        }
-        new_root.meshes.push(mesh);
-    }
-    
-    // 处理模型的节点
-    let model_node_start = new_root.nodes.len();
-    let mut model_nodes = Vec::new();
-    
-    // 首先收集所有模型节点
-    for mut node in model_root.nodes {
-        // 调整网格索引
-        if let Some(mesh) = &mut node.mesh {
-            let new_index = (mesh.value() as usize + bsp_mesh_count) as u32;
-            *mesh = Index::new(new_index);
-        }
-        
-        model_nodes.push(node);
-    }
-    
-    // 调整模型节点的子节点索引
-    for (_i, node) in model_nodes.iter_mut().enumerate() {
-        if let Some(children) = &mut node.children {
-            for child in children {
-                let new_index = (child.value() as usize + model_node_start) as u32;
-                *child = Index::new(new_index);
-            }
-        }
-    }
-    
-    // 添加所有模型节点
-    new_root.nodes.extend(model_nodes);
-    
-    // 创建新的根节点
-    let root_rotation = Quaternion::<f32>::from_angle_y(Deg(90.0));
-    let root_node = Node {
-        camera: None,
-        children: Some(Vec::new()),
-        extensions: Default::default(),
-        extras: Default::default(),
-        matrix: None,
-        mesh: None,
-        name: Some("Complete Root".to_string()),
-        rotation: Some(UnitQuaternion([
-            root_rotation.v.x,
-            root_rotation.v.y,
-            root_rotation.v.z,
-            root_rotation.s,
-        ])),
-        scale: None,
-        translation: None,
-        skin: None,
-        weights: None,
-    };
-    
-    // 添加根节点
-    let root_index = new_root.nodes.len();
-    new_root.nodes.push(root_node);
-    
-    // 更新根节点的子节点，包含所有BSP和模型节点
-    let node_indices = 0..root_index;
-    if let Some(ref mut children) = new_root.nodes[root_index].children {
-        *children = node_indices
-            .map(|index| Index::new(index as u32))
-            .collect();
-    }
-    
-    // 更新场景
-    new_root.scenes = vec![Scene {
-        name: Some("Complete Scene".to_string()),
-        extensions: None,
-        extras: Default::default(),
-        nodes: vec![Index::new(root_index as u32)],
-    }];
-    
-    // 更新缓冲区信息
-    new_root.buffers = vec![Buffer {
-        byte_length: USize64(combined_buffer.len() as u64),
-        extensions: Default::default(),
-        extras: Default::default(),
-        name: None,
-        uri: None,
-    }];
-    
-    Ok((new_root, combined_buffer))
 }
 
 /// 把 `n` 就地向上取到 4 的倍数（已经是 4 的倍数时不变）。
@@ -1310,6 +803,7 @@ fn model_of<'a>(bsp: &'a Bsp, model: &str) -> Option<crate::vbsp::Handle<'a, cra
 fn push_bsp_model_bsp(
     buffer: &mut Vec<u8>,
     gltf: &mut Root,
+    index_cache: &mut GltfIndexCache,
     bsp: &Bsp,
     model: &crate::vbsp::Handle<crate::vbsp::Model>,
     offset: crate::vbsp::Vector,
@@ -1343,6 +837,7 @@ fn push_bsp_model_bsp(
         primitives.push(push_bsp_face_bsp(
             buffer,
             gltf,
+            index_cache,
             bsp,
             &face,
             &texture,
@@ -1460,6 +955,7 @@ fn push_bsp_model_bsp(
 fn push_bsp_face_bsp(
     buffer: &mut Vec<u8>,
     gltf: &mut Root,
+    index_cache: &mut GltfIndexCache,
     bsp: &Bsp,
     face: &crate::vbsp::Handle<crate::vbsp::Face>,
     texture: &crate::vbsp::Handle<'_, crate::vbsp::TextureInfo>,
@@ -1675,6 +1171,7 @@ fn push_bsp_face_bsp(
         Some(push_or_get_material_bsp(
             buffer,
             gltf,
+            index_cache,
             bsp,
             texture.name(),
             options,

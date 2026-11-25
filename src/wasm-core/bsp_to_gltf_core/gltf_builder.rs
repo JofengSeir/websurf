@@ -13,7 +13,7 @@
 //! - [`push_or_get_material_bsp`]：材质名归一 → 查重 → 加载 → 建 glTF 材质
 //! - [`push_material`]：`MaterialData` → glTF `Material`（透明度模式、UV 变换、线框 extras）
 //! - [`push_or_get_texture`] / [`push_texture`]：贴图查重 → PNG 编码 → view / image / texture
-//! - [`get_material_index`] / [`get_texture_index`]：两条按 `name` 比对的线性查表
+//! - [`GltfIndexCache`]：材质 / 纹理名到下标的两张 O(1) 索引表，保留首个同名下标
 //! - [`texture_has_alpha_holes`]：贴图自带镂空的兜底判据
 //!
 //! 关键不变量：
@@ -21,6 +21,8 @@
 //!   [`push_or_get_material_bsp`] 里先经 `to_ascii_lowercase`；纹理名保持
 //!   `MaterialData::texture` 的 `name`（取自 `$basetexture`，回退材质取材质名）
 //!   原样，两者口径不同。
+//! - [`GltfIndexCache`] 在首次查名前预扫描既有列表，按**首次出现**建立名→下标表；
+//!   列表若在缓存之外变长，长度检查会触发重建，仍取首个同名项。
 //! - 新对象的下标一律在写入之前取 `len()`；[`push_material`] 不写 `gltf.materials`，
 //!   追加由调用方完成，故下标与 `push` 后的位置一致。
 //! - 命中查重即返回既有下标：同名材质 / 贴图不会重复追加 glTF 对象与 BIN 字节。
@@ -56,8 +58,88 @@ use gltf_json::validation::USize64;
 use gltf_json::{Extras, Image, Index, Material, Root, Texture};
 use image::codecs::png::PngEncoder;
 use image::{ColorType, DynamicImage, ImageEncoder};
-use std::f32::consts::PI;
 use crate::vbsp::Bsp;
+use std::collections::HashMap;
+use std::f32::consts::PI;
+
+/// 材质 / 纹理名到 glTF 列表下标的 O(1) 索引，严格保留**首次出现**的下标。
+///
+/// 线性 `find_map` 在数千材质时会退化成 O(N²)；这里在 BSP 世界面阶段开始前扫一遍
+/// `gltf.materials` / `gltf.textures` 建表，之后每次命中 O(1)。查表时用长度检查兜底
+/// 外部追加：若列表在缓存之外变长，就重建索引，仍取首个同名项。
+pub(crate) struct GltfIndexCache {
+    material_indices: HashMap<String, u32>,
+    texture_indices: HashMap<String, u32>,
+    material_len: usize,
+    texture_len: usize,
+}
+
+impl GltfIndexCache {
+    /// 以当前 `root` 的材质 / 纹理列表为底建索引（含调用前已追加的 lightmap 纹理）。
+    pub(crate) fn new(root: &Root) -> Self {
+        let mut cache = Self {
+            material_indices: HashMap::new(),
+            texture_indices: HashMap::new(),
+            material_len: 0,
+            texture_len: 0,
+        };
+        cache.rebuild_materials(root);
+        cache.rebuild_textures(root);
+        cache
+    }
+
+    fn rebuild_materials(&mut self, root: &Root) {
+        self.material_indices.clear();
+        for (index, material) in root.materials.iter().enumerate() {
+            if let Some(name) = material.name.as_deref() {
+                self.material_indices
+                    .entry(name.to_owned())
+                    .or_insert(index as u32);
+            }
+        }
+        self.material_len = root.materials.len();
+    }
+
+    fn rebuild_textures(&mut self, root: &Root) {
+        self.texture_indices.clear();
+        for (index, texture) in root.textures.iter().enumerate() {
+            if let Some(name) = texture.name.as_deref() {
+                self.texture_indices
+                    .entry(name.to_owned())
+                    .or_insert(index as u32);
+            }
+        }
+        self.texture_len = root.textures.len();
+    }
+
+    fn material_index(&mut self, root: &Root, name: &str) -> Option<Index<Material>> {
+        if self.material_len != root.materials.len() {
+            self.rebuild_materials(root);
+        }
+        self.material_indices.get(name).copied().map(Index::new)
+    }
+
+    fn texture_index(&mut self, root: &Root, name: &str) -> Option<Index<Texture>> {
+        if self.texture_len != root.textures.len() {
+            self.rebuild_textures(root);
+        }
+        self.texture_indices.get(name).copied().map(Index::new)
+    }
+
+    fn record_material(&mut self, root: &Root, index: u32) {
+        self.material_len = root.materials.len();
+        if let Some(name) = root.materials[index as usize].name.as_deref() {
+            self.material_indices.entry(name.to_owned()).or_insert(index);
+        }
+    }
+
+    fn record_texture(&mut self, root: &Root, index: u32) {
+        self.texture_len = root.textures.len();
+        if let Some(name) = root.textures[index as usize].name.as_deref() {
+            self.texture_indices.entry(name.to_owned()).or_insert(index);
+        }
+    }
+}
 
 /// 按材质名取既有 glTF 材质；没有就加载并新建一个。
 ///
@@ -81,9 +163,11 @@ use crate::vbsp::Bsp;
 /// 副作用：命中查重时四处都不动；新建材质时向 `buffer` 追加 PNG 字节，向
 /// `gltf.buffer_views` / `gltf.images` / `gltf.textures` 各追加对象，并向
 /// `gltf.materials` 追加一项。
+#[allow(clippy::too_many_arguments)] // 装配上下文 + 加载参数；拆结构体只会增加调用点噪音
 pub fn push_or_get_material_bsp(
     buffer: &mut Vec<u8>,
     gltf: &mut Root,
+    index_cache: &mut GltfIndexCache,
     bsp: &Bsp,
     material: &str,
     options: &ConvertOptions,
@@ -91,7 +175,7 @@ pub fn push_or_get_material_bsp(
     texture_collector: Option<std::rc::Rc<std::cell::RefCell<crate::bsp_to_gltf_core::materials::TextureCollector>>>,
 ) -> Index<Material> {
     let material = material.to_ascii_lowercase();
-    match get_material_index(&gltf.materials, &material) {
+    match index_cache.material_index(gltf, &material) {
         Some(index) => index,
         None => {
             // 两条分支只差 TextureCollector 的透传：加载入参与查重口径完全相同。
@@ -110,35 +194,20 @@ pub fn push_or_get_material_bsp(
                     }
                 }
                 let index = gltf.materials.len() as u32;
-                let material = push_material(buffer, gltf, material);
+                let material = push_material(buffer, gltf, material, index_cache);
                 gltf.materials.push(material);
+                index_cache.record_material(gltf, index);
                 Index::new(index)
             } else {
                 let material = crate::bsp_to_gltf_core::materials::load_material_fallback_bsp(&material, &[String::new()], bsp, options, missing_resources, None);
                 let index = gltf.materials.len() as u32;
-                let material = push_material(buffer, gltf, material);
+                let material = push_material(buffer, gltf, material, index_cache);
                 gltf.materials.push(material);
+                index_cache.record_material(gltf, index);
                 Index::new(index)
             }
         }
     }
-}
-
-/// 在既有材质里按 `Material::name` 查下标。
-///
-/// 比对是**大小写敏感的逐字符相等**（`mat.name.as_deref() == Some(path)`），`name` 为
-/// `None` 的材质不命中；`find_map` 线性扫描，同名多项时返回下标最小者。
-/// 扫描范围是整个 `gltf.materials`，其中也含
-/// `src/wasm-core/model_integrator/mod.rs` 的 `push_material` 追加的模型材质。
-///
-/// 调用方 [`push_or_get_material_bsp`] 传入的是已转小写的名字，与建材质时写入的
-/// 小写名同源，故两侧键口径一致。
-fn get_material_index(materials: &[Material], path: &str) -> Option<Index<Material>> {
-    materials
-        .iter()
-        .enumerate()
-        .find_map(|(i, mat)| (mat.name.as_deref() == Some(path)).then_some(i))
-        .map(|i| Index::new(i as u32))
 }
 
 /// 贴图是否**自带真实镂空**：`alpha < 32` 的像素占比 ≥ 1%。
@@ -213,7 +282,12 @@ fn texture_has_alpha_holes(image: &image::DynamicImage) -> bool {
 ///
 /// 副作用：`texture` 存在时向 `buffer`、`gltf.buffer_views` / `gltf.images` /
 /// `gltf.textures` 追加内容。**不写 `gltf.materials`**——追加由调用方完成。
-pub fn push_material(buffer: &mut Vec<u8>, gltf: &mut Root, material: MaterialData) -> Material {
+pub fn push_material(
+    buffer: &mut Vec<u8>,
+    gltf: &mut Root,
+    material: MaterialData,
+    index_cache: &mut GltfIndexCache,
+) -> Material {
     // 镂空判定必须赶在贴图被取走之前：下面的 `map` 会把 `TextureData` 移出
     // `material.texture`，故这里先用 `as_ref()` 借出来算。
     let texture_has_holes = material
@@ -224,13 +298,13 @@ pub fn push_material(buffer: &mut Vec<u8>, gltf: &mut Root, material: MaterialDa
 
     let texture_index = material
         .texture
-        .map(|tex| push_or_get_texture(buffer, gltf, tex));
+        .map(|tex| push_or_get_texture(buffer, gltf, tex, index_cache));
 
     // `WorldVertexTransition` 的第二贴图（`$basetexture2`）：与第一张贴图共用同一套去重与编码，
     // 下标写进材质 extras 的 `vbsp_basetexture2`，渲染端据此按顶点属性 `_VBSP_BLEND` 混合两图。
     let second_index = material
         .basetexture2
-        .map(|tex| push_or_get_texture(buffer, gltf, tex));
+        .map(|tex| push_or_get_texture(buffer, gltf, tex, index_cache));
 
     let alpha_mode = match (material.translucent, material.alpha_test.is_some()) {
         (true, _) => AlphaMode::Blend,
@@ -374,7 +448,7 @@ pub fn push_material(buffer: &mut Vec<u8>, gltf: &mut Root, material: MaterialDa
 
 /// 按 `TextureData::name` 取既有纹理；没有就编码新建一个。
 ///
-/// 命中 [`get_texture_index`] 即返回既有下标，未命中才调 [`push_texture`] 追加。
+/// 命中 [`GltfIndexCache::texture_index`] 即返回既有下标，未命中才调 [`push_texture`] 追加。
 /// 下标取自追加之前的 `len()`。
 ///
 /// **本函数不做**：不改贴图名与像素、不按内容比对——查重只认名字，故两张像素不同
@@ -383,31 +457,18 @@ fn push_or_get_texture(
     buffer: &mut Vec<u8>,
     gltf: &mut Root,
     texture: TextureData,
+    index_cache: &mut GltfIndexCache,
 ) -> Index<Texture> {
-    match get_texture_index(&gltf.textures, &texture.name) {
+    match index_cache.texture_index(gltf, &texture.name) {
         Some(index) => index,
         None => {
             let index = gltf.textures.len() as u32;
             let texture = push_texture(buffer, gltf, texture);
             gltf.textures.push(texture);
+            index_cache.record_texture(gltf, index);
             Index::new(index)
         }
     }
-}
-
-/// 在既有纹理里按 `Texture::name` 查下标。
-///
-/// 比对是**大小写敏感的逐字符相等**（`tex.name.as_deref() == Some(name)`），`name` 为
-/// `None` 的纹理不命中；`find_map` 线性扫描，同名多项时返回下标最小者。
-///
-/// 与材质名不同，纹理名**不做大小写归一**：它取自 `$basetexture`（回退材质则取材质名），
-/// 原样写入 [`push_texture`]，故仅大小写不同的两个名字在这里是两张纹理。
-fn get_texture_index(textures: &[Texture], name: &str) -> Option<Index<Texture>> {
-    textures
-        .iter()
-        .enumerate()
-        .find_map(|(i, tex)| (tex.name.as_deref() == Some(name)).then_some(i))
-        .map(|i| Index::new(i as u32))
 }
 
 /// 把一张贴图编码成 PNG 追加进 `buffer`，并补上 buffer view / image / texture 三件套。

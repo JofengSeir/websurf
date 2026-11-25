@@ -15,7 +15,7 @@
 //! - **nodes 必须先于 leaves 读**：`read_leaves` 的记录大小（32 B 或 56 B）由 BSP 树实际引用的
 //!   最大 leaf 索引决定，而这个索引只能从 `nodes` 的负 `children` 反推。
 //! - **leaf 表不能排序**：`Node::children` 存的是按位取反的 leaf 绝对下标，重排会让树遍历落到
-//!   错误的 leaf；cluster 视图另存一份 `sorted_leaves`。
+//!   错误的 leaf；cluster 分组在 `clusters()` 调用时按需排序，不常驻第二份副本。
 //! - 光照 lump 与叶环境光**不是同一条择一规则**：前者按"HDR 是否非空"，后者按"HDR 是否严格
 //!   长于 LDR"（见 `prop_ambient_cube`）。
 //! - 四条叶环境光 lump 走 `unwrap_or_default()`：读失败与"该图没有这条 lump"都落成空 `Vec`，
@@ -71,9 +71,10 @@ use std::ops::Deref;
 /// 文件完整但内容不成立是 `Validation`。
 pub type BspResult<T> = Result<T, BspError>;
 
-/// leaf 表：同一批 `Leaf` 存两份视图——树遍历要的**原始下标顺序**，与 cluster 分组要的**排序副本**。
+/// leaf 表：只保存**原始下标顺序**的一份 `leaves`。
 ///
-/// `Leaf` 固定 32 B（`data/mod.rs` 的编译期断言），两份表就是两倍常驻内存。
+/// `Leaf` 固定 32 B（`data/mod.rs` 的编译期断言）；cluster 分组视图只在调用 `clusters()`
+/// 时临时排序，不再常驻第二份副本。
 #[derive(Debug, Clone)]
 pub struct Leaves {
     /// 原始顺序的 leaves（与文件中的下标一一对应）；`Deref` / 三种 `IntoIterator` 都读它。
@@ -81,20 +82,12 @@ pub struct Leaves {
     /// **不能重排**：`Node::children` 里的 leaf 项是按位取反的绝对下标，
     /// 排序会让 `Bsp::leaf_at` 与 `Bsp::prop_ambient_cube` 的树遍历落到错误的 leaf。
     leaves: Vec<Leaf>,
-    /// 按 `cluster` 排序的副本，只喂 `clusters()`，不参与任何下标寻址。
-    sorted_leaves: Vec<Leaf>,
 }
 
 impl Leaves {
-    /// 建表：克隆一份 leaves 并按 `cluster` 排序当分组视图，传入的那份保持原顺序。
+    /// 建表：原样保存传入的 leaves，不做克隆或排序。
     pub fn new(leaves: Vec<Leaf>) -> Self {
-        // 排序副本只服务 clusters()；leaves 本身保持调用方给的顺序
-        let mut sorted_leaves = leaves.clone();
-        sorted_leaves.sort_unstable_by_key(|leaf| leaf.cluster);
-        Leaves {
-            leaves,
-            sorted_leaves,
-        }
+        Leaves { leaves }
     }
 
     /// 按原始顺序迭代（与 `Deref` 到 `[Leaf]` 看到的是同一份数据）。
@@ -102,49 +95,31 @@ impl Leaves {
         self.into_iter()
     }
 
-    /// 按原始顺序可变迭代；改这里**不会**同步到 `sorted_leaves`，两份视图就此分叉。
+    /// 按原始顺序可变迭代；`clusters()` 每次调用都从当前 `leaves` 现算，不存在第二份副本。
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Leaf> {
         self.into_iter()
     }
 
-    /// 取回原始顺序的 `Vec<Leaf>`；`sorted_leaves` 随之丢弃。
+    /// 取回原始顺序的 `Vec<Leaf>`。
     pub fn into_inner(self) -> Vec<Leaf> {
         self.leaves
     }
 
     /// 按 cluster 分组迭代：外层每项是一个 cluster，内层是该 cluster 的 leaves。
     ///
-    /// 组内次序即 `sorted_leaves` 的次序（排序不稳定，同 cluster 内的相对顺序无保证）。
-    /// 本仓没有生产调用点，唯一调用是 `test_leaf_clusters`；三工程的导出路径迭代的是未排序的 `leaves`。
-    pub fn clusters(&self) -> impl Iterator<Item = impl Iterator<Item = &Leaf>> {
-        LeafClusters {
-            leaves: &self.sorted_leaves,
-            index: 0,
+    /// 每次调用临时收集并排序 `&Leaf`，调用结束即释放；生产路径不调用它，唯一调用是
+    /// `test_leaf_clusters`。排序不稳定，故同 cluster 内的相对顺序无保证。
+    pub fn clusters(&self) -> impl Iterator<Item = std::vec::IntoIter<&Leaf>> {
+        let mut sorted: Vec<&Leaf> = self.leaves.iter().collect();
+        sorted.sort_unstable_by_key(|leaf| leaf.cluster);
+        let mut groups: Vec<Vec<&Leaf>> = Vec::new();
+        for leaf in sorted {
+            match groups.last_mut() {
+                Some(group) if group[0].cluster == leaf.cluster => group.push(leaf),
+                _ => groups.push(vec![leaf]),
+            }
         }
-    }
-}
-
-/// `Leaves::clusters` 的迭代器：在已按 `cluster` 排序的切片上，每次切出一段相邻同 cluster 的 leaves。
-///
-/// 分组靠"相邻 `cluster` 相等"（`take_while`），不查表也不哈希，因此**依赖输入已排序**；
-/// 游标按整组条数前进，所以外层每项都非空。
-struct LeafClusters<'a> {
-    leaves: &'a [Leaf],
-    index: usize,
-}
-
-impl<'a> Iterator for LeafClusters<'a> {
-    type Item = <&'a [Leaf] as IntoIterator>::IntoIter;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let cluster = self.leaves.get(self.index)?.cluster;
-        let remaining_leaves = self.leaves.get(self.index..)?;
-        let cluster_size = remaining_leaves
-            .iter()
-            .take_while(|leaf| leaf.cluster == cluster)
-            .count();
-        self.index += cluster_size;
-        Some(remaining_leaves[0..cluster_size].iter())
+        groups.into_iter().map(|group| group.into_iter())
     }
 }
 
@@ -188,7 +163,7 @@ fn test_leaf_clusters() {
     assert_eq!(vec![vec![0, 1], vec![2], vec![3, 4]], clustered);
 }
 
-/// 与 `Leaves::new` 同义：排序副本在转换时建立。
+/// 与 `Leaves::new` 同义：转换时原样保存 leaves。
 impl From<Vec<Leaf>> for Leaves {
     fn from(other: Vec<Leaf>) -> Self {
         Self::new(other)
@@ -224,7 +199,7 @@ impl<'a> IntoIterator for &'a Leaves {
     }
 }
 
-/// 可变借用迭代：按原始顺序，不动 `sorted_leaves`。
+/// 可变借用迭代：按原始顺序。
 impl<'a> IntoIterator for &'a mut Leaves {
     type Item = &'a mut Leaf;
     type IntoIter = <&'a mut [Leaf] as IntoIterator>::IntoIter;
