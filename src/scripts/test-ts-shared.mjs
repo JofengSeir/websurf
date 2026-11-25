@@ -51,6 +51,27 @@ process.on('exit', () => {
   }
 });
 
+/**
+ * 读 .ts 源码（含相对 import）-> esbuild 打包成单文件 ESM -> 写临时目录 -> 动态 import。
+ *
+ * 用于「纯函数长在实体类文件里」的模块（如 `classes/brush.ts`）：单文件转译会留下未解析的
+ * `../start-solid.js` 等 import。打包只引入共享层纯 TS，不碰 three/wasm。
+ */
+async function loadTsBundle(relPath, name) {
+  const built = await esbuild.build({
+    entryPoints: [path.join(root, relPath)],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node20',
+    write: false,
+    logLevel: 'silent',
+  });
+  const outFile = path.join(tmpDir, name + '.mjs');
+  writeFileSync(outFile, built.outputFiles[0].text, 'utf8');
+  return import(pathToFileURL(outFile).href);
+}
+
 /** 读 .ts 源码 -> esbuild 转译成 ESM -> 写临时目录 -> 动态 import。 */
 async function loadTs(relPath, name) {
   const source = readFileSync(path.join(root, relPath), 'utf8');
@@ -68,6 +89,16 @@ async function loadTs(relPath, name) {
 const { createSimClock } = await loadTs('src/ts-shared/app/sim-clock.ts', 'sim-clock');
 const sharedState = await loadTs('src/ts-shared/auth/shared-state.ts', 'shared-state');
 const { createConfigSync } = await loadTs('src/ts-shared/app/config-sync.ts', 'config-sync');
+// 门平移换算是 `classes/brush.ts` 的一部分（独立成模块会让 debug 端的 `__esm` 包装差异
+// 触发 shared-artifacts 的跨端文本分叉判定），因此打包该文件后 import。
+const {
+  doorMoveDirection,
+  doorModelSize,
+  doorMoveDistance,
+  doorMoveSpeed,
+  doorTravelSeconds,
+  doorMoveOffset,
+} = await loadTsBundle('src/ts-shared/entity/classes/brush.ts', 'entity-brush');
 
 const { ShmState, SHARED_BUFFER_SIZE, KEY_MASK, keysToMask, maskToKeys } = sharedState;
 
@@ -417,4 +448,81 @@ test('config-sync: snapshot 返回 sections 的深拷贝', () => {
   assert.deepEqual(snap, { render: { fov: 90, vsync: true }, audio: { volume: 0.8 } });
   snap.render.fov = 12;
   assert.equal(config.render.fov, 90);
+});
+
+// ── door-motion：func_door 平移换算（T-N4） ──────────────────────────────────────
+// 口径对照 Source `CBaseDoor::Spawn`：方向由 `AngleVectors` 的 forward 转 Y-up，
+// 行程 = |dir·OBB| - lip，speed 是 HU/s。真实样例来自
+// test/maps/ze_cursed_bear_tales_v1_2.bsp（Y-up 尺寸 = BSP model AABB 的 [y,z,x]）。
+
+function vecNear(actual, expected, tol = 1e-9) {
+  assert.equal(actual.length, 3, '三维向量');
+  for (let i = 0; i < 3; i += 1) {
+    assert.ok(Math.abs(actual[i] - expected[i]) <= tol, '[' + actual.join(',') + '] != [' + expected.join(',') + ']');
+  }
+}
+
+test('door-motion: movedir 角度 → Y-up 单位向量（pitch/yaw，roll 不参与）', () => {
+  vecNear(doorMoveDirection([-90, 0, 0]), [0, 1, 0]);
+  vecNear(doorMoveDirection([90, 0, 0]), [0, -1, 0]);
+  vecNear(doorMoveDirection([0, 0, 0]), [0, 0, 1]);
+  vecNear(doorMoveDirection([0, 90, 0]), [1, 0, 0]);
+  vecNear(doorMoveDirection([0, 180, 0]), [0, 0, -1]);
+  vecNear(doorMoveDirection([0, 270, 0]), [-1, 0, 0]);
+  vecNear(doorMoveDirection([0, 15, 0]), [Math.sin(Math.PI / 12), 0, Math.cos(Math.PI / 12)]);
+  vecNear(doorMoveDirection([0, 90, 45]), doorMoveDirection([0, 90, 0]));
+});
+
+test('door-motion: 缺键/非法 movedir 返回 null（调用方回退旧隐藏近似）', () => {
+  assert.equal(doorMoveDirection(undefined), null);
+  assert.equal(doorMoveDirection(null), null);
+  assert.equal(doorMoveDirection([]), null);
+  assert.equal(doorMoveDirection([0, 0]), null);
+  assert.equal(doorMoveDirection([Number.NaN, 0, 0]), null);
+});
+
+test('door-motion: brush 体积并集尺寸（AABB 平移不变，等价 OBB 尺寸）', () => {
+  assert.deepEqual(doorModelSize([{ mins: [0, 0, 0], maxs: [10, 20, 30] }]), [10, 20, 30]);
+  assert.deepEqual(doorModelSize([
+    { mins: [-5, 0, 0], maxs: [0, 4, 8] },
+    { mins: [0, 10, -2], maxs: [6, 12, 8] },
+  ]), [11, 12, 10]);
+  assert.equal(doorModelSize([]), null);
+  assert.equal(doorModelSize(undefined), null);
+});
+
+test('door-motion: 行程 = |dir·OBB| - lip，投影小于 lip 时钳 0', () => {
+  const size = [320, 304, 36];
+  assert.equal(doorMoveDistance(size, [0, 1, 0], 64), 240); // 实测 #200 lvl2_door
+  assert.equal(doorMoveDistance([1, 656, 168], [0, 1, 0], 300), 356); // 实测 #589 lvl1_door_08
+  assert.equal(doorMoveDistance(size, [0, 1, 0], 0), 304);
+  assert.equal(doorMoveDistance(size, [0, 1, 0], 304), 0);
+  assert.equal(doorMoveDistance(size, [0, 1, 0], 400), 0);
+  assert.ok(near(doorMoveDistance([356, 16, 356], [Math.SQRT1_2, 0, Math.SQRT1_2], 0), 503.46, 1e-4)); // 实测 #1355 45° 门
+  assert.equal(doorMoveDistance(size, undefined, 0), 0);
+  assert.equal(doorMoveDistance(undefined, [0, 1, 0], 0), 0);
+});
+
+test('door-motion: speed 0/非有限/负数回落到 Source 默认 100 HU/s', () => {
+  assert.equal(doorMoveSpeed(0), 100);
+  assert.equal(doorMoveSpeed(-3), 100);
+  assert.equal(doorMoveSpeed(Number.NaN), 100);
+  assert.equal(doorMoveSpeed(250), 250);
+});
+
+test('door-motion: 行程时长 = 距离 / speed，按剩余进度线性折算', () => {
+  assert.equal(doorTravelSeconds(240, 100), 2.4);
+  assert.equal(doorTravelSeconds(240, 0), 2.4); // speed 0 → 100
+  assert.equal(doorTravelSeconds(240, 100, 0.25), 0.6);
+  assert.equal(doorTravelSeconds(240, 100, -0.5), 1.2);
+  assert.equal(doorTravelSeconds(0, 100), 0);
+  assert.equal(doorTravelSeconds(156, 1), 156); // 实测 #1315 speed=1，忠实 Source 的慢速
+});
+
+test('door-motion: 位移 = 方向 * 行程 * progress，progress 钳 0..1', () => {
+  vecNear(doorMoveOffset([0, 1, 0], 240, 0.5), [0, 120, 0]);
+  vecNear(doorMoveOffset([0, 1, 0], 240, 2), [0, 240, 0]);
+  vecNear(doorMoveOffset([0, 1, 0], 240, -1), [0, 0, 0]);
+  vecNear(doorMoveOffset(undefined, 240, 1), [0, 0, 0]);
+  vecNear(doorMoveOffset([1, 0, 0], 240, 0), [0, 0, 0]);
 });

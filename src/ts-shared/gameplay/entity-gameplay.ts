@@ -397,14 +397,18 @@ export class EntityGameplay {
     this.brushSolid.clear();
     this.brushOffset.clear();
     this.teleportEnabled.clear();
-    // 出生即「关」的 brush（初始开着的门 / START_OFF 墙 / StartDisabled 的 func_brush）：
-    // Rust 侧建物理世界时已按 `start_solid=false` 排除碰撞，但渲染层没有事件就不会藏几何，
-    // 于是会出现「能穿过去但看着是关着的门/墙」。这里把初态同步成渲染可见性镜像：
-    // 记进 `brushSolid`（物理实例晚于本调用建立时由 `update()` 重放，属于安全冗余），
+    // 出生即「关」的 brush（START_OFF 墙 / StartDisabled 的 func_brush / 拿不到 movedir 的
+    // 旧式门）：Rust 侧建物理世界时已按 `start_solid=false` 排除碰撞，但渲染层没有事件就
+    // 不会藏几何，于是会出现「能穿过去但看着是关着的门/墙」。这里把初态同步成渲染可见性
+    // 镜像：记进 `brushSolid`（物理实例晚于本调用建立时由 `update()` 重放，属于安全冗余），
     // 并通过 `onBrushSolidChange` 通知宿主隐藏几何。
+    // `func_door` 例外：能算出行程的门在 spawn 期已把几何移到开位、把自己设成实心
+    // （`doorMotionReady`，见 classes/brush.ts）；再按 start_solid 规则隐藏，会把开着的门
+    // 变成看不见的空洞。没有平移数据、回退旧隐藏近似的门不受影响。
     const attached = this.entitySystem;
     if (attached) {
       for (const entity of attached.entList.entities) {
+        if (entity.getBool('doorMotionReady', false)) continue;
         if (!entityStartsNonSolid(entity)) continue;
         this.brushSolid.set(entity.index, false);
         this.options.onBrushSolidChange?.(entity.index, false);
