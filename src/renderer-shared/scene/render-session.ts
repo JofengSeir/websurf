@@ -1241,7 +1241,11 @@ export class RenderSession {
       );
     }
     mark('near');
-    this.sorter.update(this.camera);
+    const sorterPvs =
+      this.visibility.enablePvs && this.pvs && this.pvs.enabled && this.lastVisibility?.pvsClusterValid !== false
+        ? this.pvs
+        : null;
+    this.sorter.update(this.camera, sorterPvs, this.lastVisibility?.clusterAtCamera ?? -1);
     mark('sort');
     // 水面折射/深度 RT：必须在主渲染**之前**的干净上下文渲染（T-650 v4：原先嵌套在
     // 水面 onBeforeRender 里，嵌套 render 状态被外层半途状态污染且随视角变化，§12.9）。

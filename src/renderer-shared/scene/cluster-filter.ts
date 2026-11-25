@@ -413,7 +413,7 @@ function isSortedPerFace(mesh: THREE.Mesh): boolean {
 export function prepareClusterIndex(
   items: readonly { mesh: THREE.Mesh; clusterIds: number[] }[],
   pvs: PvsFilterQuery,
-  minTris = 64,
+  minTris = 2,
 ): ClusterIndexStats {
   const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
   const stats: ClusterIndexStats = { prepared: 0, skipped: 0, tris: 0, preparedMs: 0, reasons: {} };

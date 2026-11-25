@@ -8,6 +8,12 @@
  */
 import * as THREE from 'three';
 
+/** 半透明块逐三角形 PVS 剔除所需最小查询接口。 */
+export interface TransparentPvsQuery {
+  isVisible(clusterId: number): boolean;
+  getClusterAt(pos: { x: number; y: number; z: number }): number;
+}
+
 /**
  * 半透明逐面排序的比较：距离大在前；距离相等时**下标小的在前**。
  *
@@ -34,6 +40,13 @@ export class TransparentSorter {
   private sortLastVisible = -1;
   /** 上次逐面排序时的相机位置；位置没动就不必重算三角形距离（转视角不改距离）。 */
   private readonly faceSortLastPos = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);
+  /** 上次排序时的相机 PVS cluster；跨房间换区时强制重排并更新逐面 PVS 剔除。 */
+  private lastPvsCluster = -2;
+  private readonly pvsTmpA = new THREE.Vector3();
+  private readonly pvsTmpB = new THREE.Vector3();
+  private readonly pvsTmpC = new THREE.Vector3();
+  private readonly pvsTmpN = new THREE.Vector3();
+  private readonly pvsTmpP = new THREE.Vector3();
 
   /** 当前收集到的半透明块数（诊断用）。 */
   get size(): number {
@@ -43,6 +56,7 @@ export class TransparentSorter {
   /** 换图/卸载时清空（原 `disposeScene` 里的 `this.transparentChunks = []`）。 */
   clear(): void {
     this.chunks = [];
+    this.lastPvsCluster = -2;
   }
 
   /**
@@ -69,7 +83,7 @@ export class TransparentSorter {
    * 这里直接按三角形中心到相机的距离重写 index buffer（远→近），组内保持材质组
    * 边界不变；非索引几何先补一条顺序 index。来源位置用几何原生 position，不重采样。
    */
-  private sortFaces(mesh: THREE.Mesh, camera: THREE.Camera): void {
+  private sortFaces(mesh: THREE.Mesh, camera: THREE.Camera, pvs: TransparentPvsQuery | null): void {
     const geom = mesh.geometry;
     const pos = geom.attributes.position as THREE.BufferAttribute | undefined;
     if (!pos) return;
@@ -81,6 +95,7 @@ export class TransparentSorter {
       groupCount: number;
       tris: Tri[];
       dists: Float64Array;
+      triClusters: Int32Array | null;
       prevIdx: Uint32Array | null;
       /** 复用 scratch（长度随三角形数固定），逐面排序每帧 0 分配。 */
       order: Int32Array;
@@ -123,6 +138,7 @@ export class TransparentSorter {
         groupCount: groupsEmpty ? 0 : geom.groups.length,
         tris,
         dists: new Float64Array(triCount),
+        triClusters: null,
         prevIdx: null,
         order: new Int32Array(triCount),
         orderTmp: new Int32Array(triCount),
@@ -134,6 +150,41 @@ export class TransparentSorter {
       mesh.userData.__vbspFaceSort = cache;
     }
     const c = cache;
+    if (pvs && !c.triClusters) {
+      const tc = new Int32Array(c.tris.length);
+      const mw = mesh.matrixWorld;
+      const va = this.pvsTmpA;
+      const vb = this.pvsTmpB;
+      const vc = this.pvsTmpC;
+      const vn = this.pvsTmpN;
+      const vp = this.pvsTmpP;
+      for (let i = 0; i < c.tris.length; i++) {
+        const t = c.tris[i];
+        va.fromBufferAttribute(pos, t.a).applyMatrix4(mw);
+        vb.fromBufferAttribute(pos, t.b).applyMatrix4(mw);
+        vc.fromBufferAttribute(pos, t.c).applyMatrix4(mw);
+        const cx = (va.x + vb.x + vc.x) / 3;
+        const cy = (va.y + vb.y + vc.y) / 3;
+        const cz = (va.z + vb.z + vc.z) / 3;
+        vp.set(cx, cy, cz);
+        let cl = pvs.getClusterAt(vp);
+        if (cl < 0) {
+          vb.sub(va);
+          vc.sub(va);
+          vn.crossVectors(vb, vc);
+          if (vn.lengthSq() >= 1e-12) {
+            vn.normalize();
+            for (const off of [8, -8, 32, -32]) {
+              vp.set(cx + vn.x * off, cy + vn.y * off, cz + vn.z * off);
+              cl = pvs.getClusterAt(vp);
+              if (cl >= 0) break;
+            }
+          }
+        }
+        tc[i] = cl;
+      }
+      c.triClusters = tc;
+    }
     const cam = camera.position;
     const p = this.sortPoint;
     for (let i = 0; i < c.tris.length; i++) {
@@ -209,11 +260,17 @@ export class TransparentSorter {
       let cursor = groupsEmpty ? 0 : geom.groups[gi].start;
       const end = offsets[gi] + counts[gi];
       for (let j = offsets[gi]; j < end; j++) {
-        const t = c.tris[bucketSorted[j]];
-        if (!changed && (prevIdx![k] !== t.a || prevIdx![k + 1] !== t.b || prevIdx![k + 2] !== t.c)) changed = true;
-        idxArr[cursor] = t.a;
-        idxArr[cursor + 1] = t.b;
-        idxArr[cursor + 2] = t.c;
+        const ti = bucketSorted[j];
+        const t = c.tris[ti];
+        const hidden =
+          pvs !== null && c.triClusters !== null && c.triClusters[ti] >= 0 && !pvs.isVisible(c.triClusters[ti]);
+        const ia = t.a;
+        const ib = hidden ? t.a : t.b;
+        const ic = hidden ? t.a : t.c;
+        if (!changed && (prevIdx![k] !== ia || prevIdx![k + 1] !== ib || prevIdx![k + 2] !== ic)) changed = true;
+        idxArr[cursor] = ia;
+        idxArr[cursor + 1] = ib;
+        idxArr[cursor + 2] = ic;
         cursor += 3;
         k += 3;
       }
@@ -234,7 +291,7 @@ export class TransparentSorter {
    * 合并后 `position=(0,0,0)`、three 退化成 id 顺序的影响。地图解析侧的
    * `faceIndex` 已随来源区间表保留，后续要升级到逐面排序时可直接用。
    */
-  update(camera: THREE.Camera): void {
+  update(camera: THREE.Camera, pvs: TransparentPvsQuery | null = null, camCluster = -1): void {
     const list = this.chunks;
     if (list.length === 0) return;
     const box = this.sortBox;
@@ -250,14 +307,17 @@ export class TransparentSorter {
       visCount++;
       visHash = (visHash * 31 + mesh.id) | 0;
     }
-    // 逐面排序（每块逐三角形算距离 + 重排 + index 重传）只在相机位置真的变了才做：
+    // 逐面排序（每块逐三角形算距离 + 重排 + index 重传）只在相机位置真的变了或 PVS cluster 变化时才做：
     // 转视角时相机位置不变 ⇒ 距离不变 ⇒ 排序结果与上一帧逐位相同（实测占整帧 7%）。
     const moved = cameraPos.distanceToSquared(this.faceSortLastPos) > 0.0625;
     if (moved) this.faceSortLastPos.copy(cameraPos);
+    const pvsChanged = camCluster !== this.lastPvsCluster;
+    this.lastPvsCluster = camCluster;
     if (
       visCount === this.sortLastVisible &&
       visHash === this.sortLastHash &&
-      !moved
+      !moved &&
+      !pvsChanged
     ) {
       return;
     }
@@ -277,8 +337,8 @@ export class TransparentSorter {
       box.copy(local).applyMatrix4(mesh.matrixWorld);
       box.clampPoint(cameraPos, point);
       mesh.userData.__vbspTransparentDist = point.distanceToSquared(cameraPos);
-      if (moved && (globalThis as { __vbspNoFaceSort?: unknown }).__vbspNoFaceSort !== true) {
-        this.sortFaces(mesh, camera);
+      if ((moved || pvsChanged) && (globalThis as { __vbspNoFaceSort?: unknown }).__vbspNoFaceSort !== true) {
+        this.sortFaces(mesh, camera, pvs);
       }
     }
     list.sort((a, b) => {
