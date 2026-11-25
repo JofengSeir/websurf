@@ -156,42 +156,65 @@ void main() {
 }
 `;
 
-let glowTexture: THREE.Texture | null = null;
-
-/** 逐像素双高斯径向渐变贴图（柔和扩散、无硬盘台阶），只建一次；多盏灯共享。 */
-function getGlowTexture(): THREE.Texture {
-	if (glowTexture) return glowTexture;
-	const size = 128;
-	const canvas = document.createElement('canvas');
-	canvas.width = size;
-	canvas.height = size;
-	const ctx = canvas.getContext('2d');
-	if (ctx) {
-		const img = ctx.createImageData(size, size);
-		const half = (size - 1) * 0.5;
-		for (let y = 0; y < size; y++) {
-			const dy = (y - half) / half;
-			for (let x = 0; x < size; x++) {
-				const dx = (x - half) / half;
-				const r2 = dx * dx + dy * dy;
-				const edge = Math.max(0, 1 - r2);
-				const falloff =
-					r2 >= 1 ? 0 : (0.55 * Math.exp(-r2 * 7.0) + 0.45 * Math.exp(-r2 * 2.1)) * edge * edge;
-				const a = Math.round(Math.min(1, falloff) * 255);
-				const idx = (y * size + x) * 4;
-				img.data[idx] = 255;
-				img.data[idx + 1] = 255;
-				img.data[idx + 2] = 255;
-				img.data[idx + 3] = a;
-			}
-		}
-		ctx.putImageData(img, 0, 0);
-	}
-	const tex = new THREE.CanvasTexture(canvas);
-	tex.colorSpace = THREE.SRGBColorSpace;
-	glowTexture = tex;
-	return tex;
+/**
+ * 灯光晕光片元 + 视角方向性炫光：背对灯头暗淡（灯罩遮挡感），侧面柔和，
+ * 沿照射方向正对灯头时触发强白芯核、水平镜头拉丝与十字星芒（进入 BloomPostFx 触发真实泛光）。
+ */
+const GLARE_VERT = `
+uniform vec3 uSpotDir;
+uniform float uBaseSize;
+varying vec2 vUv;
+varying float vFacing;
+varying float vGlare;
+varying float vCamFade;
+void main() {
+	vUv = uv;
+	vec4 worldOrigin = modelMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+	vec3 toCam = cameraPosition - worldOrigin.xyz;
+	float dist = max(1.0, length(toCam));
+	vec3 viewDir = toCam / dist;
+	vFacing = dot(normalize(uSpotDir), viewDir);
+	float onAxis = smoothstep(0.42, 0.995, vFacing);
+	vGlare = onAxis * onAxis;
+	vCamFade = smoothstep(0.0, ${SHADEOUT_DISTANCE.toFixed(1)}, dist);
+	float distBoost = clamp(dist / 360.0, 0.85, 2.2);
+	float scale = uBaseSize * (0.65 + 0.35 * max(0.0, vFacing) + 1.85 * vGlare * distBoost);
+	vec4 mv = viewMatrix * worldOrigin;
+	mv.xy += position.xy * scale;
+	gl_Position = projectionMatrix * mv;
 }
+`;
+
+const GLARE_FRAG = `
+uniform vec3 uColor;
+uniform float uGain;
+varying vec2 vUv;
+varying float vFacing;
+varying float vGlare;
+varying float vCamFade;
+void main() {
+	vec2 p = vUv * 2.0 - 1.0;
+	float r2 = dot(p, p);
+	if (r2 >= 1.0) discard;
+	float edge = 1.0 - r2;
+	float halo = (0.55 * exp(-r2 * 7.0) + 0.45 * exp(-r2 * 2.1)) * edge * edge;
+	float core = exp(-r2 * 28.0) * edge;
+	float streak = exp(-p.y * p.y * 85.0) * exp(-p.x * p.x * 3.8) * edge;
+	float star = exp(-abs(p.x) * 26.0) * exp(-abs(p.y) * 5.0)
+		+ exp(-abs(p.y) * 26.0) * exp(-abs(p.x) * 5.0);
+	star *= edge * edge;
+	float backDim = mix(0.14, 0.45, smoothstep(-0.25, 0.35, vFacing));
+	float intensity = uGain * vCamFade * (
+		halo * (backDim + 1.15 * vGlare)
+		+ core * (0.18 + 1.65 * vGlare)
+		+ (streak * 0.42 + star * 0.22) * vGlare
+	);
+	if (intensity <= 0.001) discard;
+	float hot = clamp(core * (0.35 + 0.65 * vGlare) + vGlare * 0.35 * halo, 0.0, 1.0);
+	vec3 tint = mix(uColor, vec3(1.0), hot);
+	gl_FragColor = vec4(tint * intensity, 1.0);
+}
+`;
 
 export interface SpotDLightEntry {
 	position: [number, number, number];
@@ -203,7 +226,7 @@ interface RigEntry {
 	spot: PunctualSpot;
 	dlight: SpotDLightEntry | null;
 	beam: THREE.Mesh;
-	sprite: THREE.Sprite | null;
+	glare: THREE.Mesh;
 	baseOrigin: THREE.Vector3;
 	baseDir: THREE.Vector3;
 	length: number;
@@ -270,7 +293,8 @@ export class SpotBeamRig {
 					const gain = amt * hdrScale;
 					const beamMat = entry.beam.material as THREE.ShaderMaterial;
 					if (beamMat.uniforms?.uPeak) beamMat.uniforms.uPeak.value = BEAM_PEAK * gain;
-					if (entry.sprite) entry.sprite.material.opacity = 0.45 * gain;
+					const glareMat = entry.glare.material as THREE.ShaderMaterial;
+					if (glareMat.uniforms?.uGain) glareMat.uniforms.uGain.value = gain;
 				}
 			}
 			entry.ancestors.length = 0;
@@ -292,7 +316,7 @@ export class SpotBeamRig {
 			chain.reverse(); // 根祖先在前，直接父级在后
 			entry.ancestors.push(...chain);
 			entry.beam.userData.vbspDynamicSpot = true;
-			if (entry.sprite) entry.sprite.userData.vbspDynamicSpot = true;
+			entry.glare.userData.vbspDynamicSpot = true;
 			for (const ancIdx of chain) {
 				let list = this.byAncestor.get(ancIdx);
 				if (!list) {
@@ -352,10 +376,12 @@ export class SpotBeamRig {
 		entry.beam.quaternion.setFromUnitVectors(this.upAxis, dir);
 		entry.beam.updateMatrix();
 		entry.beam.updateMatrixWorld(true);
-		if (entry.sprite) {
-			entry.sprite.position.copy(pos);
-			entry.sprite.updateMatrix();
-			entry.sprite.updateMatrixWorld(true);
+		entry.glare.position.copy(pos);
+		entry.glare.updateMatrix();
+		entry.glare.updateMatrixWorld(true);
+		const glareMat = entry.glare.material as THREE.ShaderMaterial;
+		if (glareMat.uniforms?.uSpotDir) {
+			(glareMat.uniforms.uSpotDir.value as THREE.Vector3).copy(dir);
 		}
 		entry.spot.position[0] = pos.x;
 		entry.spot.position[1] = pos.y;
@@ -403,7 +429,6 @@ export function buildSpotBeams(spots: PunctualSpot[], root: THREE.Object3D | nul
 	group.name = 'vbspSpotBeams';
 	group.renderOrder = 10;
 
-	const glow = getGlowTexture();
 	const up = new THREE.Vector3(0, 1, 0);
 	const activeSpots: PunctualSpot[] = [];
 	const dlights: SpotDLightEntry[] = [];
@@ -420,8 +445,10 @@ export function buildSpotBeams(spots: PunctualSpot[], root: THREE.Object3D | nul
 		const axis = new THREE.Vector3(s.direction[0], s.direction[1], s.direction[2]).normalize();
 		const origin = new THREE.Vector3(s.position[0], s.position[1], s.position[2]);
 		const maxLength = Math.max(48, s.beamLength ?? Math.min(s.range, 900));
-		const hit = traceBeamHit(origin, axis, maxLength, root);
-		const length = hit.length;
+		// 动态挂接射灯会随载体离开出生房间，不做出生位一次性射线永久截断，由场景深度自然遮挡墙体。
+		const hit = s.parentName ? null : traceBeamHit(origin, axis, maxLength, root);
+		const length = hit ? hit.length : maxLength;
+		const hitPoint = hit ? hit.point : origin.clone().addScaledVector(axis, length);
 		const width = Math.min(MAX_BEAM_WIDTH, s.beamWidth as number);
 		// 灯头紧凑聚拢（halfStart 窄口）→ 随照射距离自然散开成体积光锥，消除旧版大矩形灯头。
 		const halfStart = Math.max(2.2, Math.min(7.5, width * 0.12));
@@ -431,7 +458,7 @@ export function buildSpotBeams(spots: PunctualSpot[], root: THREE.Object3D | nul
 		if (!noDLight && !startsOff) {
 			const k = Math.min(1.5, Math.max(0.25, s.intensity / 1000));
 			dlight = {
-				position: [hit.point.x, hit.point.y + 5, hit.point.z],
+				position: [hitPoint.x, hitPoint.y + 5, hitPoint.z],
 				color: [s.color[0] * k, s.color[1] * k, s.color[2] * k],
 				range: Math.max(48, 5.4 * halfEnd),
 			};
@@ -475,29 +502,47 @@ export function buildSpotBeams(spots: PunctualSpot[], root: THREE.Object3D | nul
 		beam.visible = !startsOff;
 		group.add(beam);
 
-		// 灯头辉光：起源里 `point_spotlight` 带 `light_glow03` halo。
-		const spriteMat = new THREE.SpriteMaterial({
-			map: glow,
-			color,
+		// 灯头光学炫光（Mesh 走 GLOW_LAYER 泛光，正对光轴时触发强耀斑/拉丝/星芒）。
+		const glareGeo = new THREE.BufferGeometry();
+		glareGeo.setAttribute(
+			'position',
+			new THREE.Float32BufferAttribute([
+				-0.5, -0.5, 0,
+				0.5, -0.5, 0,
+				-0.5, 0.5, 0,
+				0.5, 0.5, 0,
+			], 3),
+		);
+		glareGeo.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 1, 1], 2));
+		glareGeo.setIndex([0, 1, 2, 1, 3, 2]);
+		const glareMat = new THREE.ShaderMaterial({
+			uniforms: {
+				uColor: { value: color },
+				uSpotDir: { value: axis.clone() },
+				uBaseSize: { value: Math.max(22, Math.min(54, (s.beamWidth ?? 75) * 0.48)) },
+				uGain: { value: 1.0 },
+			},
+			vertexShader: GLARE_VERT,
+			fragmentShader: GLARE_FRAG,
 			transparent: true,
-			opacity: 0.45,
 			depthWrite: false,
 			depthTest: true,
 			blending: THREE.AdditiveBlending,
+			side: THREE.DoubleSide,
 			fog: false,
 		});
-		const sprite = new THREE.Sprite(spriteMat);
-		sprite.position.copy(origin);
-		sprite.scale.setScalar(Math.max(18, Math.min(48, (s.beamWidth ?? 75) * 0.42)));
-		sprite.renderOrder = 11;
-		sprite.visible = !startsOff;
-		group.add(sprite);
+		const glare = new THREE.Mesh(glareGeo, glareMat);
+		glare.position.copy(origin);
+		glare.frustumCulled = false;
+		glare.renderOrder = 11;
+		glare.visible = !startsOff;
+		group.add(glare);
 
 		rig.addEntry({
 			spot: s,
 			dlight,
 			beam,
-			sprite,
+			glare,
 			baseOrigin: origin.clone(),
 			baseDir: axis.clone(),
 			length,
