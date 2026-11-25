@@ -40,7 +40,6 @@
 
 use crate::vbsp::data::*;
 use crate::vbsp::Bsp;
-use arrayvec::ArrayVec;
 use itertools::Either;
 use ahash::RandomState;
 use std::fmt::{Debug, Formatter};
@@ -125,11 +124,9 @@ impl<'a> Handle<'a, Model> {
 }
 
 impl Handle<'_, Node> {
-    /// 分割该节点的平面（`Node::plane_index` → `Bsp::planes`）。
-    ///
-    /// 走 `Bsp::plane` 后 `unwrap()`：下标越界会 panic；`Bsp::validate` 已覆盖 node→plane。
-    pub fn plane(&self) -> Handle<'_, Plane> {
-        self.bsp.plane(self.plane_index as _).unwrap()
+    /// 分割该节点的平面（`Node::plane_index` → `Bsp::planes`）；下标越界返回 `None`。
+    pub fn plane(&self) -> Option<Handle<'_, Plane>> {
+        self.bsp.plane(self.plane_index as _)
     }
 }
 
@@ -261,10 +258,8 @@ impl<'a> Handle<'a, TextureData> {
 
 
 impl<'a> Handle<'a, Face> {
-    /// 该面的纹理信息（`texture_info` → `Bsp::textures_info`）。
-    ///
-    /// `get(..)` 之后 `unwrap()`：越界 panic；`Bsp::validate` 已覆盖这条关系。
-    pub fn texture(&self) -> Handle<'a, TextureInfo> {
+    /// 该面的纹理信息（`texture_info` → `Bsp::textures_info`）；下标越界返回 `None`。
+    pub fn texture(&self) -> Option<Handle<'a, TextureInfo>> {
         self.bsp
             .textures_info
             .get(self.texture_info as usize)
@@ -272,19 +267,18 @@ impl<'a> Handle<'a, Face> {
                 bsp: self.bsp,
                 data: texture_info,
             })
-            .unwrap()
     }
 
-    /// 组成该面的顶点：`vertex_indexes()` 的每个下标查一次 `Bsp::vertices`，下标越界 panic。
+    /// 组成该面的顶点：`vertex_indexes()` 的每个下标查一次 `Bsp::vertices`，越界项被丢弃。
     pub fn vertices(&self) -> impl Iterator<Item = &'a Vertex> + 'a {
         let bsp = self.bsp;
         self.vertex_indexes()
-            .map(move |vert_index| bsp.vertices.get(vert_index as usize).unwrap())
+            .filter_map(move |vert_index| bsp.vertices.get(vert_index as usize))
     }
 
     /// 组成该面的顶点下标（指向 `Bsp::vertices`），沿面的边走一圈。
     ///
-    /// 三步查表，任何一步越界都 panic：`first_edge..first_edge + num_edges` 取 `surface_edges`、
+    /// 三步查表，任何一步越界只跳过该边：`first_edge..first_edge + num_edges` 取 `surface_edges`、
     /// `SurfaceEdge::edge_index()`（取绝对值）取 `edges`、再按 `SurfaceEdge::direction()` 在边的
     /// `start_index` / `end_index` 之间二选一。
     ///
@@ -292,31 +286,35 @@ impl<'a> Handle<'a, Face> {
     /// 所以相邻三角形共用的顶点会在结果里重复出现。
     pub fn vertex_indexes(&self) -> impl Iterator<Item = u16> + 'a {
         let bsp = self.bsp;
-        (self.data.first_edge..(self.data.first_edge + self.data.num_edges as i32))
-            .map(move |surface_edge| bsp.surface_edges.get(surface_edge as usize).unwrap())
-            .map(move |surface_edge| {
-                bsp.edges
-                    .get(surface_edge.edge_index() as usize)
-                    .map(|edge| (edge, surface_edge.direction()))
-                    .unwrap()
-            })
-            .map(|(edge, direction)| match direction {
+        // 先把遍历范围夹到实际表长：畸形 `first_edge`/`num_edges` 不会造成超长空转。
+        let start = self.data.first_edge.max(0) as usize;
+        let count = self.data.num_edges.max(0) as usize;
+        let end = start.saturating_add(count).min(bsp.surface_edges.len());
+        (start..end).filter_map(move |surface_edge| {
+            let surface_edge = bsp.surface_edges.get(surface_edge as usize)?;
+            let edge = bsp.edges.get(surface_edge.edge_index() as usize)?;
+            Some(match surface_edge.direction() {
                 EdgeDirection::FirstToLast => edge.start_index,
                 EdgeDirection::LastToFirst => edge.end_index,
             })
+        })
     }
 
-    /// 该面第一条边的方向（`surface_edges[first_edge]`）；直接下标，`first_edge` 越界即 panic。
-    pub fn edge_direction(&self) -> EdgeDirection {
-        self.bsp.surface_edges[self.first_edge as usize].direction()
+    /// 该面第一条边的方向（`surface_edges[first_edge]`）；越界返回 `None`。
+    pub fn edge_direction(&self) -> Option<EdgeDirection> {
+        self.bsp
+            .surface_edges
+            .get(self.first_edge as usize)
+            .map(|surface_edge| surface_edge.direction())
     }
 
     /// 该面是否应当渲染：纹理 `flags` 与 `SKY2D | SKY | TRIGGER | HINT | SKIP | NODRAW` 的交集为空。
     ///
-    /// 判据取自 `TextureInfo::flags`，所以要先能取到 texture_info 与 texture_data，
-    /// 与它们同样受越界 panic 的影响（见 `texture`）。
+    /// 判据取自 `TextureInfo::flags`；取不到 texture_info 时按不可见处理。
     pub fn is_visible(&self) -> bool {
-        let texture = self.texture();
+        let Some(texture) = self.texture() else {
+            return false;
+        };
         !texture.flags.intersects(
             TextureFlags::SKY2D
                 | TextureFlags::SKY
@@ -329,19 +327,23 @@ impl<'a> Handle<'a, Face> {
 
     /// 三角扇剖分：取前两个顶点当基准，此后每读一个顶点就与"上一个"和"第一个"组成一个三角形。
     ///
-    /// 只适用于顶点已按序排列的凸面。顶点不足 3 个时 `expect("face with <3 points")` panic。
+    /// 只适用于顶点已按序排列的凸面。顶点不足 3 个时返回空迭代器（不 panic）。
     /// 产出三角形的顶点顺序是 `[c, b, a]`（与输入遍历顺序相反）。
     pub fn triangulate(&self) -> impl Iterator<Item = [Vector; 3]> + 'a {
         let mut vertices = self.vertices();
 
-        let a = vertices.next().expect("face with <3 points");
-        let mut b = vertices.next().expect("face with <3 points");
+        let Some(a) = vertices.next() else {
+            return Either::Left(std::iter::empty());
+        };
+        let Some(mut b) = vertices.next() else {
+            return Either::Left(std::iter::empty());
+        };
 
-        vertices.map(move |c| {
+        Either::Right(vertices.map(move |c| {
             let points = [c.position, b.position, a.position];
             b = c;
             points
-        })
+        }))
     }
 
     /// 该面挂的 displacement（`displacement_info` 为负时 `None`）。
@@ -404,11 +406,11 @@ impl<'a> Handle<'a, Face> {
         }
     }
 
-    /// 面的平面法线（`plane_num` → `Bsp::planes`）。
-    ///
-    /// `unwrap()`：`plane_num` 越界 panic，而 `Bsp::validate` **不检查** `face.plane_num`。
-    pub fn normal(&self) -> Vector {
-        self.bsp.plane(self.plane_num as usize).unwrap().normal
+    /// 面的平面法线（`plane_num` → `Bsp::planes`）；下标越界返回 `None`。
+    pub fn normal(&self) -> Option<Vector> {
+        self.bsp
+            .plane(self.plane_num as usize)
+            .map(|plane| plane.normal)
     }
 }
 
@@ -450,33 +452,34 @@ impl<'a> Handle<'a, DisplacementInfo> {
 
     /// 四个角点的位置：先取该面的 4 个顶点，再旋转数组，使第 0 个是离 `start_position` 最近的那个。
     ///
-    /// 两条硬前提：`face().unwrap()`（面必须存在）与 `ArrayVec<_, 4>` 的 `try_into().unwrap()`
-    /// （面必须**正好** 4 个顶点）；任一不成立即 panic。
+    /// 面不存在或顶点数不是正好 4 个时返回 `None`（不 panic）。
     ///
-    /// 选点用 `partial_cmp` 比较 `point - start_position` 这个**向量**本身，不是比较距离；
-    /// 比较返回 `None`（出现 NaN）时 `unwrap()` 同样 panic。
-    fn corner_positions(&self) -> [Vector; 4] {
-        let face = self.face().unwrap();
-        let vertices: [_; 4] = face
-            .vertices()
-            .collect::<ArrayVec<_, 4>>()
-            .as_ref()
-            .try_into()
-            .unwrap();
-        let mut corner_positions: [Vector; 4] = vertices.map(|v| v.position);
+    /// 选点按 `point - start_position` 这个**向量**的 `PartialOrd`（即 `length_squared()`）取最小，
+    /// 与原实现一致；`total_cmp` 只用于让 NaN 也有确定顺序。
+    fn corner_positions(&self) -> Option<[Vector; 4]> {
+        let face = self.face()?;
+        let vertices: Vec<_> = face.vertices().take(4).collect();
+        if vertices.len() != 4 {
+            return None;
+        }
+        let mut corner_positions: [Vector; 4] = [
+            vertices[0].position,
+            vertices[1].position,
+            vertices[2].position,
+            vertices[3].position,
+        ];
 
-        // 按偏移向量的偏序取最小者（不是按距离取最近者）
+        // `Vector` 的 `PartialOrd` 按 `length_squared()` 比较（见 data::Vector），必须保持一致
         let start_index = corner_positions
             .iter()
             .copied()
             .map(|point| point - self.start_position)
             .enumerate()
-            .min_by(|(_a, a_pos), (_b, b_pos)| (a_pos).partial_cmp(b_pos).unwrap())
-            .map(|(i, _pos)| i)
-            .unwrap();
+            .min_by(|(_a, a_pos), (_b, b_pos)| a_pos.length_squared().total_cmp(&b_pos.length_squared()))?
+            .0;
 
         corner_positions.rotate_left(start_index);
-        corner_positions
+        Some(corner_positions)
     }
 
     /// 细分后的基准网格：`steps = 2^power + 1`，按 `x` 外层、`y` 内层产出 `steps × steps` 个点。
@@ -485,7 +488,9 @@ impl<'a> Handle<'a, DisplacementInfo> {
     /// 等分取 `y`，得到双线性插值点（不含位移量）。`power` 每加 1，点数按平方增长。
     fn subdivided_face(&self) -> impl Iterator<Item = Vector> + 'a {
         let steps = 2usize.pow(self.power as u32) + 1;
-        let corner_positions = self.corner_positions();
+        let Some(corner_positions) = self.corner_positions() else {
+            return Either::Left(std::iter::empty());
+        };
 
         let step_scale = 1.0 / (steps as f32 - 1.0);
         let edge_intervals = [
@@ -493,16 +498,18 @@ impl<'a> Handle<'a, DisplacementInfo> {
             (corner_positions[2] - corner_positions[3]) * step_scale,
         ];
 
-        (0..steps)
-            .flat_map(move |x| (0..steps).map(move |y| (x, y)))
-            .map(move |(x, y)| {
-                let edge_positions = [
-                    corner_positions[0] + edge_intervals[0] * x as f32,
-                    corner_positions[3] + edge_intervals[1] * x as f32,
-                ];
-                let segment_interval = (edge_positions[1] - edge_positions[0]) * step_scale;
-                edge_positions[0] + (segment_interval * y as f32)
-            })
+        Either::Right(
+            (0..steps)
+                .flat_map(move |x| (0..steps).map(move |y| (x, y)))
+                .map(move |(x, y)| {
+                    let edge_positions = [
+                        corner_positions[0] + edge_intervals[0] * x as f32,
+                        corner_positions[3] + edge_intervals[1] * x as f32,
+                    ];
+                    let segment_interval = (edge_positions[1] - edge_positions[0]) * step_scale;
+                    edge_positions[0] + (segment_interval * y as f32)
+                }),
+        )
     }
 
     /// 基准网格点 + 对应位移量：`zip(displacement_vertices(), subdivided_face())`。
@@ -603,7 +610,7 @@ impl<'a> Handle<'a, DisplacementInfo> {
         let side = 2usize.pow(self.power.max(0) as u32) + 1;
         self.tessellated_grid()
             .into_iter()
-            .map(move |(gx, gy)| vertices[gx * side + gy])
+            .filter_map(move |(gx, gy)| vertices.get(gx * side + gy).copied())
     }
 
     /// 与 `triangulated_displaced_vertices()` **同序**的混合权重：网格顶点的
@@ -613,7 +620,7 @@ impl<'a> Handle<'a, DisplacementInfo> {
         let side = 2usize.pow(self.power.max(0) as u32) + 1;
         self.tessellated_grid()
             .into_iter()
-            .map(move |(gx, gy)| alphas[gx * side + gy])
+            .filter_map(move |(gx, gy)| alphas.get(gx * side + gy).copied())
     }
 }
 

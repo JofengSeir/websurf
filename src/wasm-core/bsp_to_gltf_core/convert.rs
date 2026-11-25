@@ -1336,12 +1336,16 @@ fn push_bsp_model_bsp(
         if !face.is_visible() {
             continue;
         }
+        let Some(texture) = face.texture() else {
+            continue;
+        };
         let face_index = model.first_face + i as i32;
         primitives.push(push_bsp_face_bsp(
             buffer,
             gltf,
             bsp,
             &face,
+            &texture,
             face_index,
             options,
             missing_resources,
@@ -1458,6 +1462,7 @@ fn push_bsp_face_bsp(
     gltf: &mut Root,
     bsp: &Bsp,
     face: &crate::vbsp::Handle<crate::vbsp::Face>,
+    texture: &crate::vbsp::Handle<'_, crate::vbsp::TextureInfo>,
     face_index: i32,
     options: &ConvertOptions,
     missing_resources: &mut Vec<MissingResource>,
@@ -1472,8 +1477,6 @@ fn push_bsp_face_bsp(
 
     let (min, max) = bounding_box(face.vertex_positions());
 
-    let texture = face.texture();
-
     // lightmap UV（TEXCOORD_1）。无光照或无图集时写中性常量，保证同一块几何的属性集一致
     // （`apps/debug/src/renderer/renderer-main.ts` 与 `apps/game/src/renderer/renderer-main.ts`
     // 的 `mergeGeometries(geoms, true)` 要求参与合并的几何属性集相同）。
@@ -1487,7 +1490,7 @@ fn push_bsp_face_bsp(
     });
     let lightmap_uvs: Vec<[f32; 2]> = match (lightmap, lightmap_region) {
         (Some(export), Some(region)) => {
-            let texinfo: &crate::vbsp::TextureInfo = &texture;
+            let texinfo: &crate::vbsp::TextureInfo = texture;
             let vbsp_face: &crate::vbsp::Face = &face;
             // 位移面走**细分网格** UV（`vertex_grid_uv`），brush 面走投影（`lightmap_uv`）。
             // 两个迭代器与 `vertex_positions()` 逐项对齐，故必须同时推进。
@@ -1673,7 +1676,7 @@ fn push_bsp_face_bsp(
             buffer,
             gltf,
             bsp,
-            face.texture().name(),
+            texture.name(),
             options,
             missing_resources,
             texture_collector,
@@ -1772,7 +1775,10 @@ fn apply_water_thickness(root: &mut Root, models: &[BspModelExport<'_>]) {
             if !face.is_visible() {
                 continue;
             }
-            let key = water_key(face.texture().name());
+            let Some(texture) = face.texture() else {
+                continue;
+            };
+            let key = water_key(texture.name());
             let set = layers.entry(key).or_default();
             for p in face.vertex_positions() {
                 // 水面三角面的顶点 y 有 1~2 单位的法线抖动；按 16 HU 量化再找间隔，

@@ -26,15 +26,15 @@
 //! - `PhySolid::index` 恒为 0，分组键是函数内的字面量 `0u32`，**不是**文本段里各
 //!   `solid{...}` 块自己的 `"index"`；因此返回的 `Vec` 长度至多 1，全部凸体都装进同一个
 //!   `PhySolid`。
-//! - 最后一个表面段的 `SurfaceHeader.size` 要到下一轮循环开头才会被边界检查，所以当它是
-//!   最后一个 solid 时，越界的 `size` 会让文本段的切片直接 panic，而不是返回 `Err`。
+//! - 表面段的 `size` 在读取下一段前就会做符号与溢出检查；为负或偏移越界时返回 `Err`，
+//!   文本段起点越过文件尾时按空文本处理，不再 panic。
 //!
 //! 事实来源：本文件里每个偏移、每条拒绝条件都以**实际读取到的字节**为准（配合夹具
 //! `parse_s2_pillbig_phy` 的逐字段断言），不引用任何外部实现。
 //!
 //! 边界：只解析字节。不读 zip、不做物理模拟、不做坐标轴换算。
 //!
-//! 测试归属：本文件 1 个 `#[test]`（`parse_s2_pillbig_phy`）。
+//! 测试归属：本文件 3 个 `#[test]`（`parse_s2_pillbig_phy` 夹具 + 截断/负偏移 + 环形 ledge 树）。
 
 use std::collections::HashMap;
 
@@ -81,33 +81,69 @@ impl std::error::Error for PhyError {}
 
 /// 越界检查：`off + n > b.len()` 时返回带上下文的 `Err`，否则 `Ok(())`。
 ///
-/// 本文件所有字段读取都先过它，所以 `need` 之后的切片索引不会越界。
+/// 加法用 `checked_add`：畸形偏移接近 `usize::MAX` 时不会回绕成小值而绕过检查。
 fn need(b: &[u8], off: usize, n: usize, what: &str) -> Result<(), PhyError> {
-    if off + n > b.len() {
-        return Err(PhyError(format!(
+    match off.checked_add(n) {
+        Some(end) if end <= b.len() => Ok(()),
+        _ => Err(PhyError(format!(
             "{what}: 越界 off={off} need={n} len={}",
             b.len()
-        )));
+        ))),
     }
-    Ok(())
+}
+
+/// 取 `[off, off+n)` 切片；越界返回 `Err` 而不是 panic。
+fn bytes_at<'a>(b: &'a [u8], off: usize, n: usize, what: &str) -> Result<&'a [u8], PhyError> {
+    need(b, off, n, what)?;
+    b.get(off..)
+        .and_then(|s| s.get(..n))
+        .ok_or_else(|| PhyError(format!("{what}: 越界 off={off} need={n} len={}", b.len())))
 }
 
 /// 读偏移 `off` 处的 4 字节小端 `i32`；越界返回 `Err`。
 fn i32_at(b: &[u8], off: usize) -> Result<i32, PhyError> {
-    need(b, off, 4, "i32")?;
-    Ok(i32::from_le_bytes(b[off..off + 4].try_into().unwrap()))
+    let bytes = bytes_at(b, off, 4, "i32")?;
+    Ok(i32::from_le_bytes(
+        bytes
+            .try_into()
+            .map_err(|_| PhyError("i32: 长度不符".into()))?,
+    ))
 }
 
 /// 读偏移 `off` 处的 4 字节小端 `u32`；越界返回 `Err`。
 fn u32_at(b: &[u8], off: usize) -> Result<u32, PhyError> {
-    need(b, off, 4, "u32")?;
-    Ok(u32::from_le_bytes(b[off..off + 4].try_into().unwrap()))
+    let bytes = bytes_at(b, off, 4, "u32")?;
+    Ok(u32::from_le_bytes(
+        bytes
+            .try_into()
+            .map_err(|_| PhyError("u32: 长度不符".into()))?,
+    ))
 }
 
 /// 读偏移 `off` 处的 2 字节小端 `u16`；越界返回 `Err`。
 fn u16_at(b: &[u8], off: usize) -> Result<u16, PhyError> {
-    need(b, off, 2, "u16")?;
-    Ok(u16::from_le_bytes(b[off..off + 2].try_into().unwrap()))
+    let bytes = bytes_at(b, off, 2, "u16")?;
+    Ok(u16::from_le_bytes(
+        bytes
+            .try_into()
+            .map_err(|_| PhyError("u16: 长度不符".into()))?,
+    ))
+}
+
+/// 读偏移 `off` 处的 4 字节小端 `f32`；越界返回 `Err`。
+fn f32_at(b: &[u8], off: usize) -> Result<f32, PhyError> {
+    let bytes = bytes_at(b, off, 4, "f32")?;
+    Ok(f32::from_le_bytes(
+        bytes
+            .try_into()
+            .map_err(|_| PhyError("f32: 长度不符".into()))?,
+    ))
+}
+
+/// `base + delta`（`delta` 可为负）；下溢/上溢返回 `Err`。
+fn offset_with_delta(base: usize, delta: i32, what: &str) -> Result<usize, PhyError> {
+    base.checked_add_signed(delta as isize)
+        .ok_or_else(|| PhyError(format!("{what}: 偏移溢出 base={base} delta={delta}")))
 }
 
 /// 米 → Source 单位（HU）的换算因子：`1 / 0.0254`（≈ 39.37008 HU/m）。
@@ -121,8 +157,8 @@ const M_TO_HU: f32 = 1.0 / 0.0254;
 /// 输出保证：`PhyConvex::vertices` 已乘 `M_TO_HU`；没有三角形或没有顶点的凸体被丢弃；
 /// `bone_index != 0` 的凸体**保留**。
 ///
-/// 不做：不按块的 `"index"` 分组（见模块头）；不校验表面段总长是否越过文件尾
-/// （最后一个 solid 的 `size` 越界时会在文本段切处 panic，见模块头）。
+/// 不做：不按块的 `"index"` 分组（见模块头）；表面段总长越过文件尾时，后续字段读取
+/// 会安全返回 `Err`，文本段为空（见模块头）。
 pub fn parse_phy(b: &[u8]) -> Result<Vec<PhySolid>, PhyError> {
     if b.len() < 16 {
         return Err(PhyError("文件过短".into()));
@@ -141,15 +177,17 @@ pub fn parse_phy(b: &[u8]) -> Result<Vec<PhySolid>, PhyError> {
         // SurfaceHeader 的字段只读这三个：偏移 0 的 size、4..8 的 "VPHY" 标识、
         // 偏移 10 的 modelType。多字节字段一律走 `need` 保护的读取函数。
         let sh_size = i32_at(b, offset)?;
-        let vid = b
-            .get(offset + 4..offset + 8)
+        let header = bytes_at(b, offset, 12, "表面头")?;
+        let vid = header
+            .get(4..8)
             .ok_or_else(|| PhyError("表面头越界".into()))?;
         // CompactSurfaceHeader 紧跟在 SurfaceHeader（16B）之后
         let model_type = i16::from_le_bytes(
-            b.get(offset + 10..offset + 12)
+            header
+                .get(10..12)
                 .ok_or_else(|| PhyError("表面头越界".into()))?
                 .try_into()
-                .unwrap(),
+                .map_err(|_| PhyError("表面头 modelType 长度不符".into()))?,
         );
         if vid != b"VPHY" {
             return Err(PhyError(format!(
@@ -163,12 +201,31 @@ pub fn parse_phy(b: &[u8]) -> Result<Vec<PhySolid>, PhyError> {
                 "不支持的 modelType={model_type}（仅支持 0=凸包）"
             )));
         }
-        parse_compact_surface(b, offset + 16, &mut solids)?;
-        offset += sh_size as usize + 4; // 表面段总长 = sh_size + 4
+        let compact = offset
+            .checked_add(16)
+            .ok_or_else(|| PhyError(format!("表面段偏移溢出 offset={offset}")))?;
+        parse_compact_surface(b, compact, &mut solids)?;
+        if sh_size < 0 {
+            return Err(PhyError(format!("非法表面段长度 sh_size={sh_size}")));
+        }
+        // 表面段总长 = sh_size + 4；越界留给下一轮字段读取返回 Err
+        offset = (sh_size as usize)
+            .checked_add(4)
+            .and_then(|step| offset.checked_add(step))
+            .ok_or_else(|| {
+                PhyError(format!(
+                    "表面段偏移溢出 offset={offset} sh_size={sh_size}"
+                ))
+            })?;
     }
 
     // 文本段：从 offset 起直到第一个 `\0`；末尾没有 `\0` 时取到切片末尾
-    let text = b[offset..].split(|c| *c == 0).next().unwrap_or(&[]);
+    let text = b
+        .get(offset..)
+        .unwrap_or(&[])
+        .split(|c| *c == 0)
+        .next()
+        .unwrap_or(&[]);
     let text = String::from_utf8_lossy(text).into_owned();
 
     // 逐块取 `"index"` 与 `"surfaceprop"`：按 "solid" 切分，每片只看第一个 `{`..第一个 `}`
@@ -227,6 +284,9 @@ pub fn parse_phy(b: &[u8]) -> Result<Vec<PhySolid>, PhyError> {
     Ok(out)
 }
 
+/// 单个 compact surface 的 ledge 树最多遍历的节点数；用于阻断畸形环导致的无限循环。
+const MAX_LEDGE_NODES: usize = 65_536;
+
 /// 解析一个 compact surface：CompactSurfaceHeader(64B) + ledge 树，把每个 terminal ledge
 /// 转成一个 `PhyConvex` 推进 `out`。
 ///
@@ -241,23 +301,46 @@ pub fn parse_phy(b: &[u8]) -> Result<Vec<PhySolid>, PhyError> {
 /// 错误：一处越界即整体 `Err`（不跳过单个凸体）；但"顶点或三角形为空"的 ledge 只被跳过，
 /// 不算错误。
 fn parse_compact_surface(b: &[u8], c: usize, out: &mut Vec<PhyConvex>) -> Result<(), PhyError> {
-    need(b, c + 64, 0, "CompactSurfaceHeader")?;
+    need(b, c, 64, "CompactSurfaceHeader")?;
     // 根节点偏移在 c+48，相对 c+16 计（故下面 root_node 要再加 16）
-    let ledge_root = i32_at(b, c + 48)?;
-    let root_node = c + 16 + ledge_root as usize;
+    let root_off = c
+        .checked_add(48)
+        .ok_or_else(|| PhyError("CompactSurfaceHeader 偏移溢出".into()))?;
+    let ledge_root = i32_at(b, root_off)?;
+    let root_base = c
+        .checked_add(16)
+        .ok_or_else(|| PhyError("CompactSurfaceHeader 偏移溢出".into()))?;
+    let root_node = offset_with_delta(root_base, ledge_root, "ledge 根节点")?;
 
     let mut stack: Vec<usize> = vec![root_node];
+    let mut visited = 0usize;
     while let Some(node) = stack.pop() {
+        visited += 1;
+        if visited > MAX_LEDGE_NODES {
+            return Err(PhyError(format!(
+                "ledge 树节点数超过上限 {MAX_LEDGE_NODES}（疑似环）"
+            )));
+        }
+        need(b, node, 8, "LedgeNode")?;
         let right_node_offset = i32_at(b, node)?;
-        let compact_node_offset = i32_at(b, node + 4)?;
+        let node_off = node
+            .checked_add(4)
+            .ok_or_else(|| PhyError("LedgeNode 偏移溢出".into()))?;
+        let compact_node_offset = i32_at(b, node_off)?;
         if right_node_offset == 0 {
             // terminal：ledge 起点 = 节点起点 + 偏移 4 处的 i32。
             // 代码只读它的偏移 0（顶点缓冲的相对偏移）、偏移 4（boneIndex）与偏移 12 的
             // u16（三角形数）
-            let ledge = (node as i64 + compact_node_offset as i64) as usize;
+            let ledge = offset_with_delta(node, compact_node_offset, "ledge 起点")?;
             let point_offset = i32_at(b, ledge)?;
-            let bone_index = i32_at(b, ledge + 4)?;
-            let tri_count = u16_at(b, ledge + 12)? as usize;
+            let bone_off = ledge
+                .checked_add(4)
+                .ok_or_else(|| PhyError("ledge 偏移溢出".into()))?;
+            let bone_index = i32_at(b, bone_off)?;
+            let tri_off = ledge
+                .checked_add(12)
+                .ok_or_else(|| PhyError("ledge 偏移溢出".into()))?;
+            let tri_count = u16_at(b, tri_off)? as usize;
 
             // 第一遍：三角形记录 16B/条（4B 头 + 3×4B Edge），Edge 低 16 位是共享顶点缓冲里
             // 的起点索引；这里做索引 remap——只输出真正被三角形引用的顶点，
@@ -266,36 +349,50 @@ fn parse_compact_surface(b: &[u8], c: usize, out: &mut Vec<PhyConvex>) -> Result
             let mut indices: Vec<[u32; 3]> = Vec::with_capacity(tri_count);
             let mut max_vi = 0usize;
             for t in 0..tri_count {
-                let tbase = ledge + 16 + t * 16;
-                need(b, tbase + 16, 0, "CompactTriangle")?;
+                let tbase = ledge
+                    .checked_add(16)
+                    .and_then(|v| v.checked_add(t * 16))
+                    .ok_or_else(|| PhyError("CompactTriangle 偏移溢出".into()))?;
+                need(b, tbase, 16, "CompactTriangle")?;
                 let mut tri = [0u32; 3];
-                for e in 0..3 {
-                    let ed = u32_at(b, tbase + 4 + e * 4)?;
+                for (e, slot) in tri.iter_mut().enumerate() {
+                    let edge_off = tbase
+                        .checked_add(4 + e * 4)
+                        .ok_or_else(|| PhyError("CompactTriangle 偏移溢出".into()))?;
+                    let ed = u32_at(b, edge_off)?;
                     let sp = (ed & 0xFFFF) as u16;
                     max_vi = max_vi.max(sp as usize);
-                    let next = remap.len() as u16;
+                    let next = u16::try_from(remap.len())
+                        .map_err(|_| PhyError("顶点索引数量超过 u16".into()))?;
                     let idx = *remap.entry(sp).or_insert(next);
-                    tri[e] = idx as u32;
+                    *slot = idx as u32;
                 }
                 indices.push(tri);
+            }
+            if indices.is_empty() {
+                continue;
             }
 
             // 第二遍：共享顶点缓冲在 `ledge + pointOffset`，每点 16B（x, y, z 各 4B），
             // 读 `最大索引 + 1` 个；坐标当场乘 M_TO_HU 换 HU，只保留被引用的那些
-            let vbase = (ledge as i64 + point_offset as i64) as usize;
+            let vbase = offset_with_delta(ledge, point_offset, "顶点缓冲起点")?;
             let mut shared: Vec<[f32; 3]> = Vec::with_capacity(max_vi + 1);
             for v in 0..=max_vi {
-                need(b, vbase + v * 16, 16, "phyvertex")?;
-                let x = f32::from_le_bytes(b[vbase + v * 16..vbase + v * 16 + 4].try_into().unwrap());
-                let y = f32::from_le_bytes(b[vbase + v * 16 + 4..vbase + v * 16 + 8].try_into().unwrap());
-                let z = f32::from_le_bytes(b[vbase + v * 16 + 8..vbase + v * 16 + 12].try_into().unwrap());
+                let off = v
+                    .checked_mul(16)
+                    .and_then(|d| vbase.checked_add(d))
+                    .ok_or_else(|| PhyError("phyvertex 偏移溢出".into()))?;
+                need(b, off, 16, "phyvertex")?;
+                let x = f32_at(b, off)?;
+                let y = f32_at(b, off + 4)?;
+                let z = f32_at(b, off + 8)?;
                 shared.push([x * M_TO_HU, y * M_TO_HU, z * M_TO_HU]);
             }
             let mut vertices: Vec<[f32; 3]> = vec![[0.0; 3]; remap.len()];
             for (src, dst) in &remap {
                 vertices[*dst as usize] = shared[*src as usize];
             }
-            if vertices.is_empty() || indices.is_empty() {
+            if vertices.is_empty() {
                 continue;
             }
             out.push(PhyConvex {
@@ -305,8 +402,12 @@ fn parse_compact_surface(b: &[u8], c: usize, out: &mut Vec<PhyConvex>) -> Result
             });
         } else {
             // 非 terminal：一支在 `节点 + 偏移`，另一支固定在 `节点 + 28`（相邻节点步长）
-            stack.push((node as i64 + right_node_offset as i64) as usize);
-            stack.push(node + 28); // sizeof(LedgeNode)
+            let right = offset_with_delta(node, right_node_offset, "ledge 分支节点")?;
+            stack.push(right);
+            stack.push(
+                node.checked_add(28)
+                    .ok_or_else(|| PhyError("LedgeNode 相邻节点偏移溢出".into()))?,
+            );
         }
     }
     Ok(())
@@ -369,5 +470,40 @@ mod tests {
         );
         assert!(min_x > -460.0 && min_x < -400.0, "min_x={min_x}");
         assert!(max_x.abs() < 1.0, "max_x={max_x}");
+    }
+
+    /// 任何截断长度都只能返回 `Err`，不能 panic；负的 `sh_size` 也必须被拒绝。
+    #[test]
+    fn phyfile_truncated_and_negative_offset_does_not_panic() {
+        for len in 0..=80 {
+            let zeros = vec![0u8; len];
+            let _ = parse_phy(&zeros);
+        }
+
+        let mut phy = vec![0u8; 32];
+        phy[0..4].copy_from_slice(&16i32.to_le_bytes());
+        phy[8..12].copy_from_slice(&1i32.to_le_bytes());
+        phy[16..20].copy_from_slice(&(-1i32).to_le_bytes());
+        phy[20..24].copy_from_slice(b"VPHY");
+        assert!(parse_phy(&phy).is_err());
+    }
+
+    /// 两节点互指形成环时，遍历必须有上限并返回 `Err`，而不是无限循环。
+    #[test]
+    fn phyfile_cyclic_ledge_tree_does_not_stack_overflow() {
+        let mut b = vec![0u8; 160];
+        // CompactSurfaceHeader.ledge_root（c+48）= -16 ⇒ root = 0 + 16 - 16 = 0
+        b[48..52].copy_from_slice(&(-16i32).to_le_bytes());
+        // node 0：right=28 ⇒ 两支都落到 28
+        b[0..4].copy_from_slice(&28i32.to_le_bytes());
+        // node 28：right=-28 ⇒ 一支回到 0，形成 0 ↔ 28 环
+        b[28..32].copy_from_slice(&(-28i32).to_le_bytes());
+        let mut out = Vec::new();
+        let err = parse_compact_surface(&b, 0, &mut out).unwrap_err();
+        assert!(
+            err.0.contains("疑似环") || err.0.contains("上限"),
+            "{err}"
+        );
+        assert!(out.is_empty());
     }
 }

@@ -33,7 +33,10 @@ pub fn collect_face_texture_names(bsp: &Bsp) -> Vec<String> {
             if !face.is_visible() {
                 continue;
             }
-            let name = face.texture().name().to_ascii_lowercase();
+            let Some(texture) = face.texture() else {
+                continue;
+            };
+            let name = texture.name().to_ascii_lowercase();
             if !names.contains(&name) {
                 names.push(name);
             }

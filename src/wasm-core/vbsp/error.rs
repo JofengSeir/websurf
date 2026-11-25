@@ -8,15 +8,15 @@
 //!
 //! 关键不变量与坑：
 //! - `BspError` 是 `#[non_exhaustive]`：外部 crate 匹配时必须带 `_` 分支。
-//! - `From<binrw::Error>` 对**无法识别的自定义错误**走 `panic!`——这是刻意的 fail-loud，
-//!   代价是解析期存在 panic 路径，而不是一律返回 `Err`。
+//! - `From<binrw::Error>` 对**无法识别的自定义错误**包成 `MalformedData` 返回 `Err`，
+//!   解析期不存在 panic 路径。
 //! - `LumpOutOfBounds` / `GameLumpOutOfBounds` 携带出错的目录项本身，便于定位。
 //! - `InvalidLumpSize` 的语义是"lump 长度不是记录大小的整数倍"，不是"越界"。
 //!
 //! 边界：本文件只定义错误类型与转换，不含解析逻辑。`#[error(...)]` 的文案是英文，
 //! 属于对外错误信息，不随文档语言变化。
 //!
-//! 测试归属：本文件无 `#[test]`。
+//! 测试归属：本文件 1 个 `#[test]`（`vbsp_custom_binrw_error_returns_err_instead_of_panic`）。
 
 use crate::vbsp::bspfile::LumpType;
 use crate::vbsp::data::*;
@@ -67,7 +67,7 @@ pub enum BspError {
 ///
 /// 分派规则：回溯错误先解包再递归；IO 错误转 `IO`；`Custom` 里只认得
 /// `StringError` / `UnsupportedLumpVersion` / `InvalidNeighbourError` 三种（它们由本 crate
-/// 自己构造），其余一律 `panic!`；剩下的原样包成 `MalformedData`。
+/// 自己构造），其余原样包成 `MalformedData`；剩下的原样包成 `MalformedData`。
 impl From<binrw::Error> for BspError {
     fn from(e: binrw::Error) -> Self {
         use binrw::Error;
@@ -76,7 +76,7 @@ impl From<binrw::Error> for BspError {
         match e {
             Error::Backtrace(trace) => Self::from(*trace.error),
             Error::Io(e) => BspError::IO(e),
-            Error::Custom { err, .. } => {
+            Error::Custom { err, pos } => {
                 if err.is::<StringError>() {
                     BspError::String(*err.downcast::<StringError>().unwrap())
                 } else if err.is::<UnsupportedLumpVersion>() {
@@ -86,7 +86,8 @@ impl From<binrw::Error> for BspError {
                         *err.downcast::<InvalidNeighbourError>().unwrap(),
                     ))
                 } else {
-                    panic!("unexpected custom error")
+                    // 未知自定义错误不 panic：保留原始 binrw 错误，交给调用方按 MalformedData 处理
+                    BspError::MalformedData(Error::Custom { pos, err })
                 }
             }
             e => BspError::MalformedData(e),
@@ -166,4 +167,21 @@ pub enum EntityParseError {
     Float(#[from] ParseFloatError),
     #[error(transparent)]
     Int(#[from] ParseIntError),
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 未知的 `binrw::Error::Custom` 必须转成 `MalformedData`，而不是 panic。
+    #[test]
+    fn vbsp_custom_binrw_error_returns_err_instead_of_panic() {
+        let err = binrw::Error::Custom {
+            pos: 7,
+            err: Box::new(std::io::Error::other("boom")),
+        };
+        let mapped: BspError = err.into();
+        assert!(matches!(mapped, BspError::MalformedData(_)));
+    }
 }

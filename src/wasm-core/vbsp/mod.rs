@@ -25,8 +25,9 @@
 //! 边界：只做解析、组装与跨表校验；不解释各 lump 的内部布局（那是 `data/**` 的职责），
 //! 不做几何与光照计算——`prop_ambient_cube` 是唯一对外的查询例外。
 //!
-//! 测试归属：本文件 2 个 `#[test]`：`test_leaf_clusters`（钉 `Leaves::clusters` 的分组语义）
-//! 与 `tf2_file`（`#[ignore]`，要求工作目录下存在本地 BSP 文件）。
+//! 测试归属：本文件 3 个 `#[test]`：`test_leaf_clusters`（钉 `Leaves::clusters` 的分组语义）、
+//! `tf2_file`（`#[ignore]`，要求工作目录下存在本地 BSP 文件）与
+//! `vbsp_leaf_at_handles_cyclic_nodes_without_infinite_loop`（畸形节点环不得死循环）。
 //!
 //! 来源：本模块是 crates.io `vbsp` 0.6.0 的本地分叉（`Cargo.toml` 依赖表内没有 `vbsp` 条目）。
 
@@ -700,8 +701,8 @@ impl Bsp {
     ///
     /// 走 **BSP 树遍历**：从 `nodes[0]` 起，`plane.normal · p - plane.dist >= 0` 走
     /// `children[0]`，否则 `children[1]`，遇到负 child 取 `!child` 当 leaf 下标；**最多循环 256 次**，
-    /// 用尽仍未落到 leaf 即返回 `None`。判定与 [`Self::leaf_at`] 同一套（`leaf_at` 无次数上限且
-    /// 失败时 `unwrap`  panic，故本方法供「取不到就放弃」的光照兜底使用）。
+    /// 用尽仍未落到 leaf 即返回 `None`。判定与 [`Self::leaf_at`] 同一套（`leaf_at` 也有步数上限
+    /// 并返回 `None`；本方法保留固定 256 次的更紧上限，供「取不到就放弃」的光照兜底使用）。
     pub fn leaf_index_at_point(&self, p: [f32; 3]) -> Option<usize> {
         let mut node_idx: i32 = 0;
         for _ in 0..256 {
@@ -817,12 +818,9 @@ impl Bsp {
             .map(|vert| Handle::new(self, vert))
     }
 
-    /// 取根节点（`nodes[0]`）。
-    ///
-    /// **会 panic**：`nodes` 为空时 `node(0)` 返回 `None` 而这里 `unwrap()`；
-    /// `validate` 已把"空节点表"拦在 `Bsp::read` 内，所以解析成功的 `Bsp` 不会走到这一分支。
-    pub fn root_node(&self) -> Handle<'_, Node> {
-        self.node(0).unwrap()
+    /// 取根节点（`nodes[0]`）；`nodes` 为空时返回 `None`（不 panic）。
+    pub fn root_node(&self) -> Option<Handle<'_, Node>> {
+        self.node(0)
     }
 
     /// 迭代全部模型，顺序即 `models` 的顺序（下标 0 是世界模型）。
@@ -838,14 +836,20 @@ impl Bsp {
     /// 求点所在的 leaf：从根节点起，`dot >= plane.dist` 走 `children[0]`（正面）、否则走
     /// `children[1]`（背面），遇到负 child 取 `!child` 当 leaf 下标。
     ///
-    /// `point` 用 Source 坐标，不做旋转。**会 panic**：树走到越界的节点或 leaf 时
-    /// `node()` / `leaf()` 落空而这里 `unwrap()`；`validate` 已确认索引都在表内。
-    /// 判定与 `prop_ambient_cube` 的树遍历一致，但这里没有循环次数上限。
-    pub fn leaf_at(&self, point: Vector) -> Handle<'_, Leaf> {
-        let mut current = self.root_node();
+    /// `point` 用 Source 坐标，不做旋转。任何一步落空（根缺失 / 平面缺失 / 节点越界 /
+    /// leaf 越界）或步数超过 `nodes.len() + 1` 时返回 `None`，不 panic。
+    /// 判定与 `prop_ambient_cube` 的树遍历一致。
+    pub fn leaf_at(&self, point: Vector) -> Option<Handle<'_, Leaf>> {
+        let mut current = self.root_node()?;
+        let mut steps = 0usize;
 
         loop {
-            let plane = current.plane();
+            if steps > self.nodes.len() {
+                return None;
+            }
+            steps += 1;
+
+            let plane = current.plane()?;
             let dot: f32 = point
                 .iter()
                 .zip(plane.normal.iter())
@@ -857,10 +861,9 @@ impl Bsp {
             let next = if dot < plane.dist { back } else { front };
 
             if next < 0 {
-                return self.leaf((!next) as usize).unwrap();
-            } else {
-                current = self.node(next as usize).unwrap();
+                return self.leaf((!next) as usize);
             }
+            current = self.node(next as usize)?;
         }
     }
 
@@ -1071,7 +1074,7 @@ impl Bsp {
 
 #[cfg(test)]
 mod tests {
-    use super::Bsp;
+    use super::*;
 
     /// 端到端冒烟：从当前工作目录读一个本地 BSP 文件并跑通 `Bsp::read`。
     ///
@@ -1085,6 +1088,97 @@ mod tests {
         let data = read("koth_bagel_rc2a.bsp").unwrap();
 
         Bsp::read(&data).unwrap();
+    }
+
+    /// 构造一棵只有根节点、且根的两个 child 都指回自己的畸形树：
+    /// 遍历必须靠步数上限退出并返回 `None`，不能死循环。
+    #[test]
+    fn vbsp_leaf_at_handles_cyclic_nodes_without_infinite_loop() {
+        let empty_zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()))
+            .finish()
+            .expect("empty zip")
+            .into_inner();
+        let bsp = Bsp {
+            header: Header {
+                v: b'V',
+                b: b'B',
+                s: b'S',
+                p: b'P',
+            },
+            entities: Entities {
+                entities: String::new(),
+                raw: String::new(),
+            },
+            textures_data: Vec::new(),
+            textures_info: Vec::new(),
+            texture_string_tables: Vec::new(),
+            texture_string_data: String::new(),
+            planes: vec![Plane {
+                normal: Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                },
+                dist: 0.0,
+                ty: 0,
+            }],
+            nodes: vec![Node {
+                plane_index: 0,
+                children: [0, 0],
+                mins: [0; 3],
+                maxs: [0; 3],
+                first_face: 0,
+                face_count: 0,
+                area: 0,
+                padding: 0,
+            }],
+            leaves: Leaves::new(vec![Leaf::default()]),
+            leaf_faces: Vec::new(),
+            leaf_brushes: Vec::new(),
+            models: Vec::new(),
+            brushes: Vec::new(),
+            brush_sides: Vec::new(),
+            vertices: Vec::new(),
+            edges: Vec::new(),
+            surface_edges: Vec::new(),
+            faces: Vec::new(),
+            faces_hdr: Vec::new(),
+            lighting: None,
+            original_faces: Vec::new(),
+            vis_data: VisData::default(),
+            displacements: Vec::new(),
+            displacement_vertices: Vec::new(),
+            displacement_triangles: Vec::new(),
+            vertex_normals: Vec::new(),
+            vertex_normal_indices: Vec::new(),
+            static_props: PropStaticGameLump {
+                dict: StaticPropDictLump {
+                    entries: 0,
+                    name: Vec::new(),
+                },
+                leaf: StaticPropLeafLump {
+                    entries: 0,
+                    leaves: Vec::new(),
+                },
+                props: StaticPropLumps {
+                    entries: 0,
+                    props: Vec::new(),
+                },
+            },
+            leaf_ambient_lighting: Vec::new(),
+            leaf_ambient_lighting_hdr: Vec::new(),
+            leaf_ambient_indices: Vec::new(),
+            leaf_ambient_indices_hdr: Vec::new(),
+            pack: Packfile::read(std::borrow::Cow::Owned(empty_zip)).expect("empty packfile"),
+        };
+
+        assert!(bsp
+            .leaf_at(Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            })
+            .is_none());
     }
 }
 
