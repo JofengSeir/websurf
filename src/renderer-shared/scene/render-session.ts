@@ -1192,15 +1192,19 @@ export class RenderSession {
       times[n] = +(now - tLast).toFixed(2);
       tLast = now;
     };
+    const frameNow = performance.now();
+    const activePvs =
+      this.visibility.enablePvs && this.pvs && this.pvs.enabled && this.lastVisibility?.pvsClusterValid !== false
+        ? this.pvs
+        : null;
     // Source `TextureScroll` / `momentary_rot_button` / 激光 UV / 粒子：按真实时间推进。
     // 放在可见性之前：这些动画不影响剔除，但它们要吃到本帧的 dt，越早算越准；
     // 后面 6~9 趟 `renderer.render` 复用同一份矩阵与顶点。
     const extrasAnimating =
       this.laserBeams !== null || this.particleSystems !== null || this.entityExtras !== null;
     if (this.textureScrolls.length > 0 || this.rotButtons.length > 0 || extrasAnimating) {
-      const now = performance.now();
-      const dt = this.lastFrameAt > 0 ? Math.min(0.1, (now - this.lastFrameAt) / 1000) : 0;
-      this.lastFrameAt = now;
+      const dt = this.lastFrameAt > 0 ? Math.min(0.1, (frameNow - this.lastFrameAt) / 1000) : 0;
+      this.lastFrameAt = frameNow;
       // 首帧给一个固定小步长（与旧 debug 实现一致：1/64 秒），避免 dt=0 时激光/粒子不推进。
       const animDt = dt > 0 ? dt : 1 / 64;
       if (this.textureScrolls.length > 0) updateTextureScrolls(this.textureScrolls, dt);
@@ -1212,12 +1216,11 @@ export class RenderSession {
       // matrixWorld，转视角时 quad 会晚一帧摆正（贴图游动）。
       if (this.entityExtras) {
         this.camera.updateMatrixWorld();
-        this.entityExtras.update(this.camera);
+        this.entityExtras.update(this.camera, activePvs);
       }
     }
-    const frameNow = performance.now();
     this.dynamicAmbient.update(this.pvs, frameNow);
-    (this.spotBeams?.userData.rig as SpotBeamRig | undefined)?.updateOcclusion(this.camera, this.laserPhysTrace, frameNow);
+    (this.spotBeams?.userData.rig as SpotBeamRig | undefined)?.updateOcclusion(this.camera, this.laserPhysTrace, frameNow, activePvs);
     // 动态对象（旋钮 pivot 等）刚改过变换：本帧在这里刷新一次世界矩阵，后面 6~9 趟
     // `renderer.render` 直接复用（`scene.matrixWorldAutoUpdate` 在构造函数里关掉了）。
     this.scene.updateMatrixWorld();

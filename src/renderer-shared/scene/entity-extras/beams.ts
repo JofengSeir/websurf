@@ -91,6 +91,8 @@ export class Beams {
   private readonly viewDir = new THREE.Vector3();
   private readonly beamDir = new THREE.Vector3();
   private readonly perp = new THREE.Vector3();
+  private startClusters: Int32Array | null = null;
+  private endClusters: Int32Array | null = null;
 
   constructor(beams: BeamEntity[]) {
     this.beams = beams;
@@ -156,17 +158,36 @@ export class Beams {
     return this.beams.length > 0 ? 1 : 0;
   }
 
-  /** 每帧按视线方向重写加宽方向（`Cross(viewForward, beamDir)`），与 `lasers.ts` 同口径。 */
-  update(camera: THREE.Camera): void {
+  /** 每帧按视线方向重写加宽方向（`Cross(viewForward, beamDir)`），与 `lasers.ts` 同口径，并按 PVS 剔除不可见房间光束。 */
+  update(
+    camera: THREE.Camera,
+    pvs: { isVisible(clusterId: number): boolean; getClusterAt(pos: { x: number; y: number; z: number }): number } | null = null,
+  ): void {
     if (this.beams.length === 0) return;
+    if (pvs && !this.startClusters) {
+      this.startClusters = new Int32Array(this.beams.length);
+      this.endClusters = new Int32Array(this.beams.length);
+      for (let i = 0; i < this.beams.length; i++) {
+        this.startClusters[i] = pvs.getClusterAt(this.beams[i].start);
+        this.endClusters[i] = pvs.getClusterAt(this.beams[i].end);
+      }
+    }
     camera.getWorldDirection(this.viewDir);
     for (let i = 0; i < this.beams.length; i++) {
       const beam = this.beams[i];
+      const pvsCulled =
+        pvs !== null
+        && this.startClusters !== null
+        && this.endClusters !== null
+        && this.startClusters[i] >= 0
+        && this.endClusters[i] >= 0
+        && !pvs.isVisible(this.startClusters[i])
+        && !pvs.isVisible(this.endClusters[i]);
       this.beamDir.subVectors(beam.end, beam.start);
       const length = this.beamDir.length();
       const v = i * 4;
-      if (!(length > 1e-3)) {
-        // 退化光束：塌成零面积。
+      if (pvsCulled || !(length > 1e-3)) {
+        // 退化或 PVS 不可见光束：塌成零面积。
         for (let vert = 0; vert < 4; vert++) {
           const p = (v + vert) * 3;
           this.positions[p] = beam.start.x;

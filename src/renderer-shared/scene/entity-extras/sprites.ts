@@ -98,6 +98,7 @@ export class SpriteGlows {
   private readonly texture: THREE.Texture;
   private readonly batch: BillboardQuadBatch;
   private readonly basis: BillboardBasis = { rx: 1, ry: 0, rz: 0, ux: 0, uy: 1, uz: 0 };
+  private clusters: Int32Array | null = null;
 
   constructor(entities: SpriteEntity[]) {
     this.entities = entities;
@@ -139,13 +140,24 @@ export class SpriteGlows {
     return slot === undefined ? null : this.visible[slot];
   }
 
-  update(camera: THREE.Camera): void {
+  update(
+    camera: THREE.Camera,
+    pvs: { isVisible(clusterId: number): boolean; getClusterAt(pos: { x: number; y: number; z: number }): number } | null = null,
+  ): void {
+    if (pvs && !this.clusters) {
+      this.clusters = new Int32Array(this.entities.length);
+      for (let i = 0; i < this.entities.length; i++) {
+        const o = this.entities[i].origin;
+        this.clusters[i] = pvs.getClusterAt({ x: o[0], y: o[1], z: o[2] });
+      }
+    }
     billboardBasisOf(camera, this.basis);
     this.batch.begin();
     for (let i = 0; i < this.entities.length; i++) {
       const entity = this.entities[i];
       const half = Math.max(0, entity.size) * 0.5;
-      if (!this.visible[i]) {
+      const pvsCulled = pvs !== null && this.clusters !== null && this.clusters[i] >= 0 && !pvs.isVisible(this.clusters[i]);
+      if (!this.visible[i] || pvsCulled) {
         // 显隐走「槽位塌零面积」：batch 的 drawRange 恒定，不写顶点的话上一帧还会画出来。
         this.batch.billboardAt(i, 0, 0, 0, 0, 0, this.basis, 0, 0, 0, 0);
         continue;

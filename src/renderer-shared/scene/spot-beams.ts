@@ -224,7 +224,7 @@ void main() {
 
 	float pinpoint = exp(-r2 * 140.0);
 	float innerHalo = exp(-r2 * 9.0) * 0.24 + exp(-r2 * 3.2) * edge2 * 0.14;
-	float veiling = exp(-r2 * 1.35) * 0.11 * vGlare * edge;
+	float veiling = exp(-r2 * 1.35) * 0.22 * vGlare * edge;
 
 	float ang = atan(p.y, p.x) + uSeed + vNdc.x * 0.45 - vNdc.y * 0.35;
 	float h1 = pow(abs(cos(ang * 3.0 + 0.4)), 24.0);
@@ -250,7 +250,7 @@ void main() {
 	vec3 rainbow = (arcPrimary + arcOuter) * sideMask * 0.40 * vGlare;
 
 	float sideBase = mix(0.14, 0.42, smoothstep(-0.25, 0.15, vFacing));
-	float baseTerm = innerHalo * (sideBase + 0.48 * vBulb) + pinpoint * (0.45 + 0.65 * vBulb) + veiling;
+	float baseTerm = innerHalo * (sideBase + 0.30 * vBulb) + pinpoint * (0.28 + 0.32 * vBulb) + veiling;
 	float opticalTerm = (rays * 0.46 + streak * 0.26) * vGlare;
 
 	vec3 baseTint = mix(uColor, vec3(1.0), clamp(pinpoint * 0.90 + veiling * 0.45, 0.0, 1.0));
@@ -258,6 +258,7 @@ void main() {
 	vec3 arcTint = mix(vec3(1.0), uColor, 0.28);
 	vec3 col = baseTint * baseTerm + rayTint * opticalTerm + rainbow * arcTint;
 	col *= uGain * vCamFade * uVis;
+	col = col / (1.0 + col * 0.35);
 	if (max(col.r, max(col.g, col.b)) <= 0.002) discard;
 	gl_FragColor = vec4(col, 1.0);
 }
@@ -278,6 +279,8 @@ interface RigEntry {
 	baseDir: THREE.Vector3;
 	length: number;
 	ancestors: number[];
+	baseVisible: boolean;
+	cluster: number;
 	visTarget: number;
 	visCurrent: number;
 	lastCheckAt: number;
@@ -325,11 +328,12 @@ export class SpotBeamRig {
 		this.entries.push(entry);
 	}
 
-	/** 节流视线遮挡检测（走 Rust WASM 物理空间网格，每帧最多 1 次，冷却 ≥80ms），并同步画幅纵横比。 */
+	/** 节流视线遮挡检测（走 Rust WASM 物理空间网格，每帧最多 1 次，冷却 ≥80ms）+ PVS 可见性剔除。 */
 	updateOcclusion(
 		camera: THREE.Camera,
 		physTrace: ((start: THREE.Vector3, end: THREE.Vector3) => number) | null,
 		nowMs: number,
+		pvs: { isVisible(clusterId: number): boolean; getClusterAt(p: { x: number; y: number; z: number }): number } | null = null,
 	): void {
 		const dt = this.lastOcclAt > 0 ? Math.min(0.1, (nowMs - this.lastOcclAt) / 1000) : 1 / 60;
 		this.lastOcclAt = nowMs;
@@ -343,11 +347,30 @@ export class SpotBeamRig {
 		for (let step = 0; step < len; step++) {
 			const idx = (this.cursor + step) % len;
 			const entry = this.entries[idx];
-			if (!entry.glare.visible) {
+			if (!entry.baseVisible) {
+				entry.beam.visible = false;
+				entry.glare.visible = false;
 				entry.visTarget = 0;
 				continue;
 			}
 			const gp = entry.glare.position;
+			if (pvs) {
+				let cl = entry.cluster;
+				if (entry.ancestors.length > 0) {
+					cl = pvs.getClusterAt(gp);
+				} else if (cl === -2) {
+					cl = pvs.getClusterAt(gp);
+					entry.cluster = cl;
+				}
+				if (cl >= 0 && !pvs.isVisible(cl)) {
+					entry.beam.visible = false;
+					entry.glare.visible = false;
+					entry.visTarget = 0;
+					continue;
+				}
+			}
+			entry.beam.visible = true;
+			entry.glare.visible = true;
 			const dx = gp.x - this.tmpPos.x;
 			const dy = gp.y - this.tmpPos.y;
 			const dz = gp.z - this.tmpPos.z;
@@ -660,6 +683,8 @@ export function buildSpotBeams(spots: PunctualSpot[], root: THREE.Object3D | nul
 			baseDir: axis.clone(),
 			length,
 			ancestors: [],
+			baseVisible: !startsOff,
+			cluster: -2,
 			visTarget: 1,
 			visCurrent: 1,
 			lastCheckAt: 0,

@@ -69,6 +69,12 @@ interface EntityExtrasCounts {
   ropeSegments: number;
 }
 
+/** 供场景扩展图元（sprite / beam）做 PVS 房间剔除的最小查询接口。 */
+export interface EntityExtrasPvs {
+  isVisible(clusterId: number): boolean;
+  getClusterAt(pos: { x: number; y: number; z: number }): number;
+}
+
 export class EntityExtras {
   /** 挂到 `scene` 的根节点（三端共用；不挂 `this.root`，故不参与 chunk 剔除）。 */
   readonly root: THREE.Group;
@@ -186,11 +192,11 @@ export class EntityExtras {
     return this.sprites ? this.sprites.visibleCount : 0;
   }
 
-  /** 每帧推进：sprite / 文字 / 光束都是屏幕朝向的，按相机矩阵重写四边形顶点。 */
-  update(camera: THREE.Camera): void {
-    this.sprites?.update(camera);
+  /** 每帧推进：sprite / 文字 / 光束都是屏幕朝向的，按相机矩阵重写四边形顶点，并按 PVS 隐藏不可见房间图元。 */
+  update(camera: THREE.Camera, pvs: EntityExtrasPvs | null = null): void {
+    this.sprites?.update(camera, pvs);
     this.worldTexts?.update(camera);
-    this.beams?.update(camera);
+    this.beams?.update(camera, pvs);
   }
 
   /** 释放几何/材质/贴图；幂等。 */
