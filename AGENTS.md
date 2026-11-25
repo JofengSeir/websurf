@@ -25,7 +25,7 @@
 
 | 位置 | 内容 |
 |---|---|
-| `apps/debug`、`apps/game`、`apps/viewer` | 三端工程；各自独立 npm，Rust 侧是仓库根**唯一** Cargo workspace 的成员（`apps/<app>/crates/wasm` 薄导出壳），共用根 `Cargo.toml` / `Cargo.lock` / `target/`（D-133 收口） |
+| `apps/debug`、`apps/game`、`apps/viewer` | 三端工程；各自独立 npm，Rust 侧是仓库根**唯一** Cargo workspace 的成员（`apps/<app>/crates/wasm` 薄导出壳），共用根 `Cargo.toml` / `Cargo.lock` / `target/`（D-133 收口）。物理权威：`apps/game` 默认主线程单权威（`?authority=worker` 回切旧双线），`apps/debug` 保持 Worker 双线（D-132） |
 | `src/phys` | 共享物理内核（Rust，`websurf-phys`） |
 | `src/wasm-core` | BSP / 模型 / 材质 / GLB 导出的共享核心（Rust，`websurf-wasm-core`） |
 | `src/wasm-bindings` | 三端共享的 `#[wasm_bindgen]` 绑定与 feature 分层（Rust，`websurf-wasm-bindings`） |
@@ -65,7 +65,7 @@ npm run dev:check              # 三端产物完整性 / mtime 过期 STALE 提�
 
 > 静态服务是 `src/scripts/serve.mjs`（Node，不依赖系统 Python）；`serve.py` 只为旧脚本兼容。打包模板 `dist/serve.mjs` 同样带 COOP/COEP 响应头。
 
-> **双 bundle 注意**：`web/app.js`（主线程）与 `web/worker.js`（权威物理 Worker）分开打包。`build:app` 会经 `prebuild:app` 自动先重编 `worker.js`；若手工跳过钩子只编 app，浏览器会静默跑旧 worker。改 `WorkerMessage` / `MainMessage` 语义时必须同步 `+1` `src/ts-shared/auth/worker-protocol.ts` 的 `WORKER_PROTOCOL`。
+> **双 bundle 注意**：`web/app.js`（主线程）与 `web/worker.js`（权威物理 Worker）分开打包。`build:app` 会经 `prebuild:app` 自动先重编 `worker.js`；若手工跳过钩子只编 app，浏览器会静默跑旧 worker。改 `WorkerMessage` / `MainMessage` 语义时必须同步 `+1` `src/ts-shared/auth/worker-protocol.ts` 的 `WORKER_PROTOCOL`（D-135 引入 `world-bin` 消息后为 **4**）。
 
 ### 2.2 Rust 侧
 
@@ -77,6 +77,10 @@ cargo +stable-x86_64-pc-windows-msvc test -p websurf-wasm-core
 ```
 
 > **禁止**为了在 `gnu` 下强行通过而修改 `~/.cargo/registry` 里的 crate 源码（例如 `windows-sys` / `windows-link`）。
+>
+> `websurf-phys` 的调试专用导出由 `phys-debug` feature 门控（D-134a：12 个 `debug_*` / `set_state_ex` / `state_full_json` 等只在带该 feature 时编入；`debug_line_trace` 无条件保留，三端契约仍在）。`src/wasm-bindings` 的 `debug-tools` feature 会启用 `websurf-phys?/phys-debug`，因此 `verify:rust` / CI 对 `websurf-wasm-core` 跑两遍：默认与 `--features phys-debug`。
+>
+> 碰撞世界载荷有两种编码（D-135）：JSON 两件套与 WSBW 二进制块（`src/phys/world_bin.rs`，magic `WSBW` / version 1）。二进制解析失败要显式退回 JSON（worker 侧已有回退并打日志），`world-builder.ts` 的 `colliderEncoding` 保持「成对不变量」；协议版本见下条 `WORKER_PROTOCOL`。
 
 > 仓库只有一个 Cargo workspace（根 `Cargo.toml`，6 个成员：`websurf-phys` / `websurf-wasm-core` / `websurf-wasm-bindings` / `websurf-debug-wasm` / `websurf-game-wasm` / `websurf-viewer-wasm`，D-133 收口）：`cargo` 一律在仓库根跑、用 `-p <包名>` 选成员，仓库只有根 `Cargo.lock` 与根 `target/`；三端 wasm 仍由 `apps/<app>` 的 `npm run build:wasm` 触发（wasm-pack 在成员目录内只编该成员，产物名由 `--out-name` 固定）。
 
