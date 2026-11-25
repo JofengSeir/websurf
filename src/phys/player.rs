@@ -977,25 +977,107 @@ fn update_duck(world: &mut World, p: &mut Player) {
 /// 盒子梯子的静态 `facing` 可能落在切线方向，会让攀爬退化成只推墙。
 ///
 /// 纯读：不改 `Player`、不改 `World`。
-fn check_ladder(world: &World, p: &Player) -> Option<(usize, [f64; 3])> {
+/// 完整 3D 起源语义抓梯检测（支持竖直、斜向与水平/天花梯）：
+/// 1. 冷却期（`ladder_cooldown > 0`）直接返回 None；
+/// 2. 已在梯上时沿 `-ladder_facing` 扫掠 2 HU 保持附着，站在地面且主动远离梯面时脱离；
+/// 3. 未在梯上时沿当前 3D 移动方向（无输入时沿视线 `fwd`）扫掠 2 HU 探测梯子，空中额外允许 `ladder_at` 兜底。
+fn check_ladder(world: &mut World, p: &Player) -> Option<(usize, [f64; 3])> {
     if p.ladder_cooldown > 0.0 {
         return None;
     }
     let mins = p.mins();
     let maxs = p.maxs();
-    let ladder_idx = world.ladder_at(&p.origin, &mins, &maxs)?;
-    if p.on_ladder == Some(ladder_idx) {
-        return Some((ladder_idx, p.ladder_facing)); // 已在同一梯上——锁定附着面法线，避免侧移贴边翻面卡住
-    }
-    let facing = world.ladders[ladder_idx].facing_toward(&p.origin);
-    // 仅在空中、或主动走向梯子时抓住
-    if !p.on_ground {
-        return Some((ladder_idx, facing));
-    }
+
     let yaw_rad = p.yaw * DEG2RAD;
-    let facing_dot = (-yaw_rad.sin()) * (-facing[0]) + (-yaw_rad.cos()) * (-facing[2]);
-    if p.input.forward && facing_dot > 0.3 {
-        return Some((ladder_idx, facing));
+    let pitch_rad = p.pitch * DEG2RAD;
+    let cp = pitch_rad.cos();
+    let fwd = [-yaw_rad.sin() * cp, pitch_rad.sin(), -yaw_rad.cos() * cp];
+    let right = [yaw_rad.cos(), 0.0, -yaw_rad.sin()];
+    let fmove = (if p.input.forward { 1.0 } else { 0.0 }) - (if p.input.back { 1.0 } else { 0.0 });
+    let smove = (if p.input.right { 1.0 } else { 0.0 }) - (if p.input.left { 1.0 } else { 0.0 });
+    let mut move_dir = [
+        fwd[0] * fmove + right[0] * smove,
+        fwd[1] * fmove + right[1] * smove,
+        fwd[2] * fmove + right[2] * smove,
+    ];
+    let move_len = normalize(&mut move_dir);
+
+    if let Some(cur_idx) = p.on_ladder {
+        let end = [
+            p.origin[0] - p.ladder_facing[0] * 2.0,
+            p.origin[1] - p.ladder_facing[1] * 2.0,
+            p.origin[2] - p.ladder_facing[2] * 2.0,
+        ];
+        if let Some((hit_idx, hit_normal, start_solid)) =
+            world.trace_ladder(&p.origin, &end, &mins, &maxs)
+        {
+            if move_len > 0.0 && dot(&move_dir, &p.ladder_facing) > 0.25 {
+                let down = [p.origin[0], p.origin[1] - 2.0, p.origin[2]];
+                let tr_ground = world.trace(&p.origin, &down, &mins, &maxs);
+                if tr_ground.fraction < 1.0
+                    && tr_ground.normal.map_or(false, |gn| gn[1] >= 0.7)
+                {
+                    return None;
+                }
+            }
+            if hit_idx == cur_idx {
+                let facing = if !start_solid && dot(&hit_normal, &p.ladder_facing) > 0.5 {
+                    hit_normal
+                } else {
+                    p.ladder_facing
+                };
+                return Some((cur_idx, facing));
+            }
+            return Some((hit_idx, hit_normal));
+        }
+        if world.ladder_at(&p.origin, &mins, &maxs) == Some(cur_idx) {
+            if move_len > 0.0 && dot(&move_dir, &p.ladder_facing) > 0.25 {
+                let down = [p.origin[0], p.origin[1] - 2.0, p.origin[2]];
+                let tr_ground = world.trace(&p.origin, &down, &mins, &maxs);
+                if tr_ground.fraction < 1.0
+                    && tr_ground.normal.map_or(false, |gn| gn[1] >= 0.7)
+                {
+                    return None;
+                }
+            }
+            return Some((cur_idx, p.ladder_facing));
+        }
+        return None;
+    }
+
+    let probe = if move_len > 0.0 { move_dir } else { fwd };
+    let end = [
+        p.origin[0] + probe[0] * 2.0,
+        p.origin[1] + probe[1] * 2.0,
+        p.origin[2] + probe[2] * 2.0,
+    ];
+    let hit = world.trace_ladder(&p.origin, &end, &mins, &maxs).or_else(|| {
+        if !p.on_ground {
+            world
+                .ladder_at(&p.origin, &mins, &maxs)
+                .map(|idx| (idx, world.ladders[idx].facing_toward_3d(&p.origin, &mins, &maxs), true))
+        } else {
+            None
+        }
+    });
+    let (idx, normal, _) = hit?;
+    if !p.on_ground {
+        return Some((idx, normal));
+    }
+    if move_len <= 0.0 {
+        return None;
+    }
+    if dot(&move_dir, &normal) < -0.2 {
+        return Some((idx, normal));
+    }
+    if normal[1] > 0.7 {
+        let lv = &world.ladders[idx];
+        let sx = (lv.max[0] - lv.min[0]).abs();
+        let sy = (lv.max[1] - lv.min[1]).abs();
+        let sz = (lv.max[2] - lv.min[2]).abs();
+        if sy < sx.max(sz) * 0.5 {
+            return Some((idx, normal));
+        }
     }
     None
 }
@@ -1068,25 +1150,38 @@ fn ladder_move(world: &mut World, p: &mut Player, params: &PhysParams, dt: f64, 
     wish[1] *= wish_speed;
     wish[2] *= wish_speed;
 
-    // 将 wish 拆分为沿梯面横向与垂直墙面两部分；垂直部分重定向到攀爬方向
+    // 竖直或斜向梯子：沿梯面切向（横向 + climb_dir）攀爬；
+    // 水平/天花梯（|n.y| >= 0.99）：沿水平视角基在梯面内水平移动。
     let n = facing;
-    let normal_vel = dot(&wish, &n);
-    let lateral = [
-        wish[0] - n[0] * normal_vel,
-        wish[1] - n[1] * normal_vel,
-        wish[2] - n[2] * normal_vel,
-    ];
-    let up = [0.0, 1.0, 0.0];
-    let mut along = cross(&n, &up); // 水平、沿墙方向
-    normalize(&mut along);
-    let mut climb_dir = cross(&along, &n); // 垂直于梯面向上
-    normalize(&mut climb_dir);
+    if n[1].abs() < 0.99 {
+        let normal_vel = dot(&wish, &n);
+        let lateral = [
+            wish[0] - n[0] * normal_vel,
+            wish[1] - n[1] * normal_vel,
+            wish[2] - n[2] * normal_vel,
+        ];
+        let up = [0.0, 1.0, 0.0];
+        let mut along = cross(&n, &up); // 水平、沿梯面横向
+        normalize(&mut along);
+        let mut climb_dir = cross(&along, &n); // 沿梯面向上（兼容竖直与斜向梯）
+        normalize(&mut climb_dir);
 
-    p.velocity = [
-        lateral[0] + climb_dir[0] * -normal_vel,
-        lateral[1] + climb_dir[1] * -normal_vel,
-        lateral[2] + climb_dir[2] * -normal_vel,
-    ];
+        p.velocity = [
+            lateral[0] + climb_dir[0] * -normal_vel,
+            lateral[1] + climb_dir[1] * -normal_vel,
+            lateral[2] + climb_dir[2] * -normal_vel,
+        ];
+    } else {
+        let fwd_flat = [-yaw_rad.sin(), 0.0, -yaw_rad.cos()];
+        let mut h_wish = [
+            (fwd_flat[0] * fmove + right[0] * smove) * LADDER_SPEED,
+            0.0,
+            (fwd_flat[2] * fmove + right[2] * smove) * LADDER_SPEED,
+        ];
+        let h_raw = normalize(&mut h_wish);
+        let h_speed = h_raw.min(LADDER_SPEED * std::f64::consts::SQRT_2);
+        p.velocity = [h_wish[0] * h_speed, 0.0, h_wish[2] * h_speed];
+    }
 
     try_player_move(world, p, params, dt);
 }

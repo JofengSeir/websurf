@@ -59,9 +59,11 @@ if (bgBytes < 1024 * 1024) {
 }
 
 const sha256 = (p) => createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+const glueJs = wanted.find((f) => f.endsWith('.js'));
 const targets = [
   ...wanted.map((f) => ({ src: path.join(srcDir, f), dst: path.join(pkgDir, f), label: 'pkg/' + f })),
   { src: path.join(srcDir, bg), dst: path.join(webDir, bg), label: 'web/' + bg },
+  ...(glueJs ? [{ src: path.join(srcDir, glueJs), dst: path.join(webDir, glueJs), label: 'web/' + glueJs }] : []),
 ];
 
 fs.mkdirSync(pkgDir, { recursive: true });

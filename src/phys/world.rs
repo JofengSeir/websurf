@@ -182,6 +182,29 @@ impl LadderVolume {
         }
         self.facing
     }
+
+    /// 完整 3D 朝向选面（支持竖直、斜向、水平/天花梯）：
+    /// 计算玩家包围盒相对每条平面的带符号距离 `d`，取最大 `d` 对应的单位 3D 法线。
+    pub fn facing_toward_3d(&self, origin: &V3, mins: &V3, maxs: &V3) -> V3 {
+        let mut best = self.facing;
+        let mut best_d = f64::NEG_INFINITY;
+        for plane in &self.planes {
+            let len = dot(&plane.normal, &plane.normal).sqrt();
+            if len < 1e-6 {
+                continue;
+            }
+            let d = dot(&plane.normal, origin) - (plane.dist - plane_offset(&plane.normal, mins, maxs));
+            if d > best_d {
+                best_d = d;
+                best = [
+                    plane.normal[0] / len,
+                    plane.normal[1] / len,
+                    plane.normal[2] / len,
+                ];
+            }
+        }
+        best
+    }
 }
 
 /// 模型三角形碰撞网格：`vertices` 是世界空间顶点，`indices` 是三元组下标。
@@ -1727,10 +1750,10 @@ impl World {
     /// 返回下标而不是引用，是为了让调用方（`player::check_ladder`）能在拿到结果后继续
     /// 以 `&mut world` 走移动流程；它再用下标去取 `facing` / `facing_toward`。
     pub fn ladder_at(&self, origin: &V3, mins: &V3, maxs: &V3) -> Option<usize> {
-        // 水平方向外扩 1 HU 贴面容差：实心梯子会让 trace_box 停在表面外侧 DIST_EPSILON(0.03125 HU)，
-        // 不加容差会擦面却判不到相交；竖直方向不外扩，避免踩在梯顶行走时误抓。
-        let touch_mins = [mins[0] - 1.0, mins[1], mins[2] - 1.0];
-        let touch_maxs = [maxs[0] + 1.0, maxs[1], maxs[2] + 1.0];
+        // 3D 外扩 1 HU 贴面容差：实心梯子会让 trace_box 停在表面外侧 DIST_EPSILON(0.03125 HU)，
+        // 三轴均加容差可同时覆盖竖直、斜向及水平梯面。
+        let touch_mins = [mins[0] - 1.0, mins[1] - 1.0, mins[2] - 1.0];
+        let touch_maxs = [maxs[0] + 1.0, maxs[1] + 1.0, maxs[2] + 1.0];
         for (i, ladder) in self.ladders.iter().enumerate() {
             if !ladder_is_active(ladder, &self.entity_solid) {
                 continue;
@@ -1740,5 +1763,46 @@ impl World {
             }
         }
         None
+    }
+
+    /// 按玩家盒沿 `start -> end` 扫掠全部激活的梯子，返回最近命中的 `(梯子下标, 3D 表面法线, start_solid)`。
+    pub fn trace_ladder(
+        &self,
+        start: &V3,
+        end: &V3,
+        mins: &V3,
+        maxs: &V3,
+    ) -> Option<(usize, V3, bool)> {
+        let mut best_frac = 1.0f64;
+        let mut best: Option<(usize, V3, bool)> = None;
+        for (i, ladder) in self.ladders.iter().enumerate() {
+            if !ladder_is_active(ladder, &self.entity_solid) {
+                continue;
+            }
+            let mut tr = TraceResult::new(*end);
+            clip_planes(
+                &ladder.planes,
+                start,
+                end,
+                ClipBounds {
+                    mins,
+                    maxs,
+                    bmin: &ladder.min,
+                    bmax: &ladder.max,
+                },
+                &mut tr,
+            );
+            if tr.start_solid {
+                let n = ladder.facing_toward_3d(start, mins, maxs);
+                return Some((i, n, true));
+            }
+            if tr.fraction < best_frac {
+                if let Some(n) = tr.normal {
+                    best_frac = tr.fraction;
+                    best = Some((i, n, false));
+                }
+            }
+        }
+        best
     }
 }

@@ -651,7 +651,8 @@ impl PhysWorld {
         if self.player.on_ladder != hit {
             if let Some(idx) = hit.filter(|_| !on_ground) {
                 self.player.on_ladder = Some(idx);
-                self.player.ladder_facing = self.world.ladders[idx].facing_toward(&self.player.origin);
+                self.player.ladder_facing =
+                    self.world.ladders[idx].facing_toward_3d(&self.player.origin, &mins, &maxs);
             } else if hit.is_none() || self.player.on_ladder.is_some() {
                 self.player.on_ladder = None;
             }

@@ -519,7 +519,9 @@ export class AuthorityCalibrator {
       // 这里不调 clearPendingInput()：清掉的会是渲染当帧的鼠标增量。输入清空只发生在
       // 下方的 yaw 分叉兜底分支。
       if (dist > 500 || yawDiff > 45) {
-        phys.set_velocity(f.vel.x, f.vel.y, f.vel.z);
+        if (st.onLadder !== true) {
+          phys.set_velocity(f.vel.x, f.vel.y, f.vel.z);
+        }
         this.syncInFlight = false;
         this.lastSyncAt = now;
         this.prevFrameRenderYaw = st.yaw;
@@ -771,7 +773,7 @@ export class AuthorityCalibrator {
     //
     // 本门不削弱合法语义：渲染自己已着地时照常重述（此时 st.onGround 本就是真，写入
     // 幂等），落地速度耦合照常生效；渲染腾空时本调用退化为与 blocked 同级的零写入。
-    if (!st.onGround) return;
+    if (!st.onGround || (st as SyncPhysState).onLadder === true) return;
     // 权威落地瞬间的速度（权威侧已过碰撞解算）；vel 缺省时回落渲染自身速度。
     const vx = vel?.[0] ?? st.velX;
     const vy = vel?.[1] ?? st.velY;

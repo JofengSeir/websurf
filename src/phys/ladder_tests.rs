@@ -386,5 +386,89 @@ fn non_solid_ladder_blocks_clip_and_set_state_syncs_ladder_attachment() {
     assert_eq!(pw.player.on_ladder, None, "set_state 移离梯子后必须清除旧 on_ladder");
 }
 
+#[test]
+fn sloped_45_degree_ladder_climbs_along_slope() {
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let min: V3 = [-50.0, 0.0, -50.0];
+    let max: V3 = [50.0, 100.0, 50.0];
+    // 45° 斜梯：法线 [0, s, s]，沿 -Z/+Y 方向倾斜上升
+    let planes = vec![
+        Plane { normal: [1.0, 0.0, 0.0], dist: 50.0 },
+        Plane { normal: [-1.0, 0.0, 0.0], dist: 50.0 },
+        Plane { normal: [0.0, 1.0, 0.0], dist: 100.0 },
+        Plane { normal: [0.0, -1.0, 0.0], dist: 0.0 },
+        Plane { normal: [0.0, s, s], dist: 0.0 },
+        Plane { normal: [0.0, -s, -s], dist: 4.0 },
+    ];
+    let mut w = World::new();
+    w.solids.push(box_brush([-300.0, -32.0, -300.0], [300.0, 0.0, 300.0], -1));
+    w.solids.push(Brush { planes: planes.clone(), min, max, entity: -1 });
+    w.ladders.push(LadderVolume { planes, min, max, facing: [0.0, s, s], entity: -1 });
+    w.build_index();
+
+    let params = PhysParams::default();
+    let mut p = create_player([0.0, 2.0, 40.0], &params);
+    p.pitch = 30.0;
+    settle(&mut w, &mut p, &params);
+    p.input.forward = true;
+    let mut grabbed = false;
+    for _ in 0..45 {
+        player_tick(&mut w, &mut p, &params, DT);
+        grabbed |= p.on_ladder.is_some();
+    }
+    assert!(grabbed && p.on_ladder.is_some(), "应能抓住 45° 斜梯");
+    assert!(p.origin[1] > 30.0, "沿斜梯应顺利上升，实际 y={}", p.origin[1]);
+}
+
+#[test]
+fn horizontal_overhead_ladder_moves_horizontally_without_falling() {
+    let min: V3 = [-100.0, 80.0, -100.0];
+    let max: V3 = [100.0, 84.0, 100.0];
+    let mut w = World::new();
+    w.solids.push(box_brush([-300.0, -32.0, -300.0], [300.0, 0.0, 300.0], -1));
+    w.solids.push(box_brush(min, max, -1));
+    w.ladders.push(LadderVolume {
+        planes: box_planes(min, max),
+        min,
+        max,
+        facing: [0.0, -1.0, 0.0],
+        entity: -1,
+    });
+    w.build_index();
+
+    let params = PhysParams::default();
+    // 玩家头顶（maxs.y = 72）贴到 y=80 的水平天花梯（origin.y = 8.0）
+    let mut p = create_player([0.0, 8.0, 40.0], &params);
+    p.on_ground = false;
+    p.input.forward = true;
+    for _ in 0..50 {
+        player_tick(&mut w, &mut p, &params, DT);
+    }
+    assert!(p.on_ladder.is_some(), "空中贴到水平天花梯应能抓住");
+    assert!((p.origin[1] - 8.0).abs() < 1.5, "挂在水平梯上不应下坠，实际 y={}", p.origin[1]);
+    assert!(p.origin[2] < -20.0, "在水平梯上应能水平移动，实际 z={}", p.origin[2]);
+}
+
+#[test]
+fn pressing_back_on_ground_detaches_from_ladder() {
+    let params = PhysParams::default();
+    let mut w = ladder_world(-1, true);
+    let mut p = player_before_ladder(&params);
+    p.pitch = 45.0;
+    p.input.forward = true;
+    for _ in 0..20 {
+        player_tick(&mut w, &mut p, &params, DT);
+    }
+    assert!(p.on_ladder.is_some());
+
+    // 退回地面后按 S 远离梯子应顺利脱离
+    p.input.forward = false;
+    p.input.back = true;
+    for _ in 0..40 {
+        player_tick(&mut w, &mut p, &params, DT);
+    }
+    assert!(p.on_ladder.is_none(), "在地面按 S 远离梯子后应脱离梯子");
+}
+
 
 
