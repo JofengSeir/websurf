@@ -387,6 +387,9 @@ export class PvsManager {
     if (!this.hasPvs || clusterId < 0) {
       return true; // 无 PVS 或无效 cluster → 全部可见
     }
+    if ((globalThis as { __vbspPvsCullAll?: boolean }).__vbspPvsCullAll === true) {
+      return false;
+    }
     return this.visibleSet.has(clusterId);
   }
 
@@ -401,7 +404,11 @@ export class PvsManager {
    * 无 PVS 或还没成功 `update` 过时返回 null，调用方应退回保守路径（全部可见）。
    */
   visibleRow(): Uint8Array | null {
-    if (!this.hasPvs || this.visibleSet.size === 0) {
+    if (!this.hasPvs) {
+      return null;
+    }
+    const cullAll = (globalThis as { __vbspPvsCullAll?: boolean }).__vbspPvsCullAll === true;
+    if (!cullAll && this.visibleSet.size === 0) {
       return null;
     }
     let row = this.rowCache;
@@ -411,8 +418,10 @@ export class PvsManager {
     } else {
       row.fill(0);
     }
-    for (const c of this.visibleSet) {
-      if (c >= 0 && c < row.length) row[c] = 1;
+    if (!cullAll) {
+      for (const c of this.visibleSet) {
+        if (c >= 0 && c < row.length) row[c] = 1;
+      }
     }
     return row;
   }

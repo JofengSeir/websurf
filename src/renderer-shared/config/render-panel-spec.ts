@@ -223,6 +223,16 @@ export const RENDER_PANEL_SPEC: readonly RenderPanelItem[] = [
     note: 'debug：重新加载地图后生效',
   },
   {
+    id: 'pvsCullAll',
+    label: 'PVS 全剔除（排查）',
+    title: '诊断用：强制所有 PVS cluster 不可见，仅留下未被 PVS 剔除的残留物件（不落档，刷新复位）',
+    group: '剔除与相机',
+    kind: 'toggle',
+    global: '__vbspPvsCullAll',
+    apply: 'live',
+    apps: D,
+  },
+  {
     id: 'fov',
     label: '视野 FOV',
     title: '相机视场角（度）',

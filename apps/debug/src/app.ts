@@ -1538,9 +1538,16 @@ function setupRenderPanel(): void {
 		app: 'debug',
 		hasMap: () => teleportMapName !== '',
 		read(item) {
+			if (item.global) {
+				return Boolean((globalThis as Record<string, unknown>)[item.global]);
+			}
 			return item.pref ? readPrefsField(readRenderPrefs(), item.pref) : 0;
 		},
 		write(item, value) {
+			if (item.global) {
+				(globalThis as Record<string, unknown>)[item.global] = value;
+				return;
+			}
 			if (!item.pref) return;
 			const next = writeRenderPrefs(prefsPathPatch(item.pref, value));
 			// 施加：光照/模式/extras 走共享施加口；排查开关单独装回；剔除距离与 FOV 有各自的活动口
@@ -1550,6 +1557,10 @@ function setupRenderPanel(): void {
 			if (item.pref === 'camera.fov') rendererMain?.setFov(Number(value));
 		},
 		reset(item) {
+			if (item.global) {
+				(globalThis as Record<string, unknown>)[item.global] = false;
+				return;
+			}
 			if (!item.pref) return;
 			const def = readPrefsField(defaultRenderPrefs(), item.pref);
 			const next = writeRenderPrefs(prefsPathPatch(item.pref, def));

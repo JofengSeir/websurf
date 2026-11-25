@@ -677,7 +677,7 @@ export class RenderSession {
     // 关卡结构、boreas 冰坡时隐时现都源自此）。这里给跨房间的块建「逐三角形 → cluster」表，
     // 相机换房间时按可见集重建 index，只留可见三角形：draw 数不变、精度到三角形。
     this.clusterIndex = this.visibility.enablePvs && this.pvs
-      ? prepareClusterIndex(this.visibility.items, this.pvs, 64)
+      ? prepareClusterIndex(this.visibility.items, this.pvs, 2)
       : null;
     if (!this.clusterIndex) this.visibility.chunkIndexActive = false;
     else this.visibility.chunkIndexActive = this.clusterIndex.prepared > 0;
@@ -1023,9 +1023,10 @@ export class RenderSession {
 
   /** 只做可见性判定（debug 的按需渲染需要在决定是否出帧前先知道有无变化）。 */
   updateVisibility(): VisibilityUpdateResult {
+    const cullAll = (globalThis as { __vbspPvsCullAll?: boolean }).__vbspPvsCullAll === true;
     // 档即开关：面板/深链改 `culling.pvs` 后下一帧生效。
     // 区域着色开启时强制关掉 PVS 剔除——否则「不可见的区域」根本不会被画出来，就看不到对照。
-    this.visibility.enablePvs = this.pvsOverride ?? (!this.pvsOverlay.enabled && readRenderPrefs().culling.pvs);
+    this.visibility.enablePvs = this.pvsOverride ?? (!this.pvsOverlay.enabled && (cullAll || readRenderPrefs().culling.pvs));
     // PVS 开关一变，自动距离档跟着换：PVS 开 ⇒ 距离场半径 `CULL_DISTANCE_PVS_DEFAULT`（18000）；
     // PVS 关 ⇒ `maxDim × 0.25` 的纯距离档。两层同时生效时**距离场先判**（场外不画、也不进 PVS），
     // 面板显式「视距」始终覆盖默认值。
@@ -1044,7 +1045,7 @@ export class RenderSession {
     if (this.visibility.enablePvs && (!this.clusterIndex || this.clusterIndex.prepared === 0) && this.pvs) {
       // 先补算 cluster：PVS 打开前 `collect()` 没采样过，空 clusterIds 会让过滤没有候选。
       this.visibility.ensureClusters(this.pvs);
-      this.clusterIndex = prepareClusterIndex(this.visibility.items, this.pvs, 64);
+      this.clusterIndex = prepareClusterIndex(this.visibility.items, this.pvs, 2);
       this.visibility.chunkIndexActive = this.clusterIndex.prepared > 0;
     }
     this.lastVisibility = this.visibility.update(this.camera, this.pvs);
@@ -1056,7 +1057,10 @@ export class RenderSession {
     const camClusterValid = this.lastVisibility?.pvsClusterValid === true;
     const camInSolid = this.lastVisibility?.cameraInSolid === true;
     if (this.visibility.enablePvs && this.clusterIndex && this.clusterIndex.prepared > 0 && this.pvs) {
-      if (camClusterValid && camCluster >= 0 && !camInSolid) {
+      if (cullAll) {
+        applyClusterIndex(this.visibility.items, this.pvs, -999);
+        this.pvsIndexActive = true;
+      } else if (camClusterValid && camCluster >= 0 && !camInSolid) {
         applyClusterIndex(this.visibility.items, this.pvs, camCluster);
         this.pvsIndexActive = true;
       } else if (this.pvsIndexActive) {
@@ -1193,8 +1197,9 @@ export class RenderSession {
       tLast = now;
     };
     const frameNow = performance.now();
+    const cullAll = (globalThis as { __vbspPvsCullAll?: boolean }).__vbspPvsCullAll === true;
     const activePvs =
-      this.visibility.enablePvs && this.pvs && this.pvs.enabled && this.lastVisibility?.pvsClusterValid !== false
+      this.visibility.enablePvs && this.pvs && this.pvs.enabled && (cullAll || this.lastVisibility?.pvsClusterValid !== false)
         ? this.pvs
         : null;
     // Source `TextureScroll` / `momentary_rot_button` / 激光 UV / 粒子：按真实时间推进。
@@ -1242,10 +1247,10 @@ export class RenderSession {
     }
     mark('near');
     const sorterPvs =
-      this.visibility.enablePvs && this.pvs && this.pvs.enabled && this.lastVisibility?.pvsClusterValid !== false
+      this.visibility.enablePvs && this.pvs && this.pvs.enabled && (cullAll || this.lastVisibility?.pvsClusterValid !== false)
         ? this.pvs
         : null;
-    this.sorter.update(this.camera, sorterPvs, this.lastVisibility?.clusterAtCamera ?? -1);
+    this.sorter.update(this.camera, sorterPvs, cullAll ? -999 : (this.lastVisibility?.clusterAtCamera ?? -1));
     mark('sort');
     // 水面折射/深度 RT：必须在主渲染**之前**的干净上下文渲染（T-650 v4：原先嵌套在
     // 水面 onBeforeRender 里，嵌套 render 状态被外层半途状态污染且随视角变化，§12.9）。
