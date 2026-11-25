@@ -11,6 +11,9 @@
 #                     只读源码、不装 wasm 工具链、不建 pkg ⇒ 最便宜的一道，D-022 选项 (a)）
 #   render-parity   — `check-render-parity.mjs`：三端渲染入口必须走共享 RenderSession，
 #                     apps 内不得再出现渲染器/装配/天空/可见性/画质等步骤（2026-10-23）
+#   shader-anchors  — `check-shader-anchors.mjs`：src/renderer-shared/shader 里的 `#include <chunk>`
+#                     锚点必须真实存在于 three 0.165.0 的 ShaderChunk 且被某个 ShaderLib 模板 include，
+#                     否则运行时字符串替换静默失效（不抛错、只是效果没了）；带反空洞守卫（2026-11-25）
 #   ts-typecheck    — 三端 `npm run typecheck`（tsc；此前 TS 类型错误只在合并后的 deploy-pages 才暴露）
 #   glb-parity      — 三端 `npm run build:wasm` + `build:ts`（产物）+ 三端 `check:api`（wasm 导出 ↔ TS 导入契约）
 #                     + `check-shared-artifacts.mjs`（产物内共享模块指纹，缺产物 SKIP）
@@ -137,6 +140,11 @@ jobs:
 
       - name: Install root shared dependencies
         run: npm ci
+
+      # three 版本锁在 package.json 的 0.165.0（精确版本，不再是 ^ 浮动）；
+      # 锚点漂移不会报错，只会让共享 shader 注入静默失效，所以单独设一道便宜的门。
+      - name: Three.js shader anchor gate
+        run: node src/scripts/check-shader-anchors.mjs
 
       # pkg/ 是 wasm-pack 生成物（gitignore）；typecheck job 不构建 wasm，
       # 这里只补一个 CI 临时声明，让 tsc 能检查源码；真实 API 由 glb-parity 的契约 job 保。
