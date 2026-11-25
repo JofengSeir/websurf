@@ -1357,10 +1357,8 @@ impl World {
         previous
     }
 
-    /// 把当前**动态** brush / 梯子（`entity >= 0`）记成「位移基准」。装载完成、
-    /// `build_index` 之后调用一次；之后 [`World::set_entity_offset`] 都从这份快照重算，
-    /// 不依赖几何的现值。世界几何（`entity < 0`）不会移动，不进快照。
-    pub fn capture_base_solids(&mut self) {
+    /// 把当前**动态** brush（`entity >= 0`）记成「位移基准」。
+    fn capture_dynamic_base_solids(&mut self) {
         self.refresh_dynamic_indices();
         self.dynamic_base_solids.clear();
         for k in 0..self.dynamic_solid_indices.len() {
@@ -1368,12 +1366,24 @@ impl World {
             let base = self.solids[index].clone();
             self.dynamic_base_solids.push((index, base));
         }
+    }
+
+    /// 把当前**动态**梯子（`entity >= 0`）记成「位移基准」。
+    fn capture_dynamic_base_ladders(&mut self) {
         self.dynamic_base_ladders.clear();
         for (index, ladder) in self.ladders.iter().enumerate() {
             if ladder.entity >= 0 {
                 self.dynamic_base_ladders.push((index, ladder.clone()));
             }
         }
+    }
+
+    /// 把当前**动态** brush / 梯子（`entity >= 0`）记成「位移基准」。装载完成、
+    /// `build_index` 之后调用一次；之后 [`World::set_entity_offset`] 都从这份快照重算，
+    /// 不依赖几何的现值。世界几何（`entity < 0`）不会移动，不进快照。
+    pub fn capture_base_solids(&mut self) {
+        self.capture_dynamic_base_solids();
+        self.capture_dynamic_base_ladders();
     }
 
     /// 运行期平移某个实体的全部 brush（电梯 / 移动平台 / 可移动门）。
@@ -1395,7 +1405,11 @@ impl World {
         }
         if self.dynamic_base_solids.is_empty() && self.solids.iter().any(|b| b.entity >= 0) {
             // 还没落基准（例如测试直接构造 World）：以当前几何为基准。
-            self.capture_base_solids();
+            self.capture_dynamic_base_solids();
+        }
+        if self.dynamic_base_ladders.is_empty() && self.ladders.iter().any(|l| l.entity >= 0) {
+            // 只有实体梯子而无动态 solid 时也要独立建立梯子基准。
+            self.capture_dynamic_base_ladders();
         }
         let entity_index = entity as usize;
         if self.entity_offsets.len() <= entity_index {

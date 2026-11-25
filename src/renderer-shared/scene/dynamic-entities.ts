@@ -19,7 +19,7 @@
  */
 
 import * as THREE from 'three';
-import { parseEntityIoBlocks } from './particles.js';
+import { resolveEntityBlocks, type EntityBlockRecords } from './particles.js';
 
 /** mesh 上的标记：值 = 实体下标（与 `vbsp_entity_index` 同口径）。 */
 export const DYNAMIC_ENTITY_MESH_KEY = 'vbspDynamicEntity';
@@ -55,16 +55,18 @@ const DYNAMIC_ENTITY_CLASSNAMES: ReadonlySet<string> = new Set([
  * 父实体移动时必须跟着动）。无 `entityIoJson`（viewer 端）/ JSON 非法 / 空文本时返回
  * 空 Set —— 全部走静态合并，与旧行为一致，不报错。
  */
-export function parseDynamicEntityIndices(entityIoJson?: string | null): Set<number> {
+export function parseDynamicEntityIndices(
+  entityIoJsonOrBlocks?: string | EntityBlockRecords | null,
+): Set<number> {
   const indices = new Set<number>();
-  const blocks = parseEntityIoBlocks(entityIoJson);
+  const blocks = resolveEntityBlocks(entityIoJsonOrBlocks);
   for (let index = 0; index < blocks.length; index++) {
     const record = blocks[index];
-    const classname = record.classname;
-    if (typeof classname === 'string' && NEVER_DYNAMIC_CLASSNAMES.has(classname)) continue;
+    const classname = typeof record.classname === 'string' ? record.classname.trim().toLowerCase() : '';
+    if (NEVER_DYNAMIC_CLASSNAMES.has(classname)) continue;
     const parentname = record.parentname;
     const hasParent = typeof parentname === 'string' && parentname.trim() !== '';
-    if (hasParent || (typeof classname === 'string' && DYNAMIC_ENTITY_CLASSNAMES.has(classname))) {
+    if (hasParent || DYNAMIC_ENTITY_CLASSNAMES.has(classname)) {
       indices.add(index);
     }
   }

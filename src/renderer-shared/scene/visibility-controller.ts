@@ -536,8 +536,25 @@ export class VisibilityController {
       // 有逐三角形 cluster 表的块不按块判：它的 index 已按可见集裁好（见 cluster-filter.ts），
       // 块级再判一次会把「部分可见」的块整块剔掉 = 开洞。
       const triFiltered = this.chunkIndexActive && !!item.mesh.userData.clusterIndex;
-      const willCull =
-        !beyond && !triFiltered && pvsActive && pvsClusterValid && !item.clusterIds.some((c) => pvs!.isVisible(c));
+      const parent = item.mesh.parent;
+      const isDynamicMoved =
+        parent !== null
+        && typeof (parent.userData as { vbspDynamicEntityGroup?: unknown }).vbspDynamicEntityGroup === 'number'
+        && (parent.position.x !== 0 || parent.position.y !== 0 || parent.position.z !== 0);
+      let willCull = false;
+      if (!beyond && !triFiltered && pvsActive && pvsClusterValid) {
+        if (isDynamicMoved) {
+          // 动态实体离开出生位置后，装载期烘焙的 clusterIds 属于旧房间；改查当前世界中心
+          // 所在 cluster，中心落进固体（-1）时放行，避免移动平台/门跨 PVS 门户消失。
+          const liveCluster = pvs!.getClusterAt(item.center);
+          willCull =
+            liveCluster >= 0
+            && !pvs!.isVisible(liveCluster)
+            && !item.clusterIds.some((c) => pvs!.isVisible(c));
+        } else {
+          willCull = !item.clusterIds.some((c) => pvs!.isVisible(c));
+        }
+      }
       let level = LOD_NEAR;
       if (beyond) {
         level = LOD_FAR;

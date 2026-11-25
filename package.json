@@ -13,7 +13,7 @@
     "check:start-solid": "node src/scripts/check-entity-start-solid.mjs",
     "dev:check": "node src/scripts/dev-preflight.mjs --all",
     "hooks:install": "git config core.hooksPath .githooks",
-    "test:ts": "node src/scripts/test-ts-shared.mjs && node src/scripts/check-entity-io.mjs"
+    "test:ts": "node src/scripts/test-ts-shared.mjs && node src/scripts/check-entity-io.mjs && node src/scripts/check-entity-start-solid.mjs"
   },
   "dependencies": {
     "three": "0.165.0"

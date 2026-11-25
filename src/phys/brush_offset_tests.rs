@@ -10,7 +10,7 @@
 //! 载客判定的边界条件（脚底与顶面差 ≤ 2 HU、水平外扩 2 HU）见
 //! `PhysWorld::carry_player_on_moved_brush` 文档；本文件用平台顶面站立的最小场景覆盖。
 
-use super::world::{Brush, Plane, TriMesh, TriangleGrid, World, V3};
+use super::world::{Brush, LadderVolume, Plane, TriMesh, TriangleGrid, World, V3};
 use crate::phys::PhysWorld;
 
 const ENTITY: i32 = 7;
@@ -237,5 +237,27 @@ fn triangle_query_dedups_multi_cell_triangle_via_epoch() {
     let far_hi: V3 = [6000.0, 6000.0, 6000.0];
     grid.query_indices(&far_lo, &far_hi, &mut ids);
     assert!(ids.is_empty(), "不相交范围应无候选，且 out 先被清空");
+}
+
+/// 仅有实体梯子而无动态 solid 时，不先调 `capture_base_solids()` 也应能懒建立梯子基准并随实体平移。
+#[test]
+fn offset_moves_ladder_only_entity_without_prior_capture() {
+    let mut w = World::new();
+    w.solids.push(floor());
+    let b = box_brush([-20.0, 0.0, -20.0], [20.0, 40.0, 20.0], ENTITY);
+    w.ladders.push(LadderVolume {
+        planes: b.planes,
+        min: b.min,
+        max: b.max,
+        facing: [0.0, 0.0, 1.0],
+        entity: ENTITY,
+    });
+    w.entity_solid = vec![true; ENTITY as usize + 1];
+    w.build_index();
+
+    assert_eq!(w.ladder_at(&[0.0, 10.0, 0.0], &ZERO, &ZERO), Some(0));
+    assert_eq!(w.set_entity_offset(ENTITY, [0.0, 100.0, 0.0]), 0);
+    assert_eq!(w.ladder_at(&[0.0, 10.0, 0.0], &ZERO, &ZERO), None);
+    assert_eq!(w.ladder_at(&[0.0, 110.0, 0.0], &ZERO, &ZERO), Some(0));
 }
 

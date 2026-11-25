@@ -77,7 +77,7 @@ import { runPrewarmPasses } from './prewarm.js';
 import { resetWorldTransitionTextures } from '../shader/world-transition.js';
 import { resetBumpTextures } from '../shader/bumpmap.js';
 import { collectLaserBeams, LaserBeams } from './lasers.js';
-import { collectParticleEntities, parseEntityIoBlocks, ParticleSystems } from './particles.js';
+import { collectParticleEntities, parseEntityIoBlocks, ParticleSystems, type EntityBlockRecords } from './particles.js';
 import {
   emptyEntityExtrasStats,
   EntityExtras,
@@ -430,9 +430,11 @@ export class RenderSession {
     this.disposeScene();
     // T-P1-5b：动态 brush 实体脱静态合并默认开启（`__vbspDynamicEntityGroups === false` 可关闭做 A/B）。
     // 关闭时 pending 为 null：mark / exclude / collect / 矩阵冻结豁免全都不执行，行为与旧版一致。
+    // 只在 loadScene 入口解析一次 entityIoJson，同时喂给动态实体筛查与 setupSceneExtras。
+    const entityBlocks = input.entityIoJson ? parseEntityIoBlocks(input.entityIoJson) : null;
     const dynamicGroupsOn = (globalThis as Record<string, unknown>).__vbspDynamicEntityGroups !== false;
-    this.pendingDynamicEntityIndices = dynamicGroupsOn
-      ? parseDynamicEntityIndices(input.entityIoJson)
+    this.pendingDynamicEntityIndices = dynamicGroupsOn && entityBlocks
+      ? parseDynamicEntityIndices(entityBlocks)
       : null;
     const rp = readRenderPrefs();
     this.pvs = input.pvsJson ? new PvsManager(input.pvsJson) : null;
@@ -629,7 +631,7 @@ export class RenderSession {
     // 场景扩展（env_laser / PCF 粒子）：实体 lump 的副产物，三端统一在这里装配。
     // 必须早于 `precompileScene`，且先推一拍 `update()`——粒子的网格/材质是在第一次
     // update 里才建出来的；晚于预编译就会在首帧现编 program（debug 实测单帧 84ms）。
-    this.setupSceneExtras(input.entityIoJson);
+    this.setupSceneExtras(entityBlocks);
 
     // 预编译必须在 scene.add(root) 之后：早于它编译的是空场景（game/debug 旧注释的同一约束）。
     precompileScene(this.renderer, this.scene, this.camera);
@@ -733,7 +735,9 @@ export class RenderSession {
     });
     (globalThis as { __vbspStaticFrozen?: number }).__vbspStaticFrozen = frozen;
     return frozen;
-  }  /** 载图期整帧预热：实现见 `prewarm.ts`（T-P2-2c 搬出，逻辑零改动）。 */
+  }
+
+  /** 载图期整帧预热：实现见 `prewarm.ts`（T-P2-2c 搬出，逻辑零改动）。 */
   prewarmPasses(): void {
     runPrewarmPasses({
       app: this.app,
@@ -816,13 +820,10 @@ export class RenderSession {
    * 这样预编译与整帧预热都能覆盖它们的材质（旧实现只在 debug 装配，且晚于预热帧）。
    * 装配失败只告警并清空，不影响主场景（这些图元是观感增强，不是必需）。
    */
-  private setupSceneExtras(entityIoJson?: string | null): void {
+  private setupSceneExtras(entityBlocks?: EntityBlockRecords | null): void {
     this.disposeSceneExtras();
-    if (!entityIoJson) return;
+    if (!entityBlocks || entityBlocks.length === 0) return;
     try {
-      // task-58：entityIoJson 只解析一次（JSON.parse + 实体块切分），lasers / particles 共享结果；
-      // 旧实现两个 collector 各自解析一遍，载图期白付一份解析成本。
-      const entityBlocks = parseEntityIoBlocks(entityIoJson);
       const beams = collectLaserBeams(entityBlocks);
       if (beams.length > 0) {
         this.laserBeams = new LaserBeams(beams);
@@ -1404,7 +1405,8 @@ export class RenderSession {
     return chunkClusterSample(this.diagHost(), idx, nearHU);
   }
 
-  /** 诊断：按名字查块级可见性（「这个模型到底是被剔了还是没画」）。 */  probeChunk(name: string): { name: string; found: number; d: number; r: number; clusters: number; pvsVisible: boolean | null; visible: boolean; tris: number; collider: boolean } | null {
+  /** 诊断：按名字查块级可见性（「这个模型到底是被剔了还是没画」）。 */
+  probeChunk(name: string): { name: string; found: number; d: number; r: number; clusters: number; pvsVisible: boolean | null; visible: boolean; tris: number; collider: boolean } | null {
     return probeChunkByName(this.diagHost(), name);
   }
 
@@ -1414,7 +1416,8 @@ export class RenderSession {
   }
 
   /** 可见性统计（形状与 debug 的 `LodStats` 兼容）。 */
-  stats(): RenderSessionStats {    const r = this.lastVisibility;
+  stats(): RenderSessionStats {
+    const r = this.lastVisibility;
     return {
       visible: r?.visible ?? this.visibility.items.length,
       total: this.visibility.items.length,
