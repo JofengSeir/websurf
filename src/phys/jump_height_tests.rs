@@ -40,8 +40,10 @@ fn world_with_floor() -> World {
 /// 站在平地上按跳一拍，返回这一拍的 `velocity[1]`（起跳初速）。
 fn jump_velocity_after_one_tick(height: f64) -> f64 {
     const DT: f64 = 1.0 / 64.0;
-    let mut params = PhysParams::default();
-    params.jump_height = height;
+    let params = PhysParams {
+        jump_height: height,
+        ..PhysParams::default()
+    };
     let mut world = world_with_floor();
     let mut p = create_player([0.0, 0.0, 0.0], &params);
     p.on_ground = true;

@@ -222,6 +222,14 @@ pub struct PhysWorld {
     state_out: [f64; 22],
 }
 
+/// `PhysWorld::new` 的对偶：与构造函数的空实例逐字段相同（不加载任何地图数据、
+/// `ready = false`）。
+impl Default for PhysWorld {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[wasm_bindgen]
 impl PhysWorld {
     /// 构造空实例：全默认参数、空世界（`ready = false`）、出生点 `[0, 100, 0]`、
@@ -263,6 +271,9 @@ impl PhysWorld {
     /// 无三角形碰撞；`teleport_json` 解析失败返回 `Err`，此时 `ready` 不变。
     ///
     /// 不做：不解析 BSP、不生成 GLB、不做坐标变换（传入数据必须已是 Y-up）。
+    // 7 个入参是 wasm-bindgen 导出的 JS 契约（调用方在 src/wasm-bindings：JSON 三段 +
+    // 出生点 x/y/z/yaw）；函数体只是解析后顺序转交，参数个数不反映内部复杂度。
+    #[allow(clippy::too_many_arguments)]
     pub fn build_world(
         &mut self,
         brush_json: &str,
@@ -642,7 +653,7 @@ impl PhysWorld {
                 out.extend_from_slice(&hi);
             }
             // 无 brush 命中：补 6 个 0（与 Some 分支的 3+3 等长，保持返回长度恒为 18）
-            None => out.extend(std::iter::repeat(0.0).take(6)),
+            None => out.extend(std::iter::repeat_n(0.0, 6)),
         }
         match a.first_tri {
             Some(t) => {
@@ -781,6 +792,9 @@ impl PhysWorld {
     /// （看板 `T-065` §7 实测：卡死点沿 +y 抬 1~8 HU 全部仍不空闲）。
     /// 只有终点空闲也不够 —— 终点可能恰好在实体的另一侧，中间隔着材料。
     /// **两个同时成立**才等于「这一步真的能脱身」。
+    // 7 个入参是调试探针的 JS 契约（坐标 3 + 法线 3 + 步数），收成结构体反而让
+    // 控制台/测试调用点全部改写；函数体是纯循环，没有内部复杂度。
+    #[allow(clippy::too_many_arguments)]
     #[wasm_bindgen]
     pub fn debug_normal_escape(
         &mut self,
@@ -816,11 +830,7 @@ impl PhysWorld {
         apply_input(&mut self.player, keys_mask);
         self.player.yaw -= dx * (self.params.sensitivity * player::M_YAW);
         self.player.pitch -= dy * (self.params.sensitivity * player::M_YAW);
-        self.player.pitch = self
-            .player
-            .pitch
-            .max(-player::PITCH_CLAMP)
-            .min(player::PITCH_CLAMP);
+        self.player.pitch = clamp_pitch(self.player.pitch);
         // Q/E 已由 JS 输入层生成等效鼠标量（yaw_bind_speed/M_YAW 像素/秒，与鼠标同通道，
         // 双端消费同源输入 → 角度天然一致），物理不再内部旋转
         if self.noclip {
@@ -886,11 +896,7 @@ impl PhysWorld {
         apply_input(&mut self.player, keys_mask);
         self.player.yaw -= dx * (self.params.sensitivity * player::M_YAW);
         self.player.pitch -= dy * (self.params.sensitivity * player::M_YAW);
-        self.player.pitch = self
-            .player
-            .pitch
-            .max(-player::PITCH_CLAMP)
-            .min(player::PITCH_CLAMP);
+        self.player.pitch = clamp_pitch(self.player.pitch);
         self.clamp_horizontal_speed();
         player_tick(&mut self.world, &mut self.player, &self.params, dt);
         Ok(self.state_js())
@@ -938,6 +944,9 @@ impl PhysWorld {
     ///
     /// 用途是"把权威状态写回某实例、再从该点继续推进"（重锚）。只改这 9 项：
     /// 不改蹲伏态、不改计时器、不改传送冷却、不产生事件。
+    // 9 个标量是跨端重锚契约（TS 侧按位置传方位/朝向/速度/着地），改签名会跨端漂移；
+    // 函数体只有逐项赋值。
+    #[allow(clippy::too_many_arguments)]
     pub fn set_state(
         &mut self,
         pos_x: f64,
@@ -1434,6 +1443,19 @@ fn set_f64(obj: &js_sys::Object, key: &str, v: f64) {
 /// 往 JS 对象写一个 boolean 属性；`Reflect::set` 的返回值同样被忽略。
 fn set_bool(obj: &js_sys::Object, key: &str, v: bool) {
     let _ = js_sys::Reflect::set(obj, &JsValue::from_str(key), &JsValue::from_bool(v));
+}
+
+/// 把俯仰角收进 `[-PITCH_CLAMP, PITCH_CLAMP]`。
+///
+/// 与直接写 `pitch.clamp(-C, C)` 的差别在 NaN：`f64::max` / `min` 遇到 NaN 返回另一
+/// 个操作数，所以 `pitch.max(-C).min(C)` 把 NaN 收敛为 `-C`；`f64::clamp` 会传播 NaN，
+/// `pitch` 由 TS 鼠标增量累加而来，不允许 NaN 漏进后续三角运算。其余取值两者逐位相同。
+fn clamp_pitch(pitch: f64) -> f64 {
+    if pitch.is_nan() {
+        -player::PITCH_CLAMP
+    } else {
+        pitch.clamp(-player::PITCH_CLAMP, player::PITCH_CLAMP)
+    }
 }
 
 /// 键位掩码 → `InputState`。位定义与 TS 侧 `KEY_MASK` 逐位对应

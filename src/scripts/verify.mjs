@@ -89,6 +89,11 @@ function buildSteps(name) {
       label: 'Entity start_solid contract (check-entity-start-solid.mjs)',
       args: ['src/scripts/check-entity-start-solid.mjs'],
     },
+    {
+      kind: 'node',
+      label: 'Entity import cycles (check-entity-cycles.mjs)',
+      args: ['src/scripts/check-entity-cycles.mjs'],
+    },
     { kind: 'node', label: 'Render parity gate (check-render-parity.mjs)', args: ['src/scripts/check-render-parity.mjs'] },
     { kind: 'node', label: 'Shader anchors gate (check-shader-anchors.mjs)', args: ['src/scripts/check-shader-anchors.mjs'] },
     {

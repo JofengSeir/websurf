@@ -80,7 +80,7 @@ fn drop_on_ridge(sin: f64, cos: f64) -> crate::phys::world::TraceResult {
 /// `(0, 1, 0)`。这条钉住「平均法线让脊可站」——正是「逐渐翘起的脊能一路走到 45° 才滑」。
 #[test]
 fn ridge45_walkable() {
-    let c = 0.7071067811865476f64; // cos 45°
+    let c = std::f64::consts::FRAC_1_SQRT_2; // cos 45°
     let r = drop_on_ridge(c, c);
 
     assert!(
@@ -115,8 +115,8 @@ fn ridge45_walkable() {
 /// 单张 45° 斜面可站：与 `ridge45_walkable` 对照，证明平均这一步没有把单面情形弄坏。
 #[test]
 fn single45_face_walkable() {
-    let c = 0.7071067811865476f64;
-    let s = 0.7071067811865476f64;
+    let c = std::f64::consts::FRAC_1_SQRT_2;
+    let s = std::f64::consts::FRAC_1_SQRT_2;
     let mins = [-16.0, 0.0, -16.0];
     let maxs = [16.0, 72.0, 16.0];
     // 起点必须在斜面之上：45° 时 x=100 处的表面是 y = H - 100 = 412，盒底取 H + 100。

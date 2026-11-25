@@ -360,14 +360,26 @@ fn aabb_overlaps_at(
     true
 }
 
+/// `clip_planes` 的 AABB 入参：盒相对盒心的偏移（`mins` / `maxs`）与**实体**自身的
+/// 世界 AABB（`bmin` / `bmax`，只服务 `aabb_overlaps_at` 的必要条件校验）。
+///
+/// 打成一个结构只是为了把参数个数压到 clippy 的阈值内（8 → 5）；字段语义、取值来源与
+/// 原先的四个独立引用参数完全一致，不引入任何新的计算。
+struct ClipBounds<'a> {
+    mins: &'a V3,
+    maxs: &'a V3,
+    bmin: &'a V3,
+    bmax: &'a V3,
+}
+
 /// 扫掠盒 vs 一组平面（Minkowski 扩张版裁剪循环）：brush 的平面集与三角形的
 /// 5 条构造平面共用这一条路径。
 ///
 /// 约定：实体 = 各半空间交集 `dot(n, p) - dist <= 0`（法线朝外）。要解的是"盒沿
 /// `start` → `end` 与实体相交"的分数区间 `[enter_frac, leave_frac]`。
 ///
-/// 参数：`start` / `end` 是盒心线段，`mins` / `maxs` 是盒相对盒心的偏移（`mins[1]` 是
-/// 盒底，通常为 0）；`bmin` / `bmax` 是**实体**的 AABB，只服务 `aabb_overlaps_at`。
+/// 参数：`start` / `end` 是盒心线段；`bounds` 装盒相对盒心的偏移（`mins[1]` 是盒底，
+/// 通常为 0）与**实体**的 AABB（`bmin` / `bmax`，只服务 `aabb_overlaps_at`）。
 /// 输出就地写进 `result`：`fraction`（只在更早命中时收紧）、`normal`（被采纳的那条
 /// 进入平面的法线）、起点实心时的 `start_solid` 与无出口时的 `all_solid`。
 ///
@@ -389,10 +401,7 @@ fn clip_planes(
     planes: &[Plane],
     start: &V3,
     end: &V3,
-    mins: &V3,
-    maxs: &V3,
-    bmin: &V3,
-    bmax: &V3,
+    bounds: ClipBounds<'_>,
     result: &mut TraceResult,
 ) {
     let mut enter_frac = -1.0f64;
@@ -405,7 +414,7 @@ fn clip_planes(
     let mut get_out = false;
 
     for p in planes {
-        let dist = p.dist - plane_offset(&p.normal, mins, maxs);
+        let dist = p.dist - plane_offset(&p.normal, bounds.mins, bounds.maxs);
         let d1 = dot(&p.normal, start) - dist;
         let d2 = dot(&p.normal, end) - dist;
 
@@ -434,7 +443,15 @@ fn clip_planes(
             // 保留该实体更晚的真实接触——整实体否决会丢接触。
             // 注意 else 同时覆盖"校验通过但该进入分数不比如今最优更近"，两件事都计数。
             let f_true = d1 / (d1 - d2);
-            if !aabb_overlaps_at(bmin, bmax, start, end, mins, maxs, f_true) {
+            if !aabb_overlaps_at(
+                bounds.bmin,
+                bounds.bmax,
+                start,
+                end,
+                bounds.mins,
+                bounds.maxs,
+                f_true,
+            ) {
                 // 无限平面造成的假进入（坡面端盖、沿平台顶悬停滑行撞上坡前缘）。
                 GATE_VETO_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             } else if contact_n == 0 || f > enter_frac + CONTACT_FRAC_TIE {
@@ -478,7 +495,15 @@ fn clip_planes(
         // 盒 AABB 却与实体分离时（盒底高于坡顶、仅侧棱刚过端盖平面），判 start_solid /
         // all_solid 会让移动方整速清零并把盒钉在该平面上。
         // 与进入平面同一判据（真实接触分数 0.0，即起点自身）：AABB 分离即真实不相交。
-        if !aabb_overlaps_at(bmin, bmax, start, start, mins, maxs, 0.0) {
+        if !aabb_overlaps_at(
+            bounds.bmin,
+            bounds.bmax,
+            start,
+            start,
+            bounds.mins,
+            bounds.maxs,
+            0.0,
+        ) {
             GATE_VETO_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             return;
         }
@@ -522,7 +547,16 @@ fn clip_box_to_brush(
     result: &mut TraceResult,
 ) {
     clip_planes(
-        &brush.planes, start, end, mins, maxs, &brush.min, &brush.max, result,
+        &brush.planes,
+        start,
+        end,
+        ClipBounds {
+            mins,
+            maxs,
+            bmin: &brush.min,
+            bmax: &brush.max,
+        },
+        result,
     );
 }
 
@@ -657,7 +691,18 @@ fn clip_box_to_triangle(
 
     // 走 `cand` 再挑字段：三角形**不传播** `start_solid` / `all_solid`（见上）
     let mut cand = TraceResult::new(*end);
-    clip_planes(&planes, start, end, mins, maxs, &tmin, &tmax, &mut cand);
+    clip_planes(
+        &planes,
+        start,
+        end,
+        ClipBounds {
+            mins,
+            maxs,
+            bmin: &tmin,
+            bmax: &tmax,
+        },
+        &mut cand,
+    );
     if cand.fraction >= 1.0 || cand.fraction >= result.fraction {
         return;
     }
@@ -952,6 +997,13 @@ pub struct BrushGrid {
     cells: GridCells<Brush>,
 }
 
+/// `BrushGrid::new` 的对偶：全空索引，与 `new` 逐字段相同。
+impl Default for BrushGrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BrushGrid {
     /// 空索引：`cell_size` 先写 512.0，随后由 `build` 传入的值覆盖
     /// （`World::build_index` 传的也是 512.0）。
@@ -1072,6 +1124,13 @@ pub struct TriangleGrid {
     cells: GridCells<TriEntry>,
     /// 全部三角形条目：`build` 先 `clear` 再逐个压入，`query_indices` 返回下标的取值源。
     entries: Vec<TriEntry>,
+}
+
+/// `TriangleGrid::new` 的对偶：全空索引，与 `new` 逐字段相同。
+impl Default for TriangleGrid {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TriangleGrid {
@@ -1288,6 +1347,13 @@ fn ladder_is_active(ladder: &LadderVolume, entity_solid: &[bool]) -> bool {
         .get(ladder.entity as usize)
         .copied()
         .unwrap_or(true)
+}
+
+/// `World::new` 的对偶：空世界（数据与索引全空），与 `new` 等价。
+impl Default for World {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl World {

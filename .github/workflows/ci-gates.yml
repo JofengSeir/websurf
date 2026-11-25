@@ -19,6 +19,8 @@
 #                     + `check-entity-io.mjs`（实体 I/O 合成自测 20 例；无 `test/maps` 时地图组 SKIP，2026-11-25）
 #                     + `check-entity-start-solid.mjs`（Rust ↔ TS 的 brush 出生实心规则共读同一份
 #                     `start-solid-cases.json`；Rust 侧同名夹具测试在 wasm-core-tests，2026-11-25）
+#                     + `check-entity-cycles.mjs`（`src/ts-shared/entity` 的 import 有向图必须无环；
+#                     反空洞守卫 文件 >= 10 / 边 >= 20，2026-11-25）
 #   glb-parity      — 三端 `npm run build:wasm` + `build:ts`（产物）+ 三端 `check:api`（wasm 导出 ↔ TS 导入契约）
 #                     + `check-shared-artifacts.mjs`（产物内共享模块指纹，缺产物 SKIP）
 #                     + `check-lock-consistency.mjs`（Cargo.lock 归属/版本 + wasm 导出面）
@@ -204,6 +206,11 @@ jobs:
       # 任一侧规则漂移都会红；不依赖 wasm / 地图夹具。
       - name: Entity start_solid contract (shared Rust/TS fixture)
         run: node src/scripts/check-entity-start-solid.mjs
+
+      # 实体层的 ESM 循环 import 在 tsc/esbuild 阶段静默（运行期才炸初始化顺序），
+      # 用本脚本把环前移到门禁；只读源码，不依赖 wasm / node_modules。
+      - name: Entity import cycle gate (no ESM cycles under src/ts-shared/entity)
+        run: node src/scripts/check-entity-cycles.mjs
 
   # ── debug：wasm 构建冒烟（T-653 削减验证层后，本 job 只剩 build:wasm）────────
   debug-gates:

@@ -19,7 +19,7 @@ const H: f64 = 512.0;
 const Z: f64 = 512.0;
 const BOTTOM: f64 = -400.0;
 /// 52° 斜面：`cos52 = 0.6157 < 0.7` ⇒ 单张斜面不可站。
-const SLAB_SIN: f64 = 0.7880107536067220;
+const SLAB_SIN: f64 = 0.788_010_753_606_722;
 const SLAB_COS: f64 = 0.6156614753256583;
 /// 斜脊沿 z 的下行量。
 const DROP: f64 = 200.0;

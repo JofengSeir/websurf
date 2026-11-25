@@ -162,8 +162,10 @@ fn pressing_into_a_wall_at_display_rate_does_not_creep_downhill() {
 /// 这一项同时证明夹具对该缺陷敏感 —— 第一项不是恒真的断言。
 #[test]
 fn pushing_out_on_every_contact_creeps_downhill_at_display_rate() {
-    let mut params = PhysParams::default();
-    params.push_out_only_when_solid = false;
+    let params = PhysParams {
+        push_out_only_when_solid: false,
+        ..PhysParams::default()
+    };
     let r = walk_ramp(&params);
     assert!(
         r.net_dz > 5.0,

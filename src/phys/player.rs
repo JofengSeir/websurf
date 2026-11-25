@@ -635,14 +635,13 @@ fn overbounce_for(normal: &V3) -> f64 {
 /// 只读 `Player` 与 `params`，不改状态。回归见 `duck_surf_tests.rs` 的
 /// `air_crouch_momentum_uses_standing_params` 与 `ground_crouch_uses_crouch_speed`。
 fn current_max_speed(p: &Player, params: &PhysParams) -> f64 {
-    let speed = if p.on_ground && p.ducked {
+    if p.on_ground && p.ducked {
         params.crouch_speed
     } else if p.input.walk {
         params.walk_speed
     } else {
         params.run_speed
-    };
-    speed
+    }
 }
 
 /// 由 WASD 与 yaw 算水平期望方向（单位向量，y 恒为 0）写入 `wish_dir`，返回本 tick 的
@@ -1155,7 +1154,7 @@ fn step_move(world: &mut World, p: &mut Player, params: &PhysParams, dt: f64) {
     // `trace_t` 是被清零的（`plane.normal == 0`），语义就是"不许落到空中"。
     // 旧实现写成 `tr.fraction < 1.0 && n[1] < STANDABLE_NORMAL`，于是"什么都没探到"被当成
     // "落点可站"，把玩家留在抬升后的位置（可能已在空中）。
-    let landed_standable = tr.normal.map_or(false, |n| n[1] >= STANDABLE_NORMAL);
+    let landed_standable = tr.normal.is_some_and(|n| n[1] >= STANDABLE_NORMAL);
     if !landed_standable {
         p.origin = down_origin;
         p.velocity = down_vel;
@@ -1196,7 +1195,7 @@ fn stay_on_ground(world: &mut World, p: &mut Player) {
     if tr.fraction > 0.0
         && tr.fraction < 1.0
         && !tr.start_solid
-        && tr.normal.map_or(false, |n| n[1] >= STANDABLE_NORMAL)
+        && tr.normal.is_some_and(|n| n[1] >= STANDABLE_NORMAL)
     {
         p.origin = tr.end_pos;
     }
@@ -1295,11 +1294,11 @@ fn categorize_position(world: &mut World, p: &mut Player) {
             None
         }
     };
-    let multi_probe_standable = ground_n.map_or(false, |n| n[1] >= STANDABLE_NORMAL);
+    let multi_probe_standable = ground_n.is_some_and(|n| n[1] >= STANDABLE_NORMAL);
     // 旧口径（整箱 trace 的单张法线）保留：它是多点探针全数失效时的兜底，也保证单面陡坡
     // 与平地的行为与改动前逐位一致。
     let single_plane_standable =
-        tr.fraction < 1.0 && !tr.start_solid && tr.normal.map_or(false, |n| n[1] >= STANDABLE_NORMAL);
+        tr.fraction < 1.0 && !tr.start_solid && tr.normal.is_some_and(|n| n[1] >= STANDABLE_NORMAL);
 
     // 接触计数：真正落地才累加。两个消费方（传送检测的 grounded 判据、state_out 第 11 槽）
     // 要的都是"站在可站面上"，不是"碰到任何面"，故贴坡滑行（法线落在 0.05~0.7）不计接触。
