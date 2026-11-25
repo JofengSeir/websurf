@@ -614,28 +614,38 @@ pub(crate) fn parse_pvs_data(bsp: &vbsp::Bsp) -> Result<String, JsValue> {
     serde_json::to_string(&pvs_data).map_err(|e| to_js_err(e, "序列化 PVS 数据失败"))
 }
 
+/// 一个放置实例的三角形碰撞网格（JSON 与 WSBW 二进制共用同一条提取结果）。
+///
+/// `surfaceprop` 只有 `.phy` 路径有（可视网格 / 置换面为 `None`，JSON 里整键不出现），
+/// 字段顺序即 JSON 键顺序：`name, surfaceprop?, vertices, indices, min, max`。
 #[cfg(any(feature = "glb-lite", feature = "debug-tools"))]
-pub(crate) fn export_model_phy_colliders(bsp: &vbsp::Bsp, pak: &PakfileModels) -> Result<String, JsValue> {
+#[derive(serde::Serialize)]
+pub(crate) struct TriMeshData {
+    pub(crate) name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) surfaceprop: Option<String>,
+    pub(crate) vertices: Vec<[f32; 3]>,
+    pub(crate) indices: Vec<[u32; 3]>,
+    pub(crate) min: [f32; 3],
+    pub(crate) max: [f32; 3],
+}
+
+/// `.phy` 凸包碰撞提取：返回结构体，供 JSON 与二进制两个出口复用。
+#[cfg(any(feature = "glb-lite", feature = "debug-tools"))]
+pub(crate) fn export_model_phy_colliders_data(
+    bsp: &vbsp::Bsp,
+    pak: &PakfileModels,
+) -> Result<Vec<TriMeshData>, JsValue> {
     let models = &pak.models;
     let static_props = &pak.static_props;
     if models.is_empty() {
-        return Ok("[]".to_string());
+        return Ok(Vec::new());
     }
 
     let no_entities: Vec<model_integrator::Entity> = Vec::new();
 
-    #[derive(serde::Serialize)]
-    struct TriMeshOut {
-        name: String,
-        surfaceprop: String,
-        vertices: Vec<[f32; 3]>,
-        indices: Vec<[u32; 3]>,
-        min: [f32; 3],
-        max: [f32; 3],
-    }
-
     const MAX_TRI_TOTAL: usize = 200_000;
-    let mut out: Vec<TriMeshOut> = Vec::new();
+    let mut out: Vec<TriMeshData> = Vec::new();
     let mut tri_total = 0usize;
 
     for m in models {
@@ -732,9 +742,9 @@ pub(crate) fn export_model_phy_colliders(bsp: &vbsp::Bsp, pak: &PakfileModels) -
                 continue;
             }
             tri_total += tris.len();
-            out.push(TriMeshOut {
+            out.push(TriMeshData {
                 name: m.name.clone(),
-                surfaceprop: sprop.clone(),
+                surfaceprop: Some(sprop.clone()),
                 vertices: verts,
                 indices: tris.clone(),
                 min,
@@ -743,33 +753,37 @@ pub(crate) fn export_model_phy_colliders(bsp: &vbsp::Bsp, pak: &PakfileModels) -
         }
     }
 
+    Ok(out)
+}
+
+/// JSON 出口（对外字符串契约不变）。
+#[cfg(any(feature = "glb-lite", feature = "debug-tools"))]
+pub(crate) fn export_model_phy_colliders(
+    bsp: &vbsp::Bsp,
+    pak: &PakfileModels,
+) -> Result<String, JsValue> {
+    let out = export_model_phy_colliders_data(bsp, pak)?;
     serde_json::to_string(&out).map_err(|e| to_js_err(e, "序列化模型 PHY 碰撞失败"))
 }
 
+/// 可视网格三角形碰撞提取（含置换面，与 JSON 出口同一份结果）。
 #[cfg(any(feature = "glb-lite", feature = "debug-tools"))]
-pub(crate) fn export_model_tri_colliders(bsp: &vbsp::Bsp, pak: &PakfileModels) -> Result<String, JsValue> {
+pub(crate) fn export_model_tri_colliders_data(
+    bsp: &vbsp::Bsp,
+    pak: &PakfileModels,
+) -> Result<Vec<TriMeshData>, JsValue> {
     let models = &pak.models;
     let static_props = &pak.static_props;
     if models.is_empty() {
-        return Ok("[]".to_string());
+        return Ok(Vec::new());
     }
 
     let no_entities: Vec<model_integrator::Entity> = Vec::new();
 
-    /// 单个放置实例的三角形网格条目（世界空间极值 + 下标）。
-    #[derive(serde::Serialize)]
-    struct TriMeshOut {
-        name: String,
-        vertices: Vec<[f32; 3]>,
-        indices: Vec<[u32; 3]>,
-        min: [f32; 3],
-        max: [f32; 3],
-    }
-
     /// 累计三角形总护栏：达到上限后不再展开新的放置实例。
     const MAX_TRI_TOTAL: usize = 200_000;
 
-    let mut out: Vec<TriMeshOut> = Vec::new();
+    let mut out: Vec<TriMeshData> = Vec::new();
     let mut tri_total = 0usize;
 
     for m in models {
@@ -844,8 +858,9 @@ pub(crate) fn export_model_tri_colliders(bsp: &vbsp::Bsp, pak: &PakfileModels) -
                 continue;
             }
             tri_total += tris.len();
-            out.push(TriMeshOut {
+            out.push(TriMeshData {
                 name: m.name.clone(),
+                surfaceprop: None,
                 vertices: verts,
                 indices: tris.clone(),
                 min,
@@ -874,14 +889,25 @@ pub(crate) fn export_model_tri_colliders(bsp: &vbsp::Bsp, pak: &PakfileModels) -
         }
         if verts.len() < 3 { continue; }
         let tri_count = (verts.len() / 3) as u32;
-        out.push(TriMeshOut {
+        out.push(TriMeshData {
             name: format!("__disp_{i}"),
+            surfaceprop: None,
             vertices: verts,
             indices: (0..tri_count).map(|t| [t * 3, t * 3 + 1, t * 3 + 2]).collect(),
             min,
             max,
         });
     }
+    Ok(out)
+}
+
+/// JSON 出口（对外字符串契约不变；字段顺序与旧 `TriMeshOut` 逐字一致）。
+#[cfg(any(feature = "glb-lite", feature = "debug-tools"))]
+pub(crate) fn export_model_tri_colliders(
+    bsp: &vbsp::Bsp,
+    pak: &PakfileModels,
+) -> Result<String, JsValue> {
+    let out = export_model_tri_colliders_data(bsp, pak)?;
     serde_json::to_string(&out).map_err(|e| to_js_err(e, "序列化模型三角形碰撞失败"))
 }
 

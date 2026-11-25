@@ -130,28 +130,28 @@ pub(crate) struct BrushPlanesOpts {
 
 /// brush 平面输出项；`is_real_face` / `is_bevel` 为 `None` 时整键不序列化。
 #[derive(serde::Serialize)]
-struct WasmBrushPlane {
-    normal: [f32; 3],
-    dist: f32,
+pub(crate) struct WasmBrushPlane {
+    pub(crate) normal: [f32; 3],
+    pub(crate) dist: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    is_real_face: Option<bool>,
+    pub(crate) is_real_face: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    is_bevel: Option<bool>,
+    pub(crate) is_bevel: Option<bool>,
 }
 
 /// 单块 brush 的碰撞体描述。字段顺序即 JSON 键顺序。
 #[derive(serde::Serialize)]
-struct WasmBrush {
-    planes: Vec<WasmBrushPlane>,
-    min: [f32; 3],
-    max: [f32; 3],
-    is_ladder: bool,
-    is_solid: bool,
+pub(crate) struct WasmBrush {
+    pub(crate) planes: Vec<WasmBrushPlane>,
+    pub(crate) min: [f32; 3],
+    pub(crate) max: [f32; 3],
+    pub(crate) is_ladder: bool,
+    pub(crate) is_solid: bool,
     /// 所属实体下标（`-1` = worldspawn / 无实体归属）。运行期碰撞开关按这个下标定位。
-    entity: i32,
+    pub(crate) entity: i32,
     /// 出生时是否实心。`false`（实体层出生即关，如 `func_wall_toggle` START_OFF）时
     /// 物理世界建好后该 brush 不参与碰撞，运行期由实体 I/O 开关切回。
-    start_solid: bool,
+    pub(crate) start_solid: bool,
 }
 
 /// 顶点"落在某平面上"的判定容差（HU）。凸包顶点由 `plane_intersect` 从三元组交点直接
@@ -332,6 +332,17 @@ pub(crate) fn export_brushes_planes_impl(
     filter_json: &str,
     opts: BrushPlanesOpts,
 ) -> Result<String, JsValue> {
+    let brushes = extract_brushes_planes(bsp, filter_json, opts)?;
+    serde_json::to_string(&brushes).map_err(|e| to_js_err(e, "序列化 brush 平面数据失败"))
+}
+
+/// 与 [`export_brushes_planes_impl`] 同一条提取逻辑，直接返回结构体（二进制编码用）。
+/// 统计日志仍在这里打，JSON / 二进制两条路的控制台输出逐字一致。
+pub(crate) fn extract_brushes_planes(
+    bsp: &vbsp::Bsp,
+    filter_json: &str,
+    opts: BrushPlanesOpts,
+) -> Result<Vec<WasmBrush>, JsValue> {
     use vbsp::{BrushFlags, Plane};
 
     // 文本解析失败一律退回默认过滤（与两端原行为一致）。
@@ -638,6 +649,5 @@ pub(crate) fn export_brushes_planes_impl(
         );
     }
 
-    // 输出纯 WasmBrush[] JSON 数组
-    serde_json::to_string(&brushes_out).map_err(|e| to_js_err(e, "序列化 brush 平面数据失败"))
+    Ok(brushes_out)
 }

@@ -324,6 +324,64 @@ impl BspProcessor {
             super::colliders_impl::export_model_tri_colliders(bsp, &pak)
         }
 
+    /// 导出 brush 平面碰撞体的 **WSBW 二进制**（与 `export_brushes_planes` 同一提取路径）。
+    ///
+    /// 格式常量与编解码只有一份：`websurf-phys` 的 `src/phys/world_bin.rs`（magic `WSBW`、
+    /// version 1、little-endian，头部 16 字节）。本方法只做编码，不参与解码。
+    /// 返回 `Uint8Array`；缓冲区由 wasm-bindgen 拷进 JS 堆，可安全 transfer 给 Worker。
+    #[cfg(feature = "phys")]
+    pub fn export_brushes_planes_bin(&self, filter_json: &str) -> Result<js_sys::Uint8Array, JsValue> {
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 未解析"))?;
+        super::world_bin_impl::brushes_planes_bin(
+            bsp,
+            filter_json,
+            super::common::BrushPlanesOpts {
+                debug_plane_flags: false,
+                detailed_skip_log: true,
+            },
+        )
+    }
+
+    /// 导出模型 `.phy` 凸包碰撞三角形为 **WSBW 二进制**。
+    #[cfg(feature = "phys")]
+    pub fn export_model_phy_colliders_bin(&self) -> Result<js_sys::Uint8Array, JsValue> {
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 未解析"))?;
+        let pak = self.collect_models(VhvLog::Always)?;
+        super::world_bin_impl::phy_colliders_bin(bsp, &pak)
+    }
+
+    /// 导出模型可视网格（含置换面）碰撞三角形为 **WSBW 二进制**。
+    #[cfg(feature = "phys")]
+    pub fn export_model_tri_colliders_bin(&self) -> Result<js_sys::Uint8Array, JsValue> {
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 未解析"))?;
+        let pak = self.collect_models(VhvLog::Always)?;
+        super::world_bin_impl::tri_colliders_bin(bsp, &pak)
+    }
+
+    /// 按 `colliderSource`（`auto` / `phy` / `visual`）导出模型碰撞三角形为 **WSBW 二进制**。
+    ///
+    /// `auto` 的逐实例回退在 Rust 内完成（与 TS 旧实现同一判据：`.phy` 实例在前，
+    /// 可视网格里 `name` 未出现在 `.phy` 结果中的实例补在后），因此主线程不需要
+    /// 解析任何 JSON 就能拿到合并后的单一缓冲区。
+    #[cfg(feature = "phys")]
+    pub fn export_model_colliders_bin(&self, source: &str) -> Result<js_sys::Uint8Array, JsValue> {
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 未解析"))?;
+        let pak = self.collect_models(VhvLog::Always)?;
+        super::world_bin_impl::model_colliders_bin(bsp, &pak, source)
+    }
+
     /// 生成纹理画质 manifest：`{ 纹理名: "#mosaic v4 字节码" }` 的 JSON 文本。
         ///
         /// 键有两类来源：地图 face 纹理走 `websurf_wasm_core::mosaic::manifest::build_mosaic_manifest`

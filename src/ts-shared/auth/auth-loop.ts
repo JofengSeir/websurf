@@ -77,6 +77,17 @@ export interface PhysWorldLike {
     z: number,
     yawDeg: number,
   ): void;
+  /** WSBW 二进制建世界（T-D135）。缓冲区所有权归调用方：本方法只读，不 detach。
+   * 声明为可选，兼容没有该能力的旧 wasm / 测试桩；`world-bin` 分支调用前会检查。 */
+  build_world_binary?(
+    brushBin: Uint8Array,
+    triBin: Uint8Array,
+    teleportJson: string,
+    x: number,
+    y: number,
+    z: number,
+    yawDeg: number,
+  ): void;
   set_params(json: string): void;
   set_hull(halfWidth: number, standHeight: number, duckHeight: number): void;
   set_noclip(active: boolean): void;

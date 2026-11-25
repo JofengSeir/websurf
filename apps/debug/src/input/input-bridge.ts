@@ -4,7 +4,7 @@
  * 逐帧输入不走本类：鼠标 / 按键增量由渲染帧写共享内存输入槽（`shared.addInput`），回退通道
  * 才由 `MsgState` 直接发 `input` 消息。本类只承载低频控制消息。
  *
- * 接收侧分两处：`init` / `world-json` / `config` / `respawn` / `set-spawn-points` / `teleport` /
+ * 接收侧分两处：`init` / `world-json` / `world-bin` / `config` / `respawn` / `set-spawn-points` / `teleport` /
  * `teleport-to-pos` / `set-death-threshold` 由 `src/ts-shared/auth/worker-dispatch.ts` 按 `type`
  * 分派；`set-physics-param` / `reset-physics-param` / `set-hull` / `reset-hull` /
  * `set-auto-restore-hull` 由 `apps/debug/src/worker/physics-worker.ts` 的 `handleMessage` 处理。
@@ -19,6 +19,21 @@ export class InputBridge {
   /** 发 `init`：共享内存（可为 null，null 时 Worker 走消息回退通道）+ 画布尺寸与设备像素比。 */
   sendInit(shared: SharedArrayBuffer | null, width: number, height: number, dpr: number): void {
     this.worker.postMessage({ type: 'init', shared, width, height, dpr });
+  }
+
+  /** 发 `world-bin`：WSBW 二进制世界（T-D135）。两块 buffer 以 transfer 方式交给 Worker，
+   *  零拷贝。**调用方前置条件**：主线程已用同一块 buffer 建好自己的 `PhysWorld`，且此后
+   *  不再读写（transfer 后本线程侧 `byteLength === 0`）。 */
+  sendWorldBin(world: {
+    brushBuf: ArrayBuffer;
+    triBuf: ArrayBuffer;
+    teleportJson: string;
+    spawn: { x: number; y: number; z: number; yawDeg: number };
+  }): void {
+    this.worker.postMessage(
+      { type: 'world-bin', ...world },
+      [world.brushBuf, world.triBuf],
+    );
   }
 
   /** 发 `world-json`：主线程解析好的世界数据，Worker 据此构建权威 `PhysWorld`。 */

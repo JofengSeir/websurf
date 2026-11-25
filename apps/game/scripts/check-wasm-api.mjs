@@ -38,6 +38,10 @@ const EXPORT_API = [
   'export_brushes_planes',
   'export_model_tri_colliders',
   'export_model_phy_colliders',
+  'export_brushes_planes_bin',
+  'export_model_tri_colliders_bin',
+  'export_model_phy_colliders_bin',
+  'export_model_colliders_bin',
   'export_glb_with_pakfile_models',
   'export_glb_with_pakfile_models_with_defaults',
   'export_glb_with_pakfile_models_with_defaults_and_lights',
@@ -54,6 +58,7 @@ const EXPORT_API = [
 // 物理层：PhysWorld 类（Rust phys 模块，双 Worker 权威/预测共用）
 const PHYS_API = [
   'build_world',
+  'build_world_binary',
   'tick',
   'state',
   'respawn',

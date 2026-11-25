@@ -10,9 +10,10 @@
  * ## 步骤顺序（顺序即正确性）
  * 1. `metadata()` → 归一成 `WorldMetadata`；
  * 2. 借用型导出：`parse_spawn_points()` / `parse_teleports()` / `parse_pvs_data()`；
- * 3. `export_brushes_planes()` 导出地图 brush 凸包（过滤条件见下）；
+ * 3. `export_brushes_planes()` 导出地图 brush 凸包（过滤条件见下）；可选同时/改用
+ *    `export_brushes_planes_bin()` 出 WSBW 二进制块（见 `colliderEncoding`）；
  * 4. 模型碰撞体：按 `colliderSource` 选 `export_model_tri_colliders()` 或
- *    `export_model_phy_colliders()`，失败逐级回退；
+ *    `export_model_phy_colliders()`，失败逐级回退；二进制档走 `export_model_colliders_bin()`；
  * 5. （可选）`export_missing_textures()`——**必须在第 7 步（GLB 导出）之前**：
  *    它要读 BSP 的 face/材质数据，GLB 导出会消费这些数据；
  * 6. 默认纹理包（可选）：内嵌 base64 或 `fetch` `./textures.mtz`，交给调用方注入的解压函数；
@@ -28,6 +29,9 @@
  * - `colliderSource`：`'auto' | 'visual' | 'phy'`。`'visual'` 用可视网格三角形（与显示逐位一致）；
  *   `'phy'` 用模型自带 `.phy` 凸包；`'auto'` 先试 `.phy`，结果为空数组时再回退可视网格。
  *   缺省 `'auto'`；只有 `apps/debug` 会传入面板值，`apps/game` 不传。
+ * - `colliderEncoding`：`'json' | 'bin' | 'both'`，缺省 `'json'`。`'bin'` 只出 WSBW 二进制块
+ *   （game 的物理不需要 JSON 文本）；`'both'` 两份都出（debug 的线框 overlay 仍要 JSON 里的
+ *   `is_real_face` / `is_bevel`）。当前 wasm 没有 `*_bin` 导出时自动退回 JSON。
  * - `collectMissingTextures`：为真时才调 `export_missing_textures()`；只有 debug 传。
  * - `decompressMtz`：缺省时整段跳过默认纹理包回退，`defaultsJson` 保持 `'{}'`。
  * - `onProgress`：每个阶段回调一次，回调后 `setTimeout(0)` 让出主线程（解析是同步长任务）。
@@ -57,6 +61,13 @@ export interface BspProcessorLike {
   export_brushes_planes(filterJson: string): string;
   export_model_tri_colliders(): string;
   export_model_phy_colliders(): string;
+  /** WSBW 二进制 brush 块（T-D135；与 `export_brushes_planes` 同一份提取，只是不序列化 JSON）。 */
+  export_brushes_planes_bin?(filterJson: string): Uint8Array;
+  /** WSBW 二进制模型碰撞块，按 `source`（`auto` / `visual` / `phy`）在 Rust 侧选源+回退。 */
+  export_model_colliders_bin?(source: string): Uint8Array;
+  /** 单独出 `.phy` / 可视网格二进制块（当前 TS 管线不用，留给调试/对照）。 */
+  export_model_phy_colliders_bin?(): Uint8Array;
+  export_model_tri_colliders_bin?(): Uint8Array;
   /** `.phy` 凸体的生成补面（VBSP `AddBrushBevels` 移植）；**只有 debug 的 pkg 导出**。 */
   export_model_phy_bevels?(): string;
   /**
@@ -111,6 +122,13 @@ export interface WorldBundle {
   metadata: WorldMetadata;
   brushJson: string;
   triJson: string;
+  /** WSBW 二进制 brush 块（独立 `ArrayBuffer`，主线程建完世界后可直接 transfer）。
+   *  只有 `colliderEncoding` 含 `bin` 且 wasm 提供该导出时存在。 */
+  brushBin?: ArrayBuffer;
+  /** WSBW 二进制模型碰撞块（同上）。
+   *  **成对约束**：`brushBin` 与 `triBin` 要么都在、要么都不在；任一块导出失败时
+   *  两块一起作废并强制输出 JSON 两件套，调用方只需判断 `brushBin && triBin`。 */
+  triBin?: ArrayBuffer;
   /**
    * `.phy` 凸体块的**生成补面** JSON（`export_model_phy_bevels` 的输出；只服务 debug 的
    * 第六路线框显示）。该导出只有 debug 的 `pkg` 提供，其余工程为 `'[]'`。
@@ -141,6 +159,8 @@ export interface WorldBundle {
 export interface WorldBuilderOptions {
   /** 模型碰撞来源（debug 三档；game 固定 auto 等价，缺省 auto）。 */
   colliderSource?: ColliderSource;
+  /** 碰撞数据编码（见文件头「抽象」；缺省 `json` = 保持既有行为）。 */
+  colliderEncoding?: 'json' | 'bin' | 'both';
   /** export_brushes_planes 过滤 JSON（缺省 = Rust ColliderFilter::default）。 */
   brushFilterJson?: string;
   /** 收集缺失纹理列表（export_missing_textures；debug 特有）。 */
@@ -177,6 +197,12 @@ export async function buildWorldBundle(
   options: WorldBuilderOptions = {},
 ): Promise<WorldBundle> {
   const yieldUi = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+  /** 切出独立 `ArrayBuffer`（copy，byteOffset=0），供 `postMessage` transfer。
+   *  wasm 导出的 view 可能指向共享线性内存；transfer 原 view 会连带 detach 整块内存。 */
+  const toTransferable = (bytes: Uint8Array): ArrayBuffer => {
+    const copy = new Uint8Array(bytes);
+    return copy.buffer as ArrayBuffer;
+  };
   const stage = async (s: string): Promise<void> => {
     if (options.onProgress) {
       options.onProgress(s);
@@ -217,47 +243,97 @@ export async function buildWorldBundle(
   }
 
   await stage('导出碰撞体');
-  const mapBrushJson = proc.export_brushes_planes(
-    options.brushFilterJson ?? JSON.stringify(DEFAULT_BRUSH_FILTER),
-  );
-  // 模型碰撞体：按 colliderSource 选源，并在失败时逐级回退。
-  //   visual → 可视网格三角形；phy → 模型自带 .phy 凸包；auto → 先 phy，空结果再退 visual。
-  //   任何一步抛错都落到下面的 catch：先重试 visual，再失败才给 '[]'。
+  const filterJson = options.brushFilterJson ?? JSON.stringify(DEFAULT_BRUSH_FILTER);
+  // 碰撞数据编码（T-D135，语义见文件头「抽象」）：
+  //   json —— 两块 JSON 文本（缺省，既有行为）；
+  //   bin  —— 只出 WSBW 二进制块（apps/game：省掉 JSON 字符串化与 Worker 侧解析）；
+  //   both —— 两份都出（apps/debug：物理走二进制，线框 overlay 仍读 JSON 的 plane 调试标记）。
+  // 老 wasm 没有 *_bin 导出时整体退回 json，绝不返回「只有一半」的世界数据。
+  const encoding = options.colliderEncoding ?? 'json';
+  const binCapable =
+    typeof proc.export_brushes_planes_bin === 'function' &&
+    typeof proc.export_model_colliders_bin === 'function';
+  if (encoding !== 'json' && !binCapable) {
+    console.warn('[load-bsp] 当前 wasm 没有 WSBW 二进制导出，碰撞数据退回 JSON');
+  }
+  const useBin = encoding !== 'json' && binCapable;
+  const emitJson = encoding !== 'bin' || !useBin;
+
+  // colliderSource 选源规则（JSON / 二进制两档共用同一判据）：
+  //   visual → 可视网格三角形；phy → 模型自带 .phy 凸包；
+  //   auto → 先 phy，再按实例把 .phy 缺失的模型补成可视网格。
   const colliderSource = options.colliderSource ?? 'auto';
-  let brushJson = mapBrushJson;
-  let triJson: string | undefined;
+
+  // 两块二进制先各试一次。**成对**是硬约束：没有任何消费者接受「一块二进制 + 一块 JSON」，
+  // 缺一块就把整对作废并强制走 JSON 两件套，否则 game 会落到 world-json 却带着 '[]'。
+  let brushBin: ArrayBuffer | undefined;
+  let triBin: ArrayBuffer | undefined;
+  if (useBin) {
+    try {
+      brushBin = toTransferable(proc.export_brushes_planes_bin!(filterJson));
+    } catch (e) {
+      console.warn('[load-bsp] brush 二进制导出失败，退回 JSON:', e);
+    }
+    try {
+      triBin = toTransferable(proc.export_model_colliders_bin!(colliderSource));
+    } catch (e) {
+      console.warn('[load-bsp] 模型碰撞二进制导出失败，退回 JSON:', e);
+    }
+    if (!brushBin || !triBin) {
+      console.warn('[load-bsp] WSBW 二进制块不完整，退回 JSON 两件套');
+      brushBin = undefined;
+      triBin = undefined;
+    }
+  }
+  const useJson = emitJson || !brushBin || !triBin;
+
+  let brushJson = '[]';
+  if (useJson) {
+    brushJson = proc.export_brushes_planes(filterJson);
+  }
+
+  // JSON 三角碰撞档：按 colliderSource 选源，任何一步抛错都落到下面的 catch：
+  // 先重试 visual，再失败才给 '[]'。二进制档的选源+逐模型回退由 Rust 侧一条路完成。
+  let triJson = '[]';
   // 已知的实例数：auto 分支上面已得，其余分支留空（日志不再为了一行数字整表 JSON.parse）
   let triCount: number | undefined;
-  try {
-    if (colliderSource === 'visual') {
-      triJson = proc.export_model_tri_colliders();
-    } else if (colliderSource === 'auto') {
-      // **逐模型**回退：`.phy` 优先，缺失/解析失败的模型改用可视网格三角形。
-      // 整表为空才回退不够用——`.phy` 缺失只影响个别模型，而其余模型已产出条目 ⇒ 那些模型
-      // 静默无碰撞（实测 surf_666 5 个、ze_cursed_bear 3 个模型命中这条）。
-      const phyArr = JSON.parse(proc.export_model_phy_colliders()) as Array<{ name: string }>;
-      const have = new Set(phyArr.map((e) => e.name));
-      const visArr = JSON.parse(proc.export_model_tri_colliders()) as Array<{ name: string }>;
-      const fallback = visArr.filter((e) => !have.has(e.name));
-      triJson = JSON.stringify(phyArr.concat(fallback));
-      triCount = phyArr.length + fallback.length;
-      console.log(
-        `[load-bsp] 模型碰撞(auto)：.phy ${phyArr.length} 实例 + 可视回退 ${fallback.length} 实例（${new Set(fallback.map((e) => e.name)).size} 模型）`,
-      );
-    } else {
-      triJson = proc.export_model_phy_colliders();
-    }
-    const triDesc = triCount === undefined
-      ? `${(triJson.length / 1048576).toFixed(1)} MB`
-      : `${triCount} 个实例`;
-    console.log(`[load-bsp] 模型三角形碰撞网格(${colliderSource}): ${triDesc}`);
-  } catch (e) {
-    console.warn('[load-bsp] 模型碰撞导出失败，回退可视网格:', e);
+  if (useJson) {
     try {
-      triJson = proc.export_model_tri_colliders();
-    } catch {
-      triJson = '[]';
+      if (colliderSource === 'visual') {
+        triJson = proc.export_model_tri_colliders();
+      } else if (colliderSource === 'auto') {
+        // **逐模型**回退：`.phy` 优先，缺失/解析失败的模型改用可视网格三角形。
+        // 整表为空才回退不够用——`.phy` 缺失只影响个别模型，而其余模型已产出条目 ⇒ 那些模型
+        // 静默无碰撞（实测 surf_666 5 个、ze_cursed_bear 3 个模型命中这条）。
+        const phyArr = JSON.parse(proc.export_model_phy_colliders()) as Array<{ name: string }>;
+        const have = new Set(phyArr.map((e) => e.name));
+        const visArr = JSON.parse(proc.export_model_tri_colliders()) as Array<{ name: string }>;
+        const fallback = visArr.filter((e) => !have.has(e.name));
+        triJson = JSON.stringify(phyArr.concat(fallback));
+        triCount = phyArr.length + fallback.length;
+        console.log(
+          `[load-bsp] 模型碰撞(auto)：.phy ${phyArr.length} 实例 + 可视回退 ${fallback.length} 实例（${new Set(fallback.map((e) => e.name)).size} 模型）`,
+        );
+      } else {
+        triJson = proc.export_model_phy_colliders();
+      }
+      const triDesc = triCount === undefined
+        ? `${(triJson.length / 1048576).toFixed(1)} MB`
+        : `${triCount} 个实例`;
+      console.log(`[load-bsp] 模型三角形碰撞网格(${colliderSource}): ${triDesc}`);
+    } catch (e) {
+      console.warn('[load-bsp] 模型碰撞导出失败，回退可视网格:', e);
+      try {
+        triJson = proc.export_model_tri_colliders();
+      } catch {
+        triJson = '[]';
+      }
     }
+  }
+  if (triBin) {
+    console.log(
+      `[load-bsp] 模型碰撞二进制(${colliderSource}): ${(triBin.byteLength / 1048576).toFixed(1)} MB`,
+    );
   }
 
   // `.phy` 凸体的**生成补面**（VBSP `AddBrushBevels` 的移植，只服务 debug 的第六路线框）。
@@ -344,7 +420,9 @@ export async function buildWorldBundle(
   return {
     metadata,
     brushJson,
-    triJson: triJson ?? '[]',
+    triJson,
+    brushBin,
+    triBin,
     phyBevelsJson,
     teleportJson,
     spawnJson,

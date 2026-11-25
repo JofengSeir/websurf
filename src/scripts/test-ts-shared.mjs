@@ -1,10 +1,11 @@
 /**
  * ts-shared 核心模块的 Node 单测（T-P2-4）。
  *
- * 覆盖三个高频纯逻辑模块：
+ * 覆盖四个高频纯逻辑模块：
  * - src/ts-shared/app/sim-clock.ts     固定步长累加器（时基、钳制、频率、统计、回调）；
  * - src/ts-shared/auth/shared-state.ts  SAB 通道（键位掩码、输入累加/消费、权威帧双缓冲、seqlock 元数据）；
- * - src/ts-shared/app/config-sync.ts    全量同步与增量 patch 的纯边界。
+ * - src/ts-shared/app/config-sync.ts    全量同步与增量 patch 的纯边界；
+ * - src/ts-shared/phys/world-builder.ts 碰撞数据 JSON/WSBW 编码降级（二进制块成对不变量）。
  *
  * 运行：node src/scripts/test-ts-shared.mjs（或根目录 npm run test:ts）。
  * 依赖：只用 Node 内置 node:test / node:assert/strict；TS 由各端已有的 esbuild 在内存中转译，
@@ -106,6 +107,8 @@ const {
   rotDoorSpeed,
   rotDoorAngleEuler,
 } = await loadTsBundle('src/ts-shared/entity/classes/brush.ts', 'entity-brush');
+// 碰撞数据编码降级：只打包共享层 TS（不碰 wasm），用桩 proc 驱动 buildWorldBundle。
+const { buildWorldBundle } = await loadTsBundle('src/ts-shared/phys/world-builder.ts', 'phys-world-builder');
 
 // 旋转枢轴的「rest 零变化」不变量：组位置 = pivot、mesh 局部位置 = 原位置 - pivot 时，
 // 世界坐标在旋转 0 的情况下逐分量不变（pivot 加回本身的抵消）。
@@ -712,3 +715,70 @@ test('rotation: 未合并路径（多 primitive 子 mesh）rest 世界坐标不�
   root.updateMatrixWorld(true);
   vecNear(localPoint.clone().applyMatrix4(mesh.matrixWorld).toArray(), [100, -50, 3], 1e-6);
 });
+// ── world-builder：碰撞数据编码降级 ────────────────────────────────────────────
+
+const WORLD_BRUSH_JSON = JSON.stringify([
+  { planes: [{ normal: [0, 0, 1], dist: 0 }], min: [0, 0, 0], max: [1, 1, 1], is_ladder: false, is_solid: true, entity: -1, start_solid: true },
+]);
+const WORLD_TRI_JSON = JSON.stringify([
+  { name: 'stub', vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]], indices: [[0, 1, 2]], min: [0, 0, 0], max: [1, 1, 0] },
+]);
+
+/** 最小 BspProcessor 桩：只覆盖 buildWorldBundle 会调用的导出。 */
+function worldBuilderProc(overrides = {}) {
+  return {
+    metadata: () => JSON.stringify({ map_name: 'stub', num_faces: 1, num_vertices: 3, num_brushes: 1, num_models: 0 }),
+    parse_spawn_points: () => JSON.stringify({ spawn_points: [{ classname: 'info_player_start', origin: [0, 100, 0], angles: [0, 0, 0] }], primary: 0 }),
+    parse_teleports: () => '{"teleports":[]}',
+    parse_pvs_data: () => '{}',
+    export_brushes_planes: () => WORLD_BRUSH_JSON,
+    export_brushes_planes_bin: () => new Uint8Array([1, 2, 3, 4]),
+    export_model_phy_colliders: () => WORLD_TRI_JSON,
+    export_model_tri_colliders: () => WORLD_TRI_JSON,
+    export_model_colliders_bin: () => new Uint8Array([5, 6, 7, 8]),
+    export_glb_with_pakfile_models_with_defaults_and_lights: () => new Uint8Array([9, 9, 9]),
+    export_glb_with_pakfile_models: () => new Uint8Array([9, 9, 9]),
+    take_mosaic_manifest: () => '{}',
+    ...overrides,
+  };
+}
+
+/** 跑一次 buildWorldBundle；测试期替换 fetch，避免 installVmtFallback 打真实请求。 */
+async function buildWith(overrides, encoding) {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: false, status: 404 });
+  try {
+    return await buildWorldBundle(worldBuilderProc(overrides), { colliderEncoding: encoding });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+test('world-builder: 两块二进制成功时只出二进制，JSON 保持占位', async () => {
+  const bundle = await buildWith({}, 'bin');
+  assert.ok(bundle.brushBin && bundle.triBin, '两块二进制都应存在');
+  assert.equal(bundle.brushJson, '[]');
+  assert.equal(bundle.triJson, '[]');
+});
+
+test('world-builder: 任一二进制块失败 -> 整对作废并强制 JSON 两件套', async () => {
+  const cases = [
+    { export_model_colliders_bin: () => { throw new Error('tri boom'); } },
+    { export_brushes_planes_bin: () => { throw new Error('brush boom'); } },
+  ];
+  for (const overrides of cases) {
+    const bundle = await buildWith(overrides, 'bin');
+    assert.equal(bundle.brushBin, undefined, '不得留下半套 brush 二进制');
+    assert.equal(bundle.triBin, undefined, '不得留下半套 tri 二进制');
+    assert.notEqual(bundle.brushJson, '[]', 'brushJson 必须由 JSON 出口补齐');
+    assert.notEqual(bundle.triJson, '[]', 'triJson 必须由 JSON 出口补齐');
+  }
+});
+
+test('world-builder: both 档同时保留二进制与两份 JSON', async () => {
+  const bundle = await buildWith({}, 'both');
+  assert.ok(bundle.brushBin && bundle.triBin);
+  assert.notEqual(bundle.brushJson, '[]');
+  assert.notEqual(bundle.triJson, '[]');
+});
+

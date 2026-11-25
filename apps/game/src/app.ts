@@ -270,7 +270,8 @@ function createGameHooks(authorityMode: AppAuthorityMode): AppHooks<RuntimeConfi
     // game 独有的耗时诊断（旧 main 内联分支）；其余消息交 runtime 通用处理
     onWorkerMessage: (message) => {
       if (message.type === 'world-build-ms') {
-        console.info(`[authority] Worker 内 world-json 处理（解析+build_world）= ${String(message.ms)}ms`);
+        const src = message.source === 'bin' ? 'world-bin（WSBW 解码+build_world）' : 'world-json（解析+build_world）';
+        console.info(`[authority] Worker 内 ${src} = ${String(message.ms)}ms`);
         return true;
       }
       if (message.type === 'world-parse-ms') {
@@ -722,6 +723,8 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
   await new Promise((r) => setTimeout(r, 0)); // 让 UI 先更新（解析耗时较长）
   try {
     const proc = new BspProcessor(new Uint8Array(bytes)) as BspProcessor & SkyboxProcessorLike; const skyboxFaces = collectSkyboxFaces(proc, (v) => decode_vtf_to_png(v)); const entitiesJson = proc.parse_entities(); const fogParams = fogParamsFromEntities(entitiesJson); const skyCamera: SkyCameraParams | null = skyCameraFromEntities(entitiesJson); const bundle = await buildWorldBundle(proc, {
+      // T-D135：game 的物理与 Worker 只吃 WSBW 二进制，不再序列化两份大 JSON。
+      colliderEncoding: 'bin',
       decompressMtz: decompress_mtz,
       onProgress: (stage) => advanceLoading(stage),
     });
@@ -744,7 +747,10 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
 
     // 主线程物理世界（渲染线）
     advanceLoading('构建物理世界');
+    // 二进制块先给主线程建世界，之后才允许 transfer（顺序即所有权，见 worker-protocol-types）。
     renderer.buildPredictionWorld({
+      brushBin: bundle.brushBin,
+      triBin: bundle.triBin,
       brushJson: bundle.brushJson,
       triJson: bundle.triJson,
       teleportJson: bundle.teleportJson,
@@ -761,34 +767,61 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
     }
     // Worker 权威物理世界（地图碰撞；独立固定步长权威帧计算）。
     // 单权威主线程模式（authorityMode='main'）没有 Worker：整段不发，主线程 predPhys 即唯一世界
-    // （因此也不做三个大 JSON 的结构化克隆与 `set-spawn-points` 的重复序列化）。
+    // （因此也不做两个大 JSON 的结构化克隆与 `set-spawn-points` 的重复序列化）。
     //
-    // ⚠️ **顺序已回退为"主线程世界建完再发"**（2026-09-20 实测）：
-    // 曾尝试把本消息提前到 `buildPredictionWorld` 之前，让两端构建并行 —— 实测**更差**：
-    // Worker 内构建 3147ms → 3454ms、首个权威帧 22.19s → 22.57s（主线程与 Worker
-    // 抢 CPU/内存带宽）。瓶颈是 Worker 侧"JSON 解析 + build_world"本身（39k 面 ≈ 3s），
-    // 只能靠优化构建/换二进制载荷解决，**不是靠调整发送顺序**。
+    // ⚠️ **顺序仍为"主线程世界建完再发"**（2026-09-20 实测过提前发送，更差）：
+    // 提前到 `buildPredictionWorld` 之前曾让 Worker 内构建 3147ms → 3454ms、首个权威帧
+    // 22.19s → 22.57s（主线程与 Worker 抢 CPU/内存带宽）。T-D135 改发 WSBW 二进制
+    // （world-bin）消掉的是"JSON 字符串化 + Worker 侧 JSON.parse"，发送顺序不动；
+    // 而且 transfer 语义本身就要求主线程先用同一块 buffer 建完世界。
     if (fixWorker) {
-      console.info(`[authority] world-json 已发送 @${performance.now().toFixed(0)}ms`);
-      // 诊断：载荷体积（决定 Worker 内耗时是"解析"还是"建结构"主导）
-      console.info(
-        `[authority] world-json 载荷：brush=${(bundle.brushJson.length / 1048576).toFixed(2)}MB ` +
-          `tri=${(bundle.triJson.length / 1048576).toFixed(2)}MB ` +
-          `teleport=${(bundle.teleportJson.length / 1024).toFixed(1)}KB（合计 ` +
-          `${((bundle.brushJson.length + bundle.triJson.length + bundle.teleportJson.length) / 1048576).toFixed(2)}MB）`,
-      );
-      const postT0 = performance.now();
-      fixWorker.postMessage({
-        type: 'world-json',
-        brushJson: bundle.brushJson,
-        triJson: bundle.triJson,
-        teleportJson: bundle.teleportJson,
-        spawn: bundle.spawn,
-      });
-      // 诊断：postMessage 内联做结构化克隆（三个大 JSON 字符串），耗时含在主线程阻塞里
-      console.info(`[authority] postMessage(world-json) 结构化克隆耗时 = ${(performance.now() - postT0).toFixed(1)}ms`);
+      if (bundle.brushBin && bundle.triBin) {
+        console.info(`[authority] world-bin 已发送 @${performance.now().toFixed(0)}ms`);
+        // 诊断：载荷体积（与旧 JSON 路径同口径，便于 A/B）
+        console.info(
+          `[authority] world-bin 载荷：brush=${(bundle.brushBin.byteLength / 1048576).toFixed(2)}MB ` +
+            `tri=${(bundle.triBin.byteLength / 1048576).toFixed(2)}MB ` +
+            `teleport=${(bundle.teleportJson.length / 1024).toFixed(1)}KB（合计 ` +
+            `${((bundle.brushBin.byteLength + bundle.triBin.byteLength + bundle.teleportJson.length) / 1048576).toFixed(2)}MB）`,
+        );
+        const postT0 = performance.now();
+        // **所有权**：两个 buffer 已在上面的 buildPredictionWorld 里被主线程世界读过，此后不再使用；
+        // transfer 后本线程侧 byteLength=0，绝不能在本条消息之后复用它们。
+        fixWorker.postMessage(
+          {
+            type: 'world-bin',
+            brushBuf: bundle.brushBin,
+            triBuf: bundle.triBin,
+            teleportJson: bundle.teleportJson,
+            spawn: bundle.spawn,
+          },
+          [bundle.brushBin, bundle.triBin],
+        );
+        // 诊断：postMessage 只转移所有权（不做结构化克隆），耗时含在主线程阻塞里
+        console.info(`[authority] postMessage(world-bin) 转移耗时 = ${(performance.now() - postT0).toFixed(1)}ms`);
+      } else {
+        // 老 wasm / 二进制导出失败：退回 JSON 世界消息（builder 已保证两个 JSON 字段完整）。
+        console.info(`[authority] world-json 已发送 @${performance.now().toFixed(0)}ms`);
+        // 诊断：载荷体积（决定 Worker 内耗时是"解析"还是"建结构"主导）
+        console.info(
+          `[authority] world-json 载荷：brush=${(bundle.brushJson.length / 1048576).toFixed(2)}MB ` +
+            `tri=${(bundle.triJson.length / 1048576).toFixed(2)}MB ` +
+            `teleport=${(bundle.teleportJson.length / 1024).toFixed(1)}KB（合计 ` +
+            `${((bundle.brushJson.length + bundle.triJson.length + bundle.teleportJson.length) / 1048576).toFixed(2)}MB）`,
+        );
+        const postT0 = performance.now();
+        fixWorker.postMessage({
+          type: 'world-json',
+          brushJson: bundle.brushJson,
+          triJson: bundle.triJson,
+          teleportJson: bundle.teleportJson,
+          spawn: bundle.spawn,
+        });
+        // 诊断：postMessage 内联做结构化克隆（三个大 JSON 字符串），耗时含在主线程阻塞里
+        console.info(`[authority] postMessage(world-json) 结构化克隆耗时 = ${(performance.now() - postT0).toFixed(1)}ms`);
+      }
     } else {
-      console.info('[authority] 单权威主线程：跳过 world-json 克隆与下发（无 Worker 权威线）');
+      console.info('[authority] 单权威主线程：跳过世界数据克隆与下发（无 Worker 权威线）');
     }
     // 出生点列表（spawn 下拉切换用）：主线程渲染物理 + Worker 权威物理**双端**
     // 都要设置——否则权威侧 teleport_to_spawn 索引为空静默忽略，权威帧

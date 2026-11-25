@@ -23,8 +23,9 @@
 //!   都以 `path = "../../../../src"` 指到本目录。`apps/viewer` 是纯查看器，
 //!   其 `crates/wasm` 只依赖 `websurf-wasm-core`，不含 `websurf-phys`。
 //!
-//! 导出面：本文件 `#[wasm_bindgen] impl PhysWorld`共 **41 个 `pub fn`**（含 `new`）；默认构建
-//! （不开 `phys-debug`）**29 个**。另外 12 个仅 debug 的导出放在文件末尾的
+//! 导出面：本文件 `#[wasm_bindgen] impl PhysWorld`共 **42 个 `pub fn`**（含 `new`）；默认构建
+//! （不开 `phys-debug`）**30 个**（T-D135 新增 `build_world_binary`，与 `build_world` 共用装配）。
+//! 另外 12 个仅 debug 的导出放在文件末尾的
 //! `#[cfg(feature = "phys-debug")] impl` 块里（`set_state_ex` / `state_full_json` /
 //! `gate_veto_count` / `debug_trace` / `debug_position_probe` / `debug_collide_attrib` /
 //! `debug_tri_mesh_name` / `debug_stuck_probe` / `debug_hull_stats` / `debug_hull` /
@@ -46,6 +47,9 @@
 pub mod player;
 pub mod teleport;
 pub mod world;
+
+/// WSBW 二进制世界格式（brush / tri 两份 buffer 的唯一编解码实现）。
+pub mod world_bin;
 
 /// VBSP `AddBrushBevels` 的移植：给单块凸体补齐「盒体扩张」所需的 box / edge bevel 平面
 /// （`.phy` 凸体要走 brush 平面表追踪器时的平面表来源）。
@@ -114,6 +118,10 @@ mod ladder_tests;
 
 #[cfg(test)]
 mod teleport_switch_tests;
+
+/// WSBW 编解码与「JSON 世界 ≡ 二进制世界」等价性。
+#[cfg(test)]
+mod world_bin_tests;
 
 use player::{create_player, player_tick, PhysParams, Player};
 use teleport::{check_death, TeleportManager};
@@ -260,8 +268,76 @@ impl PhysWorld {
         spawn_z: f64,
         spawn_yaw: f64,
     ) -> Result<(), JsValue> {
-        // 1. brush → World.solids/ladders
         let brushes = parse_brushes(brush_json)?;
+        let tri_meshes = parse_tri_meshes(tri_json)?;
+        self.build_world_from_parts(
+            brushes, tri_meshes, teleport_json, spawn_x, spawn_y, spawn_z, spawn_yaw,
+        )
+    }
+
+    /// WSBW 二进制入口：与 `build_world` 走同一套建世界逻辑，只是 brush/tri
+    /// 由 `world_bin` 直接解码，绕过 JSON 文本与 serde_json。
+    ///
+    /// 两个 buffer 都先完整解码（纯函数、不碰 self）再进入建世界流程：任一 buffer
+    /// 损坏时实例保持原状，不会出现一半世界。
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_world_binary(
+        &mut self,
+        brush_bin: &[u8],
+        tri_bin: &[u8],
+        teleport_json: &str,
+        spawn_x: f64,
+        spawn_y: f64,
+        spawn_z: f64,
+        spawn_yaw: f64,
+    ) -> Result<(), JsValue> {
+        self.build_world_binary_checked(
+            brush_bin, tri_bin, teleport_json, spawn_x, spawn_y, spawn_z, spawn_yaw,
+        )
+        .map_err(|e| JsValue::from_str(&e))
+    }
+
+    /// `build_world_binary` 的宿主可测版本：解码失败返回普通字符串，**不构造
+    /// `JsValue`**（宿主机上 `JsValue::from_str` 会 panic）。wasm 边界只做一次
+    /// 错误串转换，语义不变。
+    #[allow(clippy::too_many_arguments)]
+    fn build_world_binary_checked(
+        &mut self,
+        brush_bin: &[u8],
+        tri_bin: &[u8],
+        teleport_json: &str,
+        spawn_x: f64,
+        spawn_y: f64,
+        spawn_z: f64,
+        spawn_yaw: f64,
+    ) -> Result<(), String> {
+        let brushes = world_bin::decode_brushes(brush_bin)
+            .map_err(|e| format!("brush binary: {e}"))?;
+        let tri_meshes = world_bin::decode_tri_meshes(tri_bin)
+            .map_err(|e| format!("tri binary: {e}"))?;
+        self.build_world_from_parts(
+            brushes, tri_meshes, teleport_json, spawn_x, spawn_y, spawn_z, spawn_yaw,
+        )
+        .map_err(|e| {
+            e.as_string()
+                .unwrap_or_else(|| "build_world_binary: 世界装配失败".to_string())
+        })
+    }
+
+    /// build_world / build_world_binary 的共同实现：入参已是 Rust 侧解析结果。
+    /// 只做世界装配与实例状态写入，顺序与旧 build_world 完全一致。
+    #[allow(clippy::too_many_arguments)]
+    fn build_world_from_parts(
+        &mut self,
+        brushes: Vec<PhysBrush>,
+        tri_meshes: Vec<TriMesh>,
+        teleport_json: &str,
+        spawn_x: f64,
+        spawn_y: f64,
+        spawn_z: f64,
+        spawn_yaw: f64,
+    ) -> Result<(), JsValue> {
+        // 1. brush → World.solids/ladders
         // 实体 brush 的初始碰撞状态（下标 = 实体枚举下标）：先按最大实体下标开表，
         // 再让 start_solid=false 的 brush 所属实体置 false。世界几何没有该项。
         let max_entity = brushes
@@ -306,8 +382,7 @@ impl PhysWorld {
             }
         }
 
-        // 2. tri → World.tri_meshes（紧凑数组 [x,y,z]）
-        let tri_meshes = parse_tri_meshes(tri_json)?;
+        // 2. tri → World.tri_meshes（入参已解析；紧凑数组 [x,y,z]）
 
         // 2.5 `.phy` 凸体块 → brush：按连通分量把「一只模型的全部凸体块拼成一个 mesh」拆回块，
         //     逐块生成 VBSP 补面（box / edge bevel）后走既有 brush 平面表追踪器 —— 这样模型尖脊
@@ -1472,10 +1547,11 @@ fn parse_tri_meshes(json: &str) -> Result<Vec<TriMesh>, JsValue> {
         /// 看到空串，碰撞判定不受影响。
         #[serde(default)]
         name: String,
-        vertices: Vec<[f64; 3]>,
+        // 生产侧就是 f32；这里按 f32 接收再升 f64，保证与 WSBW 二进制解码逐位一致。
+        vertices: Vec<[f32; 3]>,
         indices: Vec<[u32; 3]>,
-        min: [f64; 3],
-        max: [f64; 3],
+        min: [f32; 3],
+        max: [f32; 3],
     }
     let data: Vec<WasmTriMesh> =
         serde_json::from_str(json).map_err(|e| to_js_err(e, "tri JSON 解析"))?;
@@ -1483,10 +1559,14 @@ fn parse_tri_meshes(json: &str) -> Result<Vec<TriMesh>, JsValue> {
         .into_iter()
         .map(|m| TriMesh {
             name: m.name,
-            vertices: m.vertices,
+            vertices: m
+                .vertices
+                .into_iter()
+                .map(|v| [v[0] as f64, v[1] as f64, v[2] as f64])
+                .collect(),
             indices: m.indices,
-            min: m.min,
-            max: m.max,
+            min: [m.min[0] as f64, m.min[1] as f64, m.min[2] as f64],
+            max: [m.max[0] as f64, m.max[1] as f64, m.max[2] as f64],
         })
         .collect())
 }

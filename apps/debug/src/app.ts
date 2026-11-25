@@ -2282,6 +2282,8 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
 	chatOverlay?.clear();
 	const proc = new BspProcessor(new Uint8Array(bytes)) as BspProcessor & SkyboxProcessorLike; const skyboxFaces = collectSkyboxFaces(proc, (v) => decode_vtf_to_png(v)); const fogParams = fogParamsFromEntities(proc.parse_entities()); const skyCamera = skyCameraFromEntities(proc.parse_entities()); const bundle = await buildWorldBundle(proc, {
 		colliderSource: config.physics.colliderSource ?? 'auto',
+		// T-D135：物理走 WSBW 二进制；线框 overlay 仍读 JSON 的 is_real_face/is_bevel。
+		colliderEncoding: 'both',
 		collectMissingTextures: true,
 		decompressMtz: decompress_mtz,
 		onProgress: (s) => setStatus(s, ''),
@@ -2322,6 +2324,8 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
 	const diag = (await rendererMain.loadScene(sceneData)) ?? null;
 	// 主线程物理世界（唯一物理渲染线）
 	rendererMain.buildPredictionWorld({
+		brushBin: bundle.brushBin,
+		triBin: bundle.triBin,
 		brushJson: bundle.brushJson,
 		triJson: bundle.triJson,
 		teleportJson: bundle.teleportJson,
@@ -2341,14 +2345,25 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
 	);
 	rendererMain.setPredictionNoclip(config.physics.mode === 'noclip');
 
-	// 权威 Worker：world-json 构建权威 PhysWorld（阶段 2：不再发 load-bsp，
-	// Worker 不解析 BSP）→ 出生点列表 → 双端参数 config
-	inputBridge.sendWorldJson({
-		brushJson: bundle.brushJson,
-		triJson: bundle.triJson,
-		teleportJson: bundle.teleportJson,
-		spawn: bundle.spawn,
-	});
+	// 权威 Worker：构建权威 PhysWorld（阶段 2：不再发 load-bsp，Worker 不解析 BSP）
+	// → 出生点列表 → 双端参数 config。T-D135 起优先 `world-bin`（WSBW 二进制 + transfer）；
+	// 二进制块必须**先**在主线程 buildPredictionWorld 用过（见上方），之后所有权全归 Worker。
+	if (bundle.brushBin && bundle.triBin) {
+		inputBridge.sendWorldBin({
+			brushBuf: bundle.brushBin,
+			triBuf: bundle.triBin,
+			teleportJson: bundle.teleportJson,
+			spawn: bundle.spawn,
+		});
+	} else {
+		// 老 wasm / 二进制导出失败：退回 JSON（builder 已保证 JSON 字段完整）。
+		inputBridge.sendWorldJson({
+			brushJson: bundle.brushJson,
+			triJson: bundle.triJson,
+			teleportJson: bundle.teleportJson,
+			spawn: bundle.spawn,
+		});
+	}
 	inputBridge.sendSetSpawnPoints(spawnList);
 	syncFullConfig();
 	// 死亡阈值重发：loadScene 时的消息早于 world-json 被 Worker 丢弃

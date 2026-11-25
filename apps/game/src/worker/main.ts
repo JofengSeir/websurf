@@ -8,7 +8,7 @@
  * - config 副本与参数映射（`syncParamsToWasm`：全部物理参数（含 D3 新增的 pushOut 两项）
  *   从 `config.physics` 取）；
  * - `initSync` 的 `{ module }` 包装形态转换（`apps/game/pkg/websurf_wasm.d.ts` 的胶水签名）；
- * - `world-json` 的 Worker 内诊断计时（`world-build-ms` / `world-parse-ms`）。
+ * - `world-json` / `world-bin` 的 Worker 内诊断计时（`world-build-ms` / `world-parse-ms`）。
  *
  * 角色不变：本 Worker 持有唯一权威 `PhysWorld`，由共享 `createAuthLoop` 以固定步长独立推进，
  * 每个步长向跨线程状态通道写一帧权威帧。主线程另持渲染物理实例（`predPhys`），两侧只经通道
@@ -44,11 +44,13 @@ function syncParamsToWasm(): void {
 }
 
 /**
- * 诊断用：本 Worker **收到** `world-json` 的时刻，`onWorldBuilt` 用它算出「解析 + build_world」
- * 的 Worker 内耗时。计时放在 Worker 内而不跨线程相减，是因为两端 `performance.now()` 基准不同、
- * 不可直接相减。
+ * 诊断用：本 Worker **收到**世界消息（`world-json` 或 T-D135 的 `world-bin`）的时刻，
+ * `onWorldBuilt` 用它算出「解析/解码 + build_world」的 Worker 内耗时。计时放在 Worker 内而不
+ * 跨线程相减，是因为两端 `performance.now()` 基准不同、不可直接相减。
  */
 let worldJsonRecvAt = 0;
+/** 与 `worldJsonRecvAt` 配对的负载形态：`json` 走两条 JSON.parse，`bin` 走 WSBW 解码。 */
+let worldBuildSource: 'json' | 'bin' = 'json';
 
 /** 共享 Worker 运行时：权威循环/分发/采样/健康守护都在共享层，这里只注入 game 的映射与诊断。 */
 const runtime = createWorkerRuntime({
@@ -67,11 +69,13 @@ const runtime = createWorkerRuntime({
   initSync: ((module: ArrayBuffer) =>
     initSync({ module } as unknown as ArrayBuffer)) as (module: ArrayBuffer) => void,
   hooks: {
-    /** 收到 `world-json` 之前记诊断起点（大 JSON 的解析耗时由本函数自己测）。 */
+    /** 收到世界消息之前记诊断起点（JSON 的解析耗时由本函数自己测；二进制无 JSON 解析）。 */
     onBeforeMessage: (data) => {
       const d = data as { type?: string; brushJson?: string; triJson?: string } | null;
-      if (d?.type !== 'world-json') return;
+      if (d?.type !== 'world-json' && d?.type !== 'world-bin') return;
       worldJsonRecvAt = performance.now();
+      worldBuildSource = d.type === 'world-bin' ? 'bin' : 'json';
+      if (d.type === 'world-bin') return;
       // 诊断（默认关闭，T-220）：大 JSON 的解析耗时（`JSON.parse` 代理测量）与 `world-build-ms`
       // 相减即得 build_world 的净耗时；`build_world` 内部会再解析一遍，故只有置
       // `globalThis.__vbspWorldParseTiming` 为 true 时才测。
@@ -89,7 +93,7 @@ const runtime = createWorkerRuntime({
       if (worldJsonRecvAt > 0) {
         const ms = performance.now() - worldJsonRecvAt;
         worldJsonRecvAt = 0;
-        postMessage({ type: 'world-build-ms', ms: +ms.toFixed(1) });
+        postMessage({ type: 'world-build-ms', ms: +ms.toFixed(1), source: worldBuildSource });
       }
     },
     /** 地图 convar（`sv_airaccelerate` / `sv_enablebunnyhopping` 等）落到 config 副本：

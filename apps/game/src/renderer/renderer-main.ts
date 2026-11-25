@@ -570,21 +570,36 @@ export class RendererMain {
 
   /** 建主线程物理世界（唯一物理线：世界 + 碰撞 + 输入 + 传送），并复位校准器与渲染采样流。 */
   buildPredictionWorld(world: {
+    /** WSBW 二进制块（T-D135）；两块同时存在时优先，缺省回退 JSON。 */
+    brushBin?: ArrayBuffer;
+    triBin?: ArrayBuffer;
     brushJson: string;
     triJson: string;
     teleportJson: string;
     spawn: { x: number; y: number; z: number; yawDeg: number };
   }): void {
     const phys = new PhysWorld();
-    phys.build_world(
-      world.brushJson,
-      world.triJson,
-      world.teleportJson,
-      world.spawn.x,
-      world.spawn.y,
-      world.spawn.z,
-      world.spawn.yawDeg,
-    );
+    if (world.brushBin && world.triBin) {
+      phys.build_world_binary(
+        new Uint8Array(world.brushBin),
+        new Uint8Array(world.triBin),
+        world.teleportJson,
+        world.spawn.x,
+        world.spawn.y,
+        world.spawn.z,
+        world.spawn.yawDeg,
+      );
+    } else {
+      phys.build_world(
+        world.brushJson,
+        world.triJson,
+        world.teleportJson,
+        world.spawn.x,
+        world.spawn.y,
+        world.spawn.z,
+        world.spawn.yawDeg,
+      );
+    }
     this.predPhys = phys;
     // 物理世界就绪后用 `MASK_SOLID` 口径重新截断 env_laser（共享会话持有光束对象）：
     // 零体积线段扫掠只认实体 brush，触发体 / nodraw / 水面天然被忽略。

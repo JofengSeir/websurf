@@ -43,6 +43,7 @@ import type {
   TeleportMessage,
   TeleportToPosMessage,
   WasmInitMessage,
+  WorldBinMessage,
   WorldJsonMessage,
 } from '../../../../src/ts-shared/auth/worker-protocol-types.js';
 
@@ -63,6 +64,7 @@ export type {
   TeleportMessage,
   TeleportToPosMessage,
   WasmInitMessage,
+  WorldBinMessage,
   WorldJsonMessage,
 };
 
@@ -126,13 +128,14 @@ export interface SetCullDistanceMessage {
   value: number;
 }
 
-/** 主线程 → Worker 的消息类型（23 项）。运行时另有 `set-mode` 与 `set-hold` 两条被
+/** 主线程 → Worker 的消息类型（24 项）。运行时另有 `set-mode` 与 `set-hold` 两条被
  *  分发层处理的消息（共享类型面已给出，见 `worker-protocol-types.ts`），本联合未收录。 */
 export type WorkerMessage =
   | WasmInitMessage
   | InitMessage
   | InputMessage
   | WorldJsonMessage
+  | WorldBinMessage
   | ConfigMessage
   | ResizeMessage
   | RespawnMessage

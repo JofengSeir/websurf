@@ -1,5 +1,5 @@
 /**
- * Worker 侧消息分发的共享实现：把 `wasm-init` / `init` / `world-json` / `config` / `respawn` /
+ * Worker 侧消息分发的共享实现：把 `wasm-init` / `init` / `world-json` / `world-bin` / `config` / `respawn` /
  * `sync-render-state` / `teleport` 等消息协议翻译成权威物理实例调用与注入钩子回调。
  *
  * ## 定位
@@ -18,13 +18,13 @@
  *   `src/ts-shared/wasm/loader.ts` 的字节获取原语。
  *
  * ## 关键不变量
- * 1. **wasm 先行**：`ready` 只由 `initWasm` 成功置位，`world-json` 在 `ready` 之前一律丢弃；
+ * 1. **wasm 先行**：`ready` 只由 `initWasm` 成功置位，`world-json` / `world-bin` 在 `ready` 之前一律丢弃；
  *    两工程都在加载地图之前发出 `wasm-init` 消息。
  * 2. **主实例恒在**：`env.phys` 是唯一必选实例槽；`tickPhys` / `scratch` 是可选并列槽，
  *    凡改动实例参数或状态的分支都在 `phys` 之后按同一实参同步它们，避免同一世界出现参数分叉。
  * 3. **死亡阈值、玩家名与水平速度上限跨世界重建存续**：`set-death-threshold` / `set-player-name` /
  *    `set-speed-cap` 的值由闭包
- *    变量记忆，`world-json` 重建实例后经 `reapplyDeathY` / `reapplyPlayerName` 重放（Rust 侧
+ *    变量记忆，`world-json` / `world-bin` 重建实例后经 `reapplyDeathY` / `reapplyPlayerName` 重放（Rust 侧
  *    这两个字段都不在种子面，重建即回默认值）。
  * 4. **幂等**：`authLoop.start()` 由 `loopStarted` 守卫只执行一次；`set-mode` 与当前模式
  *    相同时不调用 `onSetMode`，只回 `mode-ack`。
@@ -37,6 +37,8 @@
  * - 可选槽与可选钩子统一走可选链，未注入即对应能力面整体不激活。
  * - `initWasm` 是唯一异步分支：其 rejection 由 `wasm-init` 分支的 `.catch` 收敛为
  *   `{ type: 'error' }` 消息回传主线程，失败后 `ready` 保持 false。
+ * - `world-bin` 解码/建世界失败（含旧 wasm 缺 `build_world_binary`）不抛出到消息循环，
+ *   收敛为 `{ type: 'error' }`；此时三个实例已释放，等待下一条建世界消息重建。
  *
  * ## 测试归属
  * `src/ts-shared/auth/` 下没有与本文件同名的单测；行为覆盖落在 `apps/debug/scripts/` 的两个
@@ -132,7 +134,7 @@ export function normalizeConfigPatchKeys(patch: Record<string, unknown>): Record
 export interface WorkerDispatchEnv {
   /** 跨线程状态通道槽：`init` 消息写入 `createWorkerSharedState` 的结果，收到 `init` 之前为 `null`。 */
   shared: { current: ShmState | MsgState | null };
-  /** 权威 PhysWorld 槽：`world-json` 构建后写入；多个分支以它作前置真值判断。 */
+  /** 权威 PhysWorld 槽：`world-json` / `world-bin` 构建后写入；多个分支以它作前置真值判断。 */
   phys: { current: PhysWorldLike | null };
   /** 权威时钟：`world-json` 设步长并 reset，`initWasm` 成功后 start。 */
   authLoop: AuthLoop;
@@ -143,14 +145,14 @@ export interface WorkerDispatchEnv {
   /** 面板参数 → 权威 `set_params` / `set_hull`（经 `src/ts-shared/phys/params.ts` 的
    * `buildPhysicsParams` 映射）。调用点：`world-json` 尾部，以及非 `player` 段的 `config`。 */
   syncParamsToWasm(): void;
-  /** 新建权威实例（注入方 `new PhysWorld()`）。`world-json` 按已注入的槽调用一至三次。 */
+  /** 新建权威实例（注入方 `new PhysWorld()`）。两条建世界消息按已注入的槽调用一至三次。 */
   createPhysWorld(): PhysWorldLike;
   /** wasm 同步实例化。实参是字节缓冲（`Uint8Array.buffer`），不是胶水期望的 `{ module }`。 */
   initSync(module: ArrayBuffer): void;
   /** 消息发送（Worker → 主线程）。本文件只用它发 `error` 与 `mode-ack` 两种消息。 */
   post(msg: unknown): void;
   // ── 可选扩展槽与钩子（未注入 = 对应能力面整体不激活）────────────────────
-  /** 并列第二实例槽：`world-json` 与 `phys` 同建同参，状态与参数分支同步它。 */
+  /** 并列第二实例槽：建世界消息与 `phys` 同建同参，状态与参数分支同步它。 */
   tickPhys?: { current: PhysWorldLike | null };
   /** 并列第三实例槽：`world-json` 与 `phys` 同建同参，状态与参数分支同步它。
    * 本文件从不推进它（无 tick 调用），只按 `phys` 的同一实参同步。 */
@@ -330,6 +332,48 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
   };
 
   /** wasm 就绪标志：仅 `initWasm` 成功置位；`world-json` 以它作前置守卫。 */
+  /**
+   * 用同一份世界数据重建三个物理实例（主 / tick / scratch），并重放闭包记忆的全部状态。
+   *
+   * `load` 只负责把世界装进单个实例：`world-json` 传 `build_world(...)`，`world-bin` 传
+   * `build_world_binary(...)`。两条入站消息共用本流程，重放顺序只有一份，避免二进制路径漏掉
+   * 某个 `reapply*`（T-D135）。`spawnY` 由各消息的出生点提供，不在这里从实例回读。
+   */
+  const rebuildWorlds = (load: (p: PhysWorldLike) => void, spawnY: number): void => {
+    // 重建前释放旧实例：free 在 PhysWorldLike 上是可选成员，缺省的注入实现自然跳过
+    env.phys.current?.free?.();
+    env.tickPhys?.current?.free?.();
+    env.scratch?.current?.free?.(); // 第三实例随世界重建同步释放
+    const p = env.createPhysWorld();
+    load(p);
+    env.phys.current = p;
+    // 并列实例与主实例同建同参：同一份世界数据、同一出生点 ⇒ 切换时无需补建
+    if (env.tickPhys) {
+      const t = env.createPhysWorld();
+      load(t);
+      env.tickPhys.current = t;
+    }
+    // 第三实例同上（本文件不推进它，只保证参数与状态同源）
+    if (env.scratch) {
+      const sc = env.createPhysWorld();
+      load(sc);
+      env.scratch.current = sc;
+    }
+    env.syncParamsToWasm(); // 实例建好后重放参数（遍历范围由注入实现决定）
+    env.authLoop.setFixedDt(env.getConfigTickRate()); // 重建后同步当前面板步长
+    env.authLoop.reset();
+    reapplyDeathY(); // 重放记忆的死亡阈值，避免退回 Rust 侧默认值
+    reapplyPlayerName(); // 重放记忆的玩家名/门控开关（同上，不在种子面）
+    reapplySpeedCap(); // 重放记忆的手动水平速度上限（地图 sv_maxvelocity，同上）
+    reapplyJumpHeight(); // 重放记忆的起跳高度（跳跃增幅区，同上）
+    reapplyMapPhysicsParams(); // 重放记忆的地图物理参数（sv_airaccelerate 等，同上）
+    reapplyBrushSolid(); // 重放记忆的 brush 实心状态（门开合/wall_toggle，同上）
+    reapplyBrushOffset(); // 重放记忆的 brush 位移（电梯/移动平台，同上）
+    env.onWorldBuilt?.(p);
+    env.onWorldSpawn?.(spawnY, lastDeathY); // 出生点 Y + 已记忆的阈值（可为 null）
+    env.onWorldRebuilt?.(); // 世界重建完成（非 tick 场景由实现自行忽略）
+  };
+
   let ready = false;
   /** `authLoop.start()` 只允许执行一次的守卫。 */
   let loopStarted = false;
@@ -417,38 +461,40 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
         spawn: { x: number; y: number; z: number; yawDeg: number };
       };
       if (!ready) return; // wasm 未就绪：丢弃本消息（两工程都在加载地图前发 wasm-init）
-      // 重建前释放旧实例：free 在 PhysWorldLike 上是可选成员，缺省的注入实现自然跳过
-      env.phys.current?.free?.();
-      env.tickPhys?.current?.free?.();
-      env.scratch?.current?.free?.(); // 第三实例随世界重建同步释放
-      const p = env.createPhysWorld();
-      p.build_world(w.brushJson, w.triJson, w.teleportJson, w.spawn.x, w.spawn.y, w.spawn.z, w.spawn.yawDeg);
-      env.phys.current = p;
-      // 并列实例与主实例同建同参：同一份世界 JSON、同一出生点 ⇒ 切换时无需补建
-      if (env.tickPhys) {
-        const t = env.createPhysWorld();
-        t.build_world(w.brushJson, w.triJson, w.teleportJson, w.spawn.x, w.spawn.y, w.spawn.z, w.spawn.yawDeg);
-        env.tickPhys.current = t;
+      rebuildWorlds(
+        (p) => p.build_world(w.brushJson, w.triJson, w.teleportJson, w.spawn.x, w.spawn.y, w.spawn.z, w.spawn.yawDeg),
+        w.spawn.y,
+      );
+      return;
+    }
+    if (type === 'world-bin') {
+      // WSBW 二进制世界（T-D135）：teleport 仍是 JSON，两块缓冲区由主线程转移进来。
+      const w = msg as unknown as {
+        brushBuf: ArrayBuffer;
+        triBuf: ArrayBuffer;
+        teleportJson: string;
+        spawn: { x: number; y: number; z: number; yawDeg: number };
+      };
+      if (!ready) return; // 与 world-json 同守卫：wasm 未就绪时丢弃（缓冲区随之被 GC）
+      try {
+        rebuildWorlds((p) => {
+          if (typeof p.build_world_binary !== 'function') {
+            // 旧 wasm 没有该导出：报错而不是静默建空世界（协议版本号相同也可能换过 wasm）
+            throw new Error('当前 wasm 缺少 build_world_binary，请重建 wasm（world-bin 需要 WSBW 支持）');
+          }
+          p.build_world_binary(
+            new Uint8Array(w.brushBuf),
+            new Uint8Array(w.triBuf),
+            w.teleportJson,
+            w.spawn.x,
+            w.spawn.y,
+            w.spawn.z,
+            w.spawn.yawDeg,
+          );
+        }, w.spawn.y);
+      } catch (err) {
+        env.post({ type: 'error', message: `world-bin 建世界失败: ${String(err)}` });
       }
-      // 第三实例同上（本文件不推进它，只保证参数与状态同源）
-      if (env.scratch) {
-        const sc = env.createPhysWorld();
-        sc.build_world(w.brushJson, w.triJson, w.teleportJson, w.spawn.x, w.spawn.y, w.spawn.z, w.spawn.yawDeg);
-        env.scratch.current = sc;
-      }
-      env.syncParamsToWasm(); // 实例建好后重放参数（遍历范围由注入实现决定）
-      env.authLoop.setFixedDt(env.getConfigTickRate()); // 重建后同步当前面板步长
-      env.authLoop.reset();
-      reapplyDeathY(); // 重放记忆的死亡阈值，避免退回 Rust 侧默认值
-      reapplyPlayerName(); // 重放记忆的玩家名/门控开关（同上，不在种子面）
-      reapplySpeedCap(); // 重放记忆的手动水平速度上限（地图 sv_maxvelocity，同上）
-      reapplyJumpHeight(); // 重放记忆的起跳高度（跳跃增幅区，同上）
-      reapplyMapPhysicsParams(); // 重放记忆的地图物理参数（sv_airaccelerate 等，同上）
-      reapplyBrushSolid(); // 重放记忆的 brush 实心状态（门开合/wall_toggle，同上）
-      reapplyBrushOffset(); // 重放记忆的 brush 位移（电梯/移动平台，同上）
-      env.onWorldBuilt?.(p);
-      env.onWorldSpawn?.(w.spawn.y, lastDeathY); // 出生点 Y + 已记忆的阈值（可为 null）
-      env.onWorldRebuilt?.(); // 世界重建完成（非 tick 场景由实现自行忽略）
       return;
     }
     if (type === 'config') {

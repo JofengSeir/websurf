@@ -69,6 +69,7 @@ export type WorkerInboundType =
   | 'input'
   | 'wasm-init'
   | 'world-json'
+  | 'world-bin'
   | 'config'
   | 'respawn'
   | 'sync-render-state'
@@ -140,6 +141,22 @@ export interface WorldJsonMessage {
   type: 'world-json';
   brushJson: string;
   triJson: string;
+  teleportJson: string;
+  spawn: { x: number; y: number; z: number; yawDeg: number };
+}
+
+/**
+ * `world-bin`：世界数据改走 WSBW 二进制（T-D135）。`brushBuf` / `triBuf` 是**可转移**的
+ * `ArrayBuffer`（发送方 `postMessage` 时列入 transfer list，零拷贝交给 Worker）；接收侧用
+ * `new Uint8Array(buffer)` 包一层交给 `PhysWorld.build_world_binary`。teleport 仍是 JSON。
+ *
+ * 所有权：发送方必须在该缓冲区被 transfer **之前**先用它建好主线程世界，之后不得再读；
+ * transfer 后源缓冲区 `byteLength === 0`（detached），复用会立即报错。
+ */
+export interface WorldBinMessage {
+  type: 'world-bin';
+  brushBuf: ArrayBuffer;
+  triBuf: ArrayBuffer;
   teleportJson: string;
   spawn: { x: number; y: number; z: number; yawDeg: number };
 }
@@ -292,6 +309,7 @@ export type WorkerInboundMessage =
   | InitMessage
   | InputMessage
   | WorldJsonMessage
+  | WorldBinMessage
   | ConfigMessage
   | RespawnMessage
   | SyncRenderStateMessage

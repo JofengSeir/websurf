@@ -37,6 +37,7 @@ import type {
   TeleportMessage,
   TeleportToPosMessage,
   WasmInitMessage,
+  WorldBinMessage,
   WorldJsonMessage,
 } from '../../../../src/ts-shared/auth/worker-protocol-types.js';
 
@@ -59,19 +60,20 @@ export type {
   TeleportMessage,
   TeleportToPosMessage,
   WasmInitMessage,
+  WorldBinMessage,
   WorldJsonMessage,
 };
 
 // ── 主线程 → Worker：全部消息已收敛到共享类型面 ──────────────
 
-/** 主线程 → Worker 的联合类型：18 条全部来自
+/** 主线程 → Worker 的联合类型：19 条全部来自
  *  `src/ts-shared/auth/worker-protocol-types.ts` 的 `WorkerInboundMessage`，
  *  分派器 `createWorkerDispatch` 逐个 `type` 有对应分支。 */
 export type WorkerMessage =
   | WasmInitMessage | InitMessage
   | ConfigMessage | RespawnMessage
   | TeleportMessage | SetDeathThresholdMessage
-  | WorldJsonMessage | InputMessage
+  | WorldJsonMessage | WorldBinMessage | InputMessage
   | SyncRenderStateMessage | SetSpawnPointsMessage
   | TeleportToPosMessage | SetModeMessage
   | SetHoldMessage
@@ -261,10 +263,12 @@ export interface ModeAckMessage {
   appliedAtMs: number;
 }
 
-/** `world-build-ms`（Worker → 主线程）：`build_world` 段耗时诊断（主线程只打 console）。 */
+/** `world-build-ms`（Worker → 主线程）：`build_world` 段耗时诊断（主线程只打 console）。
+ *  `source` 区分世界负载形态（T-D135：`json` = 两条 JSON.parse，`bin` = WSBW 解码）。 */
 export interface WorldBuildMsMessage {
   type: 'world-build-ms';
   ms: number;
+  source?: 'json' | 'bin';
 }
 
 /** `world-parse-ms`（Worker → 主线程）：两个大 JSON 的解析耗时诊断（主线程只打 console）。 */

@@ -34,7 +34,7 @@
 //! 测试归属：`hull_bevel_tests`（3 项；含「撤掉生成必 FAIL」的成对断言）。
 
 use crate::phys::world::{cross, dot, sub, Plane, V3};
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 
 /// 平面判等的容差（VBSP `PlaneEqual(normal, dist, 0.01f, 0.01f)`；源码注释写明「碰撞面容差比
 /// 渲染面大」）。法线**逐分量**比较，与 `PlaneEqual` 同口径。
@@ -195,8 +195,10 @@ fn face_groups(vertices: &[V3], triangles: &[[u32; 3]]) -> Vec<FaceGroup> {
 
 /// 面内只出现一次的边（= 该面的 winding 边界）；面被三角化时对角线出现两次，自然被排除。
 fn face_boundary_edges(group: &FaceGroup) -> Vec<[u32; 2]> {
-    let mut seen: HashSet<[u32; 2]> = HashSet::new();
-    let mut twice: HashSet<[u32; 2]> = HashSet::new();
+    // 用有序集合：补面顺序必须可复现（HashSet 的迭代顺序每次进程/实例都不同，
+    // 会让同一份输入的平面顺序漂移，进而扰动接触求解）。
+    let mut seen: BTreeSet<[u32; 2]> = BTreeSet::new();
+    let mut twice: BTreeSet<[u32; 2]> = BTreeSet::new();
     for tri in &group.tris {
         for e in [[tri[0], tri[1]], [tri[1], tri[2]], [tri[2], tri[0]]] {
             let k = if e[0] < e[1] { e } else { [e[1], e[0]] };
@@ -288,7 +290,7 @@ pub fn hull_bevels(vertices: &[V3], triangles: &[[u32; 3]]) -> HullBevels {
     }
 
     // ---- edge bevel：非轴向边 × 6 个斜切轴面 ----
-    let mut edges: HashSet<[u32; 2]> = HashSet::new();
+    let mut edges: BTreeSet<[u32; 2]> = BTreeSet::new();
     for g in &groups {
         for e in face_boundary_edges(g) {
             edges.insert(e);
