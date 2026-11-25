@@ -220,13 +220,15 @@ const FEATURE_CLOSURE = {
  *  `__wasm_bindgen_unstable` 描述符没有 `#[used]`，存留是链接 GC 的副作用，随 workspace
  *  布局 / -C metadata 哈希变化，不是稳定契约）。features 推导差集不享受此豁免。 */
 const DEP_GRAPH_EXPORTS = { debug: ['ChromaSampling'], game: [], viewer: [] };
-/** `.wasm` 体积真基线（字节；task-81 在 36cf19a 的干净构建实测）与容忍度（±3% 区间）。
+/** `.wasm` 体积真基线（字节；D-131 在 wt/t-d131 的干净构建实测）与容忍度（±3% 区间）。
  *  下界与上界都判：体积异常变小通常意味着导出面/feature 被误删，与 ⑥ 的逐名基线互为补充。 */
-const WASM_SIZE_BASELINE = { debug: 4199231, game: 4036029, viewer: 3648919 };
+const WASM_SIZE_BASELINE = { debug: 4241462, game: 4083001, viewer: 3669980 };
 const WASM_SIZE_TOLERANCE = 0.03;
 /** pkg 导出面逐名基线（task-85 B4）。
  *  来源：task-81 在 36cf19a 的干净构建（`.tmp/verifyA/baseline-real/exports-real.json`），
- *  并在 HEAD 7c938b1 的当次 pkg 上复核一致（自由函数 11/6/5，wasm 契约导出 81/67/17）。
+ *  并在 HEAD 7c938b1 的当次 pkg 上复核一致（自由函数 11/6/5，wasm 契约导出 82/68/17；
+ *  D-131 移除 debug/game 两侧各 5 个零调用 PhysWorld 导出后，由当次构建实测复核；
+ *  移除前为 87/73）。
  *  - fns：`pkg/*.d.ts` 的 `export function` 名集；
  *  - wasmExports：`WebAssembly.Module.exports` 名集，剔除 `memory` 与 `__*`（wasm-bindgen
  *    内部脚手架，随工具链版本可能变化，不属于契约面）。
@@ -251,13 +253,13 @@ const PKG_EXPORT_BASELINE = {
       'physworld_add_velocity', 'physworld_brush_offset', 'physworld_brush_solid', 'physworld_build_world', 'physworld_debug_collide_attrib', 'physworld_debug_free_table',
       'physworld_debug_hull', 'physworld_debug_hull_stats', 'physworld_debug_line_trace', 'physworld_debug_normal_escape',
       'physworld_debug_position_probe', 'physworld_debug_stuck_probe', 'physworld_debug_trace', 'physworld_debug_tri_mesh_name',
-      'physworld_gate_veto_count', 'physworld_new', 'physworld_predict', 'physworld_respawn',
-      'physworld_seed_from', 'physworld_set_auto_restore_hull', 'physworld_set_brush_offset', 'physworld_set_brush_solid', 'physworld_set_death_y', 'physworld_set_hull',
+      'physworld_gate_veto_count', 'physworld_new', 'physworld_respawn',
+      'physworld_set_auto_restore_hull', 'physworld_set_brush_offset', 'physworld_set_brush_solid', 'physworld_set_death_y', 'physworld_set_hull',
       'physworld_set_jump_height', 'physworld_set_max_horizontal_speed', 'physworld_set_noclip', 'physworld_set_params',
       'physworld_set_push_velocity', 'physworld_set_spawn_points', 'physworld_set_state', 'physworld_set_state_ex',
-      'physworld_set_teleport_enabled', 'physworld_set_teleport_filter_enabled', 'physworld_set_teleport_player_name', 'physworld_set_velocity', 'physworld_set_yaw_pitch',
-      'physworld_state', 'physworld_state_full_json', 'physworld_state_out_ptr', 'physworld_take_event',
-      'physworld_teleport_enabled', 'physworld_teleport_to', 'physworld_teleport_to_spawn', 'physworld_tick', 'physworld_tick_into',
+      'physworld_set_teleport_enabled', 'physworld_set_teleport_filter_enabled', 'physworld_set_teleport_player_name', 'physworld_set_velocity',
+      'physworld_state', 'physworld_state_full_json', 'physworld_take_event',
+      'physworld_teleport_enabled', 'physworld_teleport_to', 'physworld_teleport_to_spawn', 'physworld_tick',
       'start',
     ],
   },
@@ -276,15 +278,15 @@ const PKG_EXPORT_BASELINE = {
       'physworld_brush_offset', 'physworld_brush_solid', 'physworld_build_world', 'physworld_debug_collide_attrib', 'physworld_debug_free_table', 'physworld_debug_hull',
       'physworld_debug_hull_stats', 'physworld_debug_line_trace', 'physworld_debug_normal_escape', 'physworld_debug_position_probe',
       'physworld_debug_stuck_probe', 'physworld_debug_trace', 'physworld_debug_tri_mesh_name', 'physworld_gate_veto_count',
-      'physworld_new', 'physworld_predict', 'physworld_respawn', 'physworld_seed_from',
+      'physworld_new', 'physworld_respawn',
       'physworld_set_auto_restore_hull', 'physworld_set_brush_offset', 'physworld_set_brush_solid', 'physworld_set_death_y', 'physworld_set_hull', 'physworld_set_jump_height',
       'physworld_set_max_horizontal_speed', 'physworld_set_noclip', 'physworld_set_params', 'physworld_set_push_velocity',
       'physworld_set_spawn_points', 'physworld_set_state', 'physworld_set_state_ex', 'physworld_set_teleport_enabled',
       'physworld_set_teleport_filter_enabled',
-      'physworld_set_teleport_player_name', 'physworld_set_velocity', 'physworld_set_yaw_pitch', 'physworld_state',
-      'physworld_state_full_json', 'physworld_state_out_ptr', 'physworld_take_event', 'physworld_teleport_enabled',
+      'physworld_set_teleport_player_name', 'physworld_set_velocity', 'physworld_state',
+      'physworld_state_full_json', 'physworld_take_event', 'physworld_teleport_enabled',
       'physworld_teleport_to',
-      'physworld_teleport_to_spawn', 'physworld_tick', 'physworld_tick_into',
+      'physworld_teleport_to_spawn', 'physworld_tick',
     ],
   },
   viewer: {

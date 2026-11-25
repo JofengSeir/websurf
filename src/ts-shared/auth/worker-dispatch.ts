@@ -6,8 +6,7 @@
  * 本文件是 Worker 线程的消息入口：`createWorkerDispatch` 的返回值直接挂到 `self.onmessage`
  * （或在工程侧包一层转发后再转交），主线程与权威物理实例之间的翻译全部收敛在这里。
  * 本文件不持有时钟、也不推进任何实例（全文没有 `tick` 调用）——推进属
- * `src/ts-shared/auth/auth-loop.ts` 的 `createAuthLoop` 与
- * `src/ts-shared/decoupled/decoupled-loop.ts`。
+ * `src/ts-shared/auth/auth-loop.ts` 的 `createAuthLoop`。
  *
  * ## 上下游
  * - 上游调用点：`apps/debug/src/worker/main.ts` 与 `apps/game/src/worker/main.ts` 各自在
@@ -53,8 +52,6 @@
  *   `start`。
  * - `src/ts-shared/auth/compute-mode.ts`：定义模式取值与交接矩阵；本文件只校验 `set-mode`
  *   的值域并透传。
- * - `src/ts-shared/decoupled/decoupled-loop.ts`：定义解耦循环本体；本文件只在世界重建、
- *   respawn、tickRate 变化三处调用它的方法。
  * - `src/ts-shared/wasm/loader.ts`：负责字节解码与 HTTP 取字节；本文件负责选分支并调用
  *   `initSync`。
  */
@@ -65,11 +62,10 @@ import { base64ToBytes, fetchWasmBytes } from '../wasm/loader.js';
 import type { AuthLoop, PhysWorldLike } from './auth-loop.js';
 import type { ComputeMode } from './compute-mode.js';
 import type {
-  DecoupledLoop,
   HoldState,
   SavePointLike,
   SyncRenderStateLike,
-} from '../decoupled/decoupled-loop.js';
+} from './worker-protocol-types.js';
 import { PANEL_TO_RUST } from '../phys/param-names.js';
 
 /** 物理参数键名归一表：`src/ts-shared/phys/params.ts` 的 `buildPhysicsParams` 产出的
@@ -159,8 +155,6 @@ export interface WorkerDispatchEnv {
   /** 并列第三实例槽：`world-json` 与 `phys` 同建同参，状态与参数分支同步它。
    * 本文件从不推进它（无 tick 调用），只按 `phys` 的同一实参同步。 */
   scratch?: { current: PhysWorldLike | null };
-  /** 解耦循环句柄：本文件调它的 `publishCurrentState` / `resetSamplers` / `onTickRateChanged`。 */
-  decoupledLoop?: DecoupledLoop;
   /** 当前计算模式（worker 侧真相源）。缺省时本文件的模式判断一律按 `'coupled'` 处理。 */
   getComputeMode?(): ComputeMode;
   /** `set-mode` 执行钩子：仅在消息 mode 通过三值校验**且与当前模式不同**时调用（同 mode
@@ -452,7 +446,6 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       reapplyMapPhysicsParams(); // 重放记忆的地图物理参数（sv_airaccelerate 等，同上）
       reapplyBrushSolid(); // 重放记忆的 brush 实心状态（门开合/wall_toggle，同上）
       reapplyBrushOffset(); // 重放记忆的 brush 位移（电梯/移动平台，同上）
-      env.decoupledLoop?.publishCurrentState(); // 立刻发布一帧，首帧状态即刻可见
       env.onWorldBuilt?.(p);
       env.onWorldSpawn?.(w.spawn.y, lastDeathY); // 出生点 Y + 已记忆的阈值（可为 null）
       env.onWorldRebuilt?.(); // 世界重建完成（非 tick 场景由实现自行忽略）
@@ -469,16 +462,12 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
           : c.patch;
       // 先更新自身 config 副本：面板值必须落在 worker 侧，否则后续读 tickRate 等字段会读到旧值
       env.applyConfigPatch(c.section, normalizedPatch);
-      // tickRate 的处理按模式分叉：解耦模式交给解耦循环处理激活边沿；其余模式改权威固定步长，
-      // 且只在步长**真变化**时清累积器——setFixedDt 步长未变返回 false，此时 reset 会丢掉
-      // 累积器余量。同一范式见 apps/debug/src/worker/main.ts 的 onTickRateChange。
+      // tickRate 的处理：改权威固定步长，且只在步长**真变化**时清累积器——setFixedDt 步长未变
+      // 返回 false，此时 reset 会丢掉累积器余量。同一范式见 apps/debug/src/worker/main.ts 的
+      // onTickRateChange。
       if (c.section === 'physics' && typeof normalizedPatch.tickRate === 'number') {
-        if ((env.getComputeMode?.() ?? 'coupled') === 'decoupled') {
-          env.decoupledLoop?.onTickRateChanged();
-        } else {
-          if (env.authLoop.setFixedDt(env.getConfigTickRate())) {
-            env.authLoop.reset(); // 仅步长真变化才清累积器（防新旧步长错配）
-          }
+        if (env.authLoop.setFixedDt(env.getConfigTickRate())) {
+          env.authLoop.reset(); // 仅步长真变化才清累积器（防新旧步长错配）
         }
       }
       if (c.section === 'player') {
@@ -510,18 +499,10 @@ export function createWorkerDispatch(env: WorkerDispatchEnv): (e: MessageEvent<u
       return;
     }
     if (type === 'respawn') {
-      // 重生到 build_world 时给定的初始出生点；检查点回退是独立消息（teleport-to-pos）
-      if ((env.getComputeMode?.() ?? 'coupled') === 'decoupled') {
-        // 解耦模式：主实例与第二实例一起重置（同建同参 ⇒ 同落出生点），并清采样器、发首帧
-        env.phys.current?.respawn();
-        env.tickPhys?.current?.respawn();
-        env.decoupledLoop?.resetSamplers(false);
-        env.decoupledLoop?.publishCurrentState();
-      } else {
-        // 其余模式：主实例 + 第三实例（第二实例留待模式切换时对齐）
-        env.phys.current?.respawn();
-        env.scratch?.current?.respawn(); // 第三实例同落出生点，保证种子同源
-      }
+      // 重生到 build_world 时给定的初始出生点；检查点回退是独立消息（teleport-to-pos）。
+      // 主实例 + 第三实例（第二实例留待模式切换时对齐）
+      env.phys.current?.respawn();
+      env.scratch?.current?.respawn(); // 第三实例同落出生点，保证种子同源
       env.tickExternalBreak?.(AUTH_EVT.respawn); // 外部驱动断点（非 tick 场景由实现忽略）
       return;
     }

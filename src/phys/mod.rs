@@ -23,25 +23,10 @@
 //!   都以 `path = "../../../../src"` 指到本目录。`apps/viewer` 是纯查看器，
 //!   其 `crates/wasm` 只依赖 `websurf-wasm-core`，不含 `websurf-phys`。
 //!
-//! 导出面：本文件 `#[wasm_bindgen] impl PhysWorld`共 **44 个 `pub fn`**（含 `new`）。
-//! 其中 `set_yaw_pitch`在 `apps/**` 与 `src/**` 内无任何调用点；
-//! `set_jump_height`只由 debug 宿主在「跳跃增幅区」（surf_null 的 `autohop_zone`）内调用；
-//! `predict`只被 `apps/game/scripts` 的两个验证脚本调用；
-//! `gate_veto_count`与 `debug_trace`同样只服务脚本；
+//! 导出面：本文件 `#[wasm_bindgen] impl PhysWorld`共 **41 个 `pub fn`**（含 `new`）。
+//! 其中 `set_jump_height`只由 debug 宿主在「跳跃增幅区」（surf_null 的 `autohop_zone`）内调用；
+//! `gate_veto_count`与 `debug_trace`只服务脚本；
 //! `debug_hull_stats`是 `.phy` 凸体转 brush 的统计出口（核对接线量级，只读）。
-//!
-//! 零分配支路（**当前未装配**）：`tick_into` 把状态写进本实例固定缓冲 `state_out`，
-//! JS 侧经 `state_out_ptr`在 wasm 线性内存上建 `Float64Array` 视图直读，不构造
-//! wasm→JS 对象。视图长度有两个口径：`tick-authority` 用满 22 槽
-//! （`src/ts-shared/auth/tick-authority.ts` 的 `authorityView` / `scratchView`），
-//! 解耦线只取前 8 槽（`src/ts-shared/decoupled/decoupled-loop.ts` 的 `outView`）
-//! ——因此 9-11 与 15-19 槽目前没有 TS 读取方。
-//! 该支路的唯一调用者是 `src/ts-shared/` 内两个控制器
-//! （`src/ts-shared/auth/tick-authority.ts` 的 `authority.tick_into` 与
-//! `src/ts-shared/decoupled/decoupled-loop.ts` 的 `phys.tick_into`），
-//! 而这两个控制器在三个工程内都没有装配点
-//! （`createTickAuthority` 仅被其单测调用），故线上路径走的是 `tick()` 返回对象。
-//! wasm 内存增长后 `memory.buffer` 会更换，视图必须按 `state_out_ptr` 重建。
 //!
 //! 边界：本模块只做状态推进与读取。不做 BSP 解析、不导出 GLB、不碰渲染；
 //! 实例与实例之间不共享可变状态，唯一跨实例可变量是诊断计数器
@@ -154,9 +139,7 @@ pub struct PhysPlane {
 
 /// 物理事件，经 `take_event`一次性取走。
 /// 消费方：`apps/debug` 渲染线的事件循环（`apps/debug/src/renderer/renderer-main.ts` 的
-/// `RendererMain.consumePhysEvents`，驱动计时挑战）与
-/// `src/ts-shared/auth/tick-authority.ts`（`publishMeta` / `onWake` 两处取走）；
-/// `apps/game` 侧未消费。
+/// `RendererMain.consumePhysEvents`，驱动计时挑战）；`apps/game` 侧未消费。
 #[derive(Clone, Debug)]
 pub enum PhysEvent {
     /// 传送触发（目标点信息）。
@@ -186,7 +169,7 @@ pub struct PhysWorld {
     /// noclip 自由视角开关。置位后 `step_core`改走 `noclip_step`：
     /// **位置由本实例自行推进**，不走碰撞、不触发传送与死亡。
     noclip: bool, auto_restore_hull: bool, // 后者：卡死（离地判定）时自动恢复默认碰撞箱，debug 面板开关（T-310）
-    /// 是否已成功执行过 `build_world`。为 false 时 `tick` / `tick_into` / `predict` 直接返回现状。
+    /// 是否已成功执行过 `build_world`。为 false 时 `tick` 直接返回现状。
     ready: bool,
     /// `build_world` 里 `.phy` 凸体转 brush 的统计（只读诊断，`debug_hull_stats` 出口）：
     /// `[转成 brush 的块数, 生成的 box bevel 张数, 生成的 edge bevel 张数, 退回三角形路径的块数]`。
@@ -203,23 +186,6 @@ pub struct PhysWorld {
     /// 地图 `logic_auto` 的 `sv_maxvelocity` 经 `set_max_horizontal_speed` 覆盖（surf_666 写的是 10000）。
     /// `<= 0` 表示关闭钳制（调试用）。
     max_horizontal_speed: f64,
-    /// 零分配输出缓冲：`tick_into` 的唯一状态出口，JS 侧经 `state_out_ptr` 在 wasm
-    /// 线性内存上建 `Float64Array` 视图直读，不构造 wasm→JS 对象。
-    ///
-    /// 槽位（定长 22；只追加不改既有槽序，故 0-7 的老消费方不受影响）：
-    /// - 0-2 `origin` x/y/z（HU）；3-5 `velocity` x/y/z（HU/s）；6 `yaw`、7 `pitch`（度）
-    /// - 8 `ducked`(0/1)；9 `duck_frac`；10 `ground_ticks_since_landing`(tick)；
-    ///   11 `contact_ticks`(tick)；12 `surfing`(0/1)；13 `blocked_ticks`(tick)；
-    ///   14 `on_ladder` 的梯子索引（不在梯子上为 -1）；15 `fall_velocity`(HU/s)；
-    ///   16-18 `landing_velocity` x/y/z（HU/s）；19 `has_jumped_before`(0/1)
-    /// - 20 `eye_height()`（HU）；21 `on_ground`(0/1)
-    ///
-    /// 当前消费口径：解耦线只建 8 槽视图
-    /// （`src/ts-shared/decoupled/decoupled-loop.ts` 的 `outView`）；
-    /// `tick-authority` 建 22 槽视图但只读 0-8、12-14、20、21
-    /// （`src/ts-shared/auth/tick-authority.ts` 的 `fillPoseFromView`）——
-    /// 因此 9-11 与 15-19 目前没有 TS 读取方。
-    state_out: [f64; 22],
 }
 
 /// `PhysWorld::new` 的对偶：与构造函数的空实例逐字段相同（不加载任何地图数据、
@@ -236,7 +202,7 @@ impl PhysWorld {
     /// 死亡线 `-100000`。
     ///
     /// **不加载任何地图数据** —— 世界由随后的 `build_world` 建立。在 `build_world`
-    /// 之前 `tick` / `tick_into` 只返回当前（默认）状态，不做物理推进。
+    /// 之前 `tick` 只返回当前（默认）状态，不做物理推进。
     #[wasm_bindgen(constructor)]
     pub fn new() -> PhysWorld {
         PhysWorld {
@@ -252,7 +218,6 @@ impl PhysWorld {
             hull_stats: [0; 4],
             event: None,
             max_horizontal_speed: 5000.0,
-            state_out: [0.0; 22],
         }
     }
 
@@ -438,10 +403,7 @@ impl PhysWorld {
         Ok(())
     }
 
-    /// 推进一个步长，返回**新构造的状态对象**。
-    ///
-    /// 与 `tick_into` 完全同语义（同一个 `step_core`），差别只在出口：本方法经
-    /// `state_js` 写 JS 对象（10 个字段），`tick_into` 写固定缓冲。
+    /// 推进一个步长，返回**新构造的状态对象**（经 `state_js` 写 10 个字段）。
     /// 本方法不累加时间、不补步、不做固定步长节流——`dt` 完全由调用方给出。
     ///
     /// 未 `build_world` 时直接返回当前状态，不推进物理。
@@ -459,40 +421,6 @@ impl PhysWorld {
         Ok(self.state_js())
     }
 
-    /// 零分配推进：与 `tick` 完全同语义（同一个 `step_core`），但状态写进本实例的
-    /// `state_out` 固定缓冲，**不构造任何 wasm→JS 对象**。
-    ///
-    /// JS 侧用法：`new Float64Array(memory.buffer, phys.state_out_ptr(), n)` 后按槽读；
-    /// 槽位表见 `state_out` 字段文档。写入分两段：0-7 由本方法直写，
-    /// 8-21 由 `fill_state_out` 写。
-    ///
-    /// wasm 内存增长后 `memory.buffer` 会换新对象、旧视图 detach，视图须按
-    /// `state_out_ptr` 重建。未 `build_world` 时直接返回、不写缓冲。
-    pub fn tick_into(&mut self, dt: f64, keys_mask: u32, dx: f64, dy: f64) {
-        if !self.ready {
-            return;
-        }
-        self.step_core(dt, keys_mask, dx, dy);
-        let p = &self.player;
-        let o = &mut self.state_out;
-        o[0] = p.origin[0];
-        o[1] = p.origin[1];
-        o[2] = p.origin[2];
-        o[3] = p.velocity[0];
-        o[4] = p.velocity[1];
-        o[5] = p.velocity[2];
-        o[6] = p.yaw;
-        o[7] = p.pitch;
-        fill_state_out(p, o);
-    }
-
-    /// `state_out` 在 wasm 线性内存中的字节地址，供 JS 建 `Float64Array` 视图。
-    /// 地址在实例存活期内不变；wasm 线性内存增长时 `memory.buffer` 会被替换成新对象，
-    /// 故视图重建的判据是"重新取一次本地址"，而不是复用旧 buffer 对象。
-    pub fn state_out_ptr(&self) -> usize {
-        self.state_out.as_ptr() as usize
-    }
-
     // -----------------------------------------------------------------------
     // 种子面 v2：整实例状态的可序列化投影，实现在 `phys::seed`
     // （`extract_seed` / `apply_seed` 互逆一对）。本文件只负责 JSON 边界与借用规则。
@@ -506,7 +434,6 @@ impl PhysWorld {
     /// 事件槽不参与播种——事件不可播种。
     ///
     /// 只写本实例：不读自身其余状态做决策、不触碰其他实例。
-    /// 同模块内的零序列化复制请改用 `seed_from`（无 JSON 文本往返）。
     /// 9 参 `set_state`的签名与语义不受本方法影响。
     pub fn set_state_ex(&mut self, json: &str) -> Result<(), JsValue> {
         let s: seed::SeedState =
@@ -524,21 +451,6 @@ impl PhysWorld {
     pub fn state_full_json(&self, include_event: bool) -> Result<String, JsValue> {
         serde_json::to_string(&self.extract_seed(include_event))
             .map_err(|e| to_js_err(e, "state_full_json"))
-    }
-
-    /// 零序列化种子通道：把 `src` 的全部种子字段逐字段拷进本实例（f64 直接拷贝，
-    /// 位级精确，不经过 JSON 文本）。事件不复制——事件不可播种。
-    ///
-    /// 种子覆盖面即 `seed::SeedState` 的字段集：运动主态（origin/velocity/yaw/pitch/
-    /// on_ground/ground_normal）、蹲伏态（ducked/duck_frac）、梯子与 surf 态、
-    /// 计时器与诊断位、InputState、四组碰撞箱、传送冷却与 `triggers_inside`。
-    /// **不在种子面**：`world` / `params` / `spawn` / `spawn_points` / `death_y` /
-    /// `ready` / `noclip` —— 这些属构建期或宿主配置，要求两实例同图构建后才天然一致。
-    ///
-    /// 方向是 `src` → `self`，`src` 只读借用，不会被本方法改动。
-    pub fn seed_from(&mut self, src: &PhysWorld) -> Result<(), JsValue> {
-        let s = src.extract_seed(false);
-        self.apply_seed(&s).map_err(|e| JsValue::from_str(&e))
     }
 
     /// 诊断计数：盒-AABB 门校验被否决的次数（进程内单调递增，无复位入口）。
@@ -820,7 +732,7 @@ impl PhysWorld {
         out
     }
 
-    /// `tick` / `tick_into` 共用的核心步进：
+    /// `tick` 的核心步进：
     /// 输入 → 角度 → （noclip 分支 ｜ 传送/死亡/reset → 碰撞移动）。
     ///
     /// 角度写入必须排在 `player_tick` 之前 —— 移动方向由玩家 yaw 决定，
@@ -836,7 +748,7 @@ impl PhysWorld {
         if self.noclip {
             noclip_step(&mut self.player, dt, &self.params);
         } else {
-            // 传送检测（权威才检测；predict 禁用；surfing 滑行不触发）
+            // 传送检测（surfing 滑行不触发）
             if let Some(dest) = self.teleport.check(
                 &self.player.origin,
                 self.player.contact_ticks,
@@ -874,32 +786,6 @@ impl PhysWorld {
             player_tick(&mut self.world, &mut self.player, &self.params, dt); self.maybe_restore_hull();
             self.clamp_horizontal_speed();
         }
-    }
-
-    /// 轻量预测步：走一次 `player_tick`（**一次调用 = 一个子步**），但不经 `step_core`——
-    /// 即不检测传送、不判死亡、不处理 `reset` 键；noclip 下直接返回现状。
-    ///
-    /// 需要多个子步就调用多次（`apps/game/scripts/phys-smoke.mjs`（已随 T-653 移除）的 `predict` 即连调两次）；
-    /// 本方法内部不再细分 `dt`。返回新构造的状态对象。
-    ///
-    /// 当前无生产调用方：只有 `apps/game/scripts/phys-smoke.mjs`（已随 T-653 移除）与 `phys-dual-pipe.mjs`（已移除）在用。
-    pub fn predict(
-        &mut self,
-        dt: f64,
-        keys_mask: u32,
-        dx: f64,
-        dy: f64,
-    ) -> Result<JsValue, JsValue> {
-        if !self.ready || self.noclip {
-            return Ok(self.state_js());
-        }
-        apply_input(&mut self.player, keys_mask);
-        self.player.yaw -= dx * (self.params.sensitivity * player::M_YAW);
-        self.player.pitch -= dy * (self.params.sensitivity * player::M_YAW);
-        self.player.pitch = clamp_pitch(self.player.pitch);
-        self.clamp_horizontal_speed();
-        player_tick(&mut self.world, &mut self.player, &self.params, dt);
-        Ok(self.state_js())
     }
 
     /// 把玩家放回初始出生点 `spawn`，并复位传送冷却。
@@ -970,8 +856,7 @@ impl PhysWorld {
     /// 只覆盖速度（HU/s）：位置、朝向、着地均不动。
     /// 供"位置不覆盖、仅用速度渐进对齐"的校准路径使用，避免改写位置造成视觉跳变。
     /// 消费方：`src/ts-shared/phys/authority-calibrator.ts` 的
-    /// `correctFromAuthority` / `calibrateVelocity`，
-    /// 与 `src/ts-shared/decoupled/decoupled-loop.ts` 的 `alignTickPhys`。
+    /// `correctFromAuthority` / `calibrateVelocity`。
     pub fn set_velocity(&mut self, vx: f64, vy: f64, vz: f64) {
         self.player.velocity = [vx, vy, vz];
     }
@@ -1164,7 +1049,7 @@ impl PhysWorld {
     /// 跳高、离开时发回默认值（见 `apps/debug/src/renderer/renderer-main.ts`）。
     ///
     /// 只影响**之后**的起跳初速，不改当前速度/位置/姿态；`<= 0` 或非有限值忽略。
-    /// 不在种子面里（`seed_from` 不携带）——它属于宿主配置，世界重建后由宿主重放。
+    /// 不在种子面里（`set_state_ex` / `state_full_json` 不携带）——它属于宿主配置，世界重建后由宿主重放。
     pub fn set_jump_height(&mut self, height: f64) {
         if height.is_finite() && height > 0.0 {
             self.params.jump_height = height;
@@ -1215,15 +1100,6 @@ impl PhysWorld {
     /// 退回「碰到就传」的旧行为；供 `__vbspTeleportFilterOff` 逃生舱使用。
     pub fn set_teleport_filter_enabled(&mut self, enabled: bool) {
         self.teleport.filter_enabled = enabled;
-    }
-
-    /// 只覆盖 yaw / pitch（度）：位置、速度、着地均不动。
-    ///
-    /// **当前无调用方**：`apps/**` 与 `src/**` 内都没有 `set_yaw_pitch` 调用点，
-    /// 只在 `apps/debug/src/wasm.d.ts` 的 `PhysWorld.set_yaw_pitch` 有一行类型声明。是否保留在导出契约内需 owner 决定。
-    pub fn set_yaw_pitch(&mut self, yaw: f64, pitch: f64) {
-        self.player.yaw = yaw;
-        self.player.pitch = pitch;
     }
 
     /// 设置死亡 Y 阈值（HU）：`origin.y` 低于该值即在下一个非 noclip 步被判掉落死亡。
@@ -1335,8 +1211,7 @@ impl PhysWorld {
     /// 返回当前状态的 JS 对象。字段固定 11 项：`posX/posY/posZ`（HU）、
     /// `yaw`/`pitch`（度）、`velX/velY/velZ`（HU/s）、`onGround`、`contactTicks`、`eyeHeight`（HU）。
     ///
-    /// **不含时间戳**——帧时间由调用方自行记录；也不含蹲伏/滑行等扩展位（那些只在
-    /// `state_out` 的 8-19 槽里）。每次调用都新建对象，热路径请改用 `tick_into`。
+    /// **不含时间戳**——帧时间由调用方自行记录；不含蹲伏/滑行等扩展位。每次调用都新建对象。
     pub fn state(&self) -> JsValue {
         self.state_js()
     }
@@ -1349,8 +1224,7 @@ impl PhysWorld {
     /// - `{ kind: 'death' }`
     ///
     /// `apps/game` 侧不消费本方法；调用方是 debug 渲染线
-    /// （`apps/debug/src/renderer/renderer-main.ts` 的 `RendererMain.consumePhysEvents`）
-    /// 与 `src/ts-shared/auth/tick-authority.ts` 的 `publishMeta`。
+    /// （`apps/debug/src/renderer/renderer-main.ts` 的 `RendererMain.consumePhysEvents`）。
     pub fn take_event(&mut self) -> JsValue {
         match self.event.take() {
             Some(PhysEvent::Teleport {
@@ -1392,8 +1266,8 @@ impl PhysWorld {
 }
 
 impl PhysWorld {
-    /// 把 `player` 的当前值写成一个**新建**的 JS 对象，是 `tick` / `predict` / `state`
-    /// 三个导出方法的共同出口。字段集固定 11 项（含调试用的 `contactTicks`），见 `state`
+    /// 把 `player` 的当前值写成一个**新建**的 JS 对象，是 `tick` / `state`
+    /// 两个导出方法的共同出口。字段集固定 11 项（含调试用的 `contactTicks`），见 `state`
     /// （`pub fn state`）的文档。
     fn state_js(&self) -> JsValue {
         let p = &self.player;
@@ -1622,26 +1496,6 @@ fn compute_ladder_facing(planes: &[world::Plane]) -> [f64; 3] {
         fz = 1.0;
     }
     [fx, 0.0, fz]
-}
-
-/// 写 `state_out` 的 8-21 槽（槽位含义见 `PhysWorld::state_out` 字段文档）。
-/// 槽 0-7 不在这里写 —— `tick_into` 自己直写那 8 个槽。
-/// 只读 `player`、不推进物理、不改任何状态。
-fn fill_state_out(p: &Player, o: &mut [f64; 22]) {
-    o[8] = if p.ducked { 1.0 } else { 0.0 };
-    o[9] = p.duck_frac;
-    o[10] = p.ground_ticks_since_landing as f64;
-    o[11] = p.contact_ticks as f64;
-    o[12] = if p.surfing { 1.0 } else { 0.0 };
-    o[13] = p.blocked_ticks as f64;
-    o[14] = p.on_ladder.map(|i| i as f64).unwrap_or(-1.0);
-    o[15] = p.fall_velocity;
-    o[16] = p.landing_velocity[0];
-    o[17] = p.landing_velocity[1];
-    o[18] = p.landing_velocity[2];
-    o[19] = if p.has_jumped_before { 1.0 } else { 0.0 };
-    o[20] = p.eye_height();
-    o[21] = if p.on_ground { 1.0 } else { 0.0 };
 }
 
 /// 卡死时自动恢复默认碰撞箱：`set_auto_restore_hull` 置位后，`step_core` 每步末尾检查

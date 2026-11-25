@@ -2,13 +2,10 @@
  * 计算模式：三值枚举 + 双线互斥门谓词 + 模式切换交接矩阵。
  *
  * ## 定位
- * `ComputeMode` 的唯一定义处（`src/ts-shared/decoupled/decoupled-loop.ts` 以
- * `export type { ComputeMode }` 原样再导出同一类型）。消费点：
- * - `src/ts-shared/auth/auth-loop.ts`：用 `isAuthLineMode` 作缺省模式门（`resolveAuthGateOpen`）；
+ * `ComputeMode` 的唯一定义处。消费点：
+ * - `src/ts-shared/auth/worker-protocol-types.ts`：`SetModeMessage.mode` 的三值联合；
  * - `src/ts-shared/auth/worker-dispatch.ts`：用 `ComputeMode` 做 `set-mode` 消息的三值白名单校验，
- *   并只在模式确实变化时调用 `onSetMode` 钩子；
- * - `src/ts-shared/auth/compute-mode.test.ts`（已随 T-653 移除）：断言两个谓词互斥、矩阵每行的两个 `*After`
- *   字段等于对 `to` 调谓词的结果、四向 tick 行齐备。
+ *   并只在模式确实变化时调用 `onSetMode` 钩子。
  *
  * ## 两条线互斥
  * `coupled` 与 `tick` 由 auth 线推进，`decoupled` 由解耦线推进；两个谓词对任一模式
@@ -17,8 +14,7 @@
  * ## 接线现状（实测）
  * `src/ts-shared` 之外没有装配点：`apps/**` 内没有 `compute-mode` 的 import，没有发送
  * `set-mode` 消息的代码，也没有注入 `getComputeMode` / `onSetMode` 钩子。因此
- * `worker-dispatch.ts` 与 `auth-loop.ts` 里的 `?? 'coupled'` 兜底始终生效，
- * 线上行为等同于 `coupled` 模式。
+ * `worker-dispatch.ts` 里的 `?? 'coupled'` 兜底始终生效，线上行为等同于 `coupled` 模式。
  *
  * ## 本文件无运行时状态
  * 只有两个纯谓词、一个纯换算函数与一张常量矩阵；不持有计时器、不读共享内存、不做 IO。

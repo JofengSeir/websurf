@@ -1,7 +1,7 @@
 //! 种子面 v2：`PhysWorld` 整实例状态的可序列化投影（`SEED_SCHEMA_VERSION = 2`）。
 //!
-//! 位置：本模块是 `mod.rs` 三个导出方法的实现体 —— `set_state_ex` 走 JSON 写、
-//! `state_full_json` 走 JSON 读、`seed_from` 走进程内的逐字段直拷（不经 JSON 文本）。
+//! 位置：本模块是 `mod.rs` 两个导出方法的实现体 —— `set_state_ex` 走 JSON 写、
+//! `state_full_json` 走 JSON 读。
 //! 本文件的 `extract_seed` / `apply_seed` 都是 `pub(crate)`，不进 wasm 导出面。
 //!
 //! 一对互逆方法的契约：
@@ -9,8 +9,7 @@
 //!   `self.player` 的同名字段，另加 `self.teleport` 的两个私有值
 //!   （`cooldown_value()` / `trigger_inside_vec()`）；`event` 只在 `include_event` 为真时带上。
 //! - `apply_seed(&mut self, s)` 只写 `self`：先三项校验（`v` / `triggers_inside` 长度 /
-//!   `on_ladder` 上界），再逐字段写 `Player`，再写 `teleport` 的两个隐藏值与事件槽，
-//!   最后把 `state_out` 预填成与状态一致（0-7 槽直写，8-21 槽交 `super::fill_state_out`）。
+//!   `on_ladder` 上界），再逐字段写 `Player`，再写 `teleport` 的两个隐藏值与事件槽。
 //!   三项校验全部排在第一次赋值之前 —— 任一 `Err` 返回时本实例零改动。
 //!
 //! 覆盖面：`SeedState` 共 32 字段 = `Player` 的 28 个字段逐项镜像 + `v`
@@ -35,13 +34,13 @@
 //!
 //! 字段在下一步的落点（逐条按源码核过，明细见各字段注）：
 //! 运动主态与蹲伏态是下一步的输入；`ground_normal` 在模拟内无读取点（摘取它的只有 `extract_seed`）；
-//! `input` 的 10 个布尔在 `tick` / `tick_into` / `predict` 入口被 `apply_input` 按键位掩码
-//! 整组覆写，故播种值不影响这三个入口的下一步；`prev_origin` / `prev_speed` 在 `player_tick`
+//! `input` 的 10 个布尔在 `tick` 入口被 `apply_input` 按键位掩码
+//! 整组覆写，故播种值不影响该入口的下一步；`prev_origin` / `prev_speed` 在 `player_tick`
 //! 开头被就地重赋，故播种值不跨 tick 存活；`contact_ticks` 与 `surfing` 的跨 tick 读取点都在
 //! 传送门（`TeleportManager::check` 的 grounded 判据与滑行早退）；`teleport_cooldown` 被同一个
 //! `check` 的冷却早退分支读取；`triggers_inside` 只经 `trigger_inside_vec()` 读出。
 //!
-//! 消费形态：`set_state_ex`（JSON 文本）或 `seed_from`（零序列化直拷）。
+//! 消费形态：`set_state_ex`（JSON 写）/ `state_full_json`（JSON 读）。
 //! 方向恒为 `src` → `self`：`extract_seed` 借 `&self`，`apply_seed` 只改 `self`。
 
 use super::{PhysEvent, PhysWorld};
@@ -90,7 +89,7 @@ pub(crate) struct SeedState {
     /// 模拟内没有读取点，摘取它的只有 `extract_seed`。
     surfed_since_grounded: bool,
     /// 落地冲击量。`player_tick` 末尾按 `(1 - 10·dt).max(0)` 指数衰减，没有分支读它；
-    /// 导出侧不进 `state_out`，只进种子面。
+    /// 只进种子面。
     land_punch: f64,
     /// 上一 tick 的跳跃键（`player_tick` 末尾由 `input.jump` 重赋）。
     /// 两个读点：地面起跳的边沿判定（该读点只在 `params.autobhop == false` 时改变分支结果）
@@ -100,33 +99,32 @@ pub(crate) struct SeedState {
     /// 梯上跳离时置 0.25。
     ladder_cooldown: f64,
     /// 下落速度（离地分支写入 `-velocity[1]`，上梯与着地时清零）。
-    /// crate 内没有分支读它；`fill_state_out` 把它写进 `state_out` 第 15 槽。
+    /// crate 内没有分支读它。
     fall_velocity: f64,
     /// 落地后经过的 tick 数。写点：落地瞬间清零、地面 tick 自增、`respawn` 清零。
-    /// 读点：`duck_frac` 的"落地 tick 即时置位"判据与 `state_out` 第 10 槽。
+    /// 读点：`duck_frac` 的"落地 tick 即时置位"判据。
     ground_ticks_since_landing: u32,
     /// 接触帧计数。只在 `categorize_position` 判定为可站面（法线 y ≥ `STANDABLE_NORMAL`
     /// 的实心命中）时自增，上升（`velocity[1] > NON_JUMP_VELOCITY`）与离地时清零。
     /// 跨 tick 读取点是传送门：`check` 以 `ground_ticks > 0` 判 grounded，
     /// A 路径的斜面 gap 与 B 路径的脚底下探都依赖它；`step_core` 传入的正是本字段，
-    /// 另外 `state_js` 的 `contactTicks` 与 `state_out` 第 11 槽也各导出一次。
+    /// 另外 `state_js` 的 `contactTicks` 也导出一次。
     contact_ticks: u32,
-    /// 是否起跳过。起跳置位、`respawn` 清零；crate 内没有分支读它，
-    /// 导出侧只进 `state_out` 第 19 槽。
+    /// 是否起跳过。起跳置位、`respawn` 清零；crate 内没有分支读它。
     has_jumped_before: bool,
-    /// 落地瞬间的速度快照。crate 内没有分支读它；导出侧进 `state_out` 第 16-18 槽。
+    /// 落地瞬间的速度快照。crate 内没有分支读它。
     landing_velocity: [f64; 3],
     /// 冻结计数。`detect_blocked_move` 在"离地 + 速度 > 150 + 位移 < 0.05"时自增，
     /// 累到 6 即清零速度并复位，任一条件不满足也清零。
-    /// 读点：该 `>= 6` 判据与 `state_out` 第 13 槽。
+    /// 读点：该 `>= 6` 判据。
     blocked_ticks: u32,
     /// 卡死计数。`check_stuck` 三处写：位置本就空闲清零、挤出成功清零、彻底卡死自增。
-    /// 除上述自增与 `extract_seed` 外没有读取点，也不进 `state_out`。
+    /// 除上述自增与 `extract_seed` 外没有读取点。
     stuck_ticks: u32,
 
     /// `InputState` 的 10 个布尔镜像（与 `player.rs` 的 `InputState` 同名同序）。
-    /// **时效**：`tick` / `tick_into` / `predict` 都在步进前用 `apply_input` 按键位掩码
-    /// 整组覆写这 10 个值，故播种值不影响这三个入口的下一步；
+    /// **时效**：`tick` 在步进前用 `apply_input` 按键位掩码整组覆写这 10 个值，
+    /// 故播种值不影响该入口的下一步；
     /// 其中 `reset` 位在 `step_core` 内被消费为重生命令，`yaw_left` / `yaw_right`
     /// 只被 `noclip_step` 读取。
     input: SeedInput,
@@ -143,8 +141,7 @@ pub(crate) struct SeedState {
     /// 本 tick 起点位置。`player_tick` 开头重赋后在 `detect_blocked_move` 里与当前位置比较；
     /// `mod.rs` 的 `apply_teleport` / `set_state` 也会把它同步到新位置。
     prev_origin: [f64; 3],
-    /// 本 tick 起点 3D 速度。`player_tick` 开头重赋；模拟内无读取点（`extract_seed` 会摘取它），
-    /// 导出侧也不进 `state_out`。
+    /// 本 tick 起点 3D 速度。`player_tick` 开头重赋；模拟内无读取点（`extract_seed` 会摘取它）。
     prev_speed: f64,
 
     // ---- `PhysWorld` 隐藏面（不属于 `Player`）----
@@ -159,7 +156,7 @@ pub(crate) struct SeedState {
     /// 长度必须等于本实例触发器数量，否则 `Err`。
     triggers_inside: Vec<bool>,
     /// 可选事件槽。缺省 / `null` → 写回时把本实例事件槽清空；显式给出 → 装入该事件。
-    /// 常规种子链（`state_full_json(false)` 与 `seed_from`）取 `extract_seed(false)`，
+    /// 常规种子链（`state_full_json(false)`）取 `extract_seed(false)`，
     /// `event` 恒为 None，故链上不携带事件、且写入端会清空目标实例的事件槽；
     /// `include_event = true` 才导出当前待取事件。
     event: Option<SeedEvent>,
@@ -306,7 +303,7 @@ impl PhysWorld {
     /// 单向写入：种子 → 本实例（只写 `self`，不读自身其余状态做决策）。
     /// 顺序：① `v` 校验 → ② `triggers_inside` 长度校验 → ③ `on_ladder` 上界校验 →
     /// ④ 逐字段写 `Player` → ⑤ 写 `teleport` 的 cooldown 与 inside 位 →
-    /// ⑥ 事件槽（缺省即清空）→ ⑦ 预填 `state_out`。
+    /// ⑥ 事件槽（缺省即清空）。
     /// ①②③ 都在第一次赋值之前，故任一 `Err` 返回时本实例零改动。
     pub(crate) fn apply_seed(&mut self, s: &SeedState) -> Result<(), String> {
         if s.v != SEED_SCHEMA_VERSION {
@@ -385,18 +382,6 @@ impl PhysWorld {
             },
             SeedEvent::Death => PhysEvent::Death,
         });
-        // 预填 state_out：写入完成即让输出缓冲与状态一致（0-7 槽直写，8-21 槽交 fill_state_out）。
-        // tick_into 每 tick 全量覆写这 22 个槽。
-        let o = &mut self.state_out;
-        o[0] = p.origin[0];
-        o[1] = p.origin[1];
-        o[2] = p.origin[2];
-        o[3] = p.velocity[0];
-        o[4] = p.velocity[1];
-        o[5] = p.velocity[2];
-        o[6] = p.yaw;
-        o[7] = p.pitch;
-        super::fill_state_out(p, o);
         Ok(())
     }
 }

@@ -11,9 +11,6 @@
  * `pub const`，改成运行时参数会同时改动物理层接口与 wasm 导出面。
  *
  * 消费方（都通过 import 取值，没有字面量副本）：
- * - `src/ts-shared/decoupled/decoupled-loop.ts`、`src/ts-shared/tick/tick-consumer.ts`
- *   用作首帧/慢字段兜底
- * - `src/ts-shared/auth/shared-state.protocol.test.ts`（已随 T-653 移除） 用作协议断言基准
  * - `apps/game/src/renderer/renderer-main.ts` 用作 eyeHeight 兜底
  * - `apps/viewer/src/core/constants.ts` 再导出，供该工程的 `pose.ts` / `fly.ts` 使用
  * - `apps/game/scripts/phys-smoke.mjs`（已随 T-653 移除） **直接正则解析本文件源码**取常量值做容差断言

@@ -55,10 +55,7 @@ const EXPORT_API = [
 const PHYS_API = [
   'build_world',
   'tick',
-  'tick_into',
-  'predict',
   'state',
-  'state_out_ptr',
   'respawn',
   'teleport_to',
   'teleport_to_spawn',
@@ -69,7 +66,6 @@ const PHYS_API = [
   'set_noclip',
   'set_state',
   'set_velocity',
-  'set_yaw_pitch',
 ];
 
 const read = readDtsApiNames({ dtsPath: DTS });

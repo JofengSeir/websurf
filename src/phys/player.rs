@@ -2,8 +2,8 @@
 //! （地面/空中移动、扫掠碰撞与平面剪裁、台阶、蹲伏、梯子、卡死挤出）。
 //!
 //! 上下游位置：
-//! - 上游（驱动）：`src/phys/mod.rs` 的 `PhysWorld::step_core` 每步调一次 `player_tick`；
-//!   轻量预测路径 `PhysWorld::predict` 直调同一函数。`player::create_player`（`PhysWorld::new`
+//! - 上游（驱动）：`src/phys/mod.rs` 的 `PhysWorld::step_core` 每步调一次 `player_tick`。
+//!   `player::create_player`（`PhysWorld::new`
 //!   与 `PhysWorld::build_world` 两处调用）建玩家、`player::apply_hull`（`PhysWorld::set_hull`
 //!   调用）改碰撞箱，是本模块仅有的构造与改箱入口。
 //! - 下游（几何查询）：所有碰撞问题都交给 `world::World` —— 扫掠追踪 `World::trace`、
@@ -88,11 +88,11 @@ pub const OVERBOUNCE_SURF: f64 = 1.0;
 /// 避免下一帧再次命中同一面。可站面与墙面都走这一支。
 pub const OVERBOUNCE_DEFAULT: f64 = 1.001;
 
-/// 每像素鼠标的偏航角（度/像素）。**本文件不读它** —— `src/phys/mod.rs` 的 `step_core` / `predict`
+/// 每像素鼠标的偏航角（度/像素）。**本文件不读它** —— `src/phys/mod.rs` 的 `step_core`
 /// 用它乘 `params.sensitivity` 把鼠标增量折算成角度。
 pub const M_YAW: f64 = 0.022;
 /// pitch 的绝对值上限（度）。**本文件不读它** —— 钳制发生在 `src/phys/mod.rs` 的
-/// `step_core` / `predict`，本模块收到的 pitch 已是钳制后的值。
+/// `step_core`，本模块收到的 pitch 已是钳制后的值。
 pub const PITCH_CLAMP: f64 = 89.0;
 
 /// 默认碰撞箱半宽（HU），x/z 两轴共用；`PhysParams::hull_half_width` 的默认值。
@@ -196,7 +196,7 @@ pub struct PhysParams {
     pub autobhop: bool,
     /// true = 起跳前把水平速度钳到 `current_max_speed × BHOP_MAX_SPEED_FACTOR`。
     pub bhop_speed_clamp: bool,
-    /// 鼠标灵敏度倍率。**本文件不读它** —— `src/phys/mod.rs` 的 `step_core` / `predict` 用它乘 `M_YAW`。
+    /// 鼠标灵敏度倍率。**本文件不读它** —— `src/phys/mod.rs` 的 `step_core` 用它乘 `M_YAW`。
     pub sensitivity: f64,
     /// Q/E 转向速度（度/秒）。**只有 `noclip_step` 读它**：常规移动的 `compute_wish` 与
     /// `ladder_move` 都不看 `input.yaw_left` / `yaw_right`。
@@ -291,7 +291,7 @@ pub struct InputState {
 }
 
 /// 单个玩家的全部可推进状态（字段全 `pub`：`mod.rs` 的 `step_core` 直接读写，
-/// `state_js` / `fill_state_out` 直接读，`seed.rs` 逐字段收发）。
+/// `state_js` 直接读，`seed.rs` 逐字段收发）。
 ///
 /// 没有 `Default`：唯一构造入口是 `create_player`，且它返回前一定调过 `apply_hull`，
 /// 所以不存在箱体未初始化的 `Player`。`yaw` / `pitch` 不在构造参数里，
@@ -342,7 +342,7 @@ pub struct Player {
     /// （仅在 > 0 时），`check_ladder` 在 > 0 期间直接返回 None。`respawn` **不复位**它。
     pub ladder_cooldown: f64,
     /// 下落速度（HU/s，正 = 下落）：空中分支每 tick 写 `−velocity.y`，落地与上梯清零。
-    /// 本文件内无读取方，唯一消费点是 `state_out` 第 15 槽（`src/phys/mod.rs` 的 `fill_state_out`）。
+    /// 本文件内无读取方。
     pub fall_velocity: f64,
     /// 落地后经过的地面 tick 数：落地当帧由 `categorize_position` 清 0，地面分支每 tick 自增。
     /// `player_tick` 末尾的 `duck_frac` 更新用 `== 0` 识别"落地当帧"（该帧视角瞬时置位）。
@@ -350,20 +350,19 @@ pub struct Player {
     /// 可站面接触帧计数：判据与落地一致（`normal.y >= STANDABLE_NORMAL` 且 `fraction < 1.0`
     /// 且非 `start_solid`），**贴坡滑行不算接触** —— surfing 期间该值恒为 0。
     /// 未接触可站面、或上升速超过 `NON_JUMP_VELOCITY` 时清零；累加用 `saturating_add`。
-    /// 消费点：`src/phys/mod.rs` 的 `step_core` 传送检测（作 `grounded` 判据）
-    /// 与 `fill_state_out` 第 11 槽。
+    /// 消费点：`src/phys/mod.rs` 的 `step_core` 传送检测（作 `grounded` 判据）。
     pub contact_ticks: u32,
     /// 自上次重生以来是否起跳过（`check_jump` 置 true、`respawn` 清 false，**落地不复位**）。
-    /// 本文件内无读取方，只进 `state_out` 第 19 槽（`src/phys/mod.rs` 的 `fill_state_out`）。
+    /// 本文件内无读取方。
     pub has_jumped_before: bool,
     /// 落地瞬间的速度快照：仅在 `categorize_position` 的"上一 tick 还在空中"分支里写。
-    /// 只进 `state_out` 第 16-18 槽（`src/phys/mod.rs` 的 `fill_state_out`），本文件内不消费。
+    /// 本文件内不消费。
     pub landing_velocity: V3,
     /// 连续"位置处于实心内"的 tick 数：`check_stuck` 里挤出成功即清零，彻底卡死才自增。
     /// 本文件内无读取方（只进种子面）。
     pub stuck_ticks: u32,
     /// 连续"有速度却几乎没位移"的 tick 数（`detect_blocked_move`）：到 6 就把速度清零并归零。
-    /// 进 `state_out` 第 13 槽（`src/phys/mod.rs` 的 `fill_state_out`）。
+    /// 本文件内不读它做分支。
     pub blocked_ticks: u32,
 
     /// 本步的按键状态。`src/phys/mod.rs` 的 `apply_input` 每步覆盖写一次。
@@ -421,7 +420,7 @@ impl Player {
     ///
     /// **不做钳制**：`duck_frac` 超出 [0, 1] 时线性外推（种子通道可以给出越界值）。
     /// 纯读函数：不写任何状态、不推进 `duck_frac`（推进在 `player_tick` 末尾）。
-    /// 消费方是 `src/phys/mod.rs` 的 `state_js`（`eyeHeight` 字段）与 `fill_state_out` 第 20 槽。
+    /// 消费方是 `src/phys/mod.rs` 的 `state_js`（`eyeHeight` 字段）。
     pub fn eye_height(&self) -> f64 {
         let stand = EYE_STAND * (self.stand_maxs[1] / DEFAULT_HULL_STAND_HEIGHT);
         let duck = EYE_DUCK * (self.duck_maxs[1] / DEFAULT_HULL_DUCK_HEIGHT);
@@ -1300,7 +1299,7 @@ fn categorize_position(world: &mut World, p: &mut Player) {
     let single_plane_standable =
         tr.fraction < 1.0 && !tr.start_solid && tr.normal.is_some_and(|n| n[1] >= STANDABLE_NORMAL);
 
-    // 接触计数：真正落地才累加。两个消费方（传送检测的 grounded 判据、state_out 第 11 槽）
+    // 接触计数：真正落地才累加。消费方是传送检测的 grounded 判据。
     // 要的都是"站在可站面上"，不是"碰到任何面"，故贴坡滑行（法线落在 0.05~0.7）不计接触。
     if multi_probe_standable || single_plane_standable {
         let was_airborne = !p.on_ground;
@@ -1327,7 +1326,7 @@ fn categorize_position(world: &mut World, p: &mut Player) {
         }
         if was_airborne {
             p.ground_ticks_since_landing = 0;
-            // 落地瞬间的速度快照（只在 was_airborne 时写；对外只经 state_out 16-18 槽）
+            // 落地瞬间的速度快照（只在 was_airborne 时写；对外只经种子面）
             p.landing_velocity = p.velocity;
         }
         p.fall_velocity = 0.0;
@@ -1686,8 +1685,7 @@ pub fn create_player(origin: V3, params: &PhysParams) -> Player {
 /// 反复调用（`src/phys/mod.rs` 的 `step_core` 每步一次）。
 ///
 /// **不含**传送检测、掉落死亡与 `reset` 键重生 —— 三者在 `src/phys/mod.rs` 的 `step_core`
-/// 里执行，且排在调用本函数**之前**；`PhysWorld::predict` 路径没有这三步，
-/// 所以按 `reset` 在预测线上只清标志、不重生。
+/// 里执行，且排在调用本函数**之前**。
 ///
 /// 副作用：几乎整个 `Player` 都会被写（位置、速度、姿态、各计时器与计数器）；
 /// `World` 只被读取（`trace` / `is_position_free` / `ladder_at`）。

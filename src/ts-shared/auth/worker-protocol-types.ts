@@ -17,7 +17,51 @@
  *   `keyof RuntimeConfig`，共享面按分派器实际读取放宽为 `string`。
  */
 import type { ComputeMode } from './compute-mode.js';
-import type { HoldState, SavePointLike, SyncRenderStateLike } from '../decoupled/decoupled-loop.js';
+
+/** 主线程同步渲染态的结构等价声明（10 字段）。字段与
+ * `src/ts-shared/phys/authority-calibrator.ts` 的 `SyncRenderState` 逐一同名同类型；
+ * 本文件不导入校准器模块，两端按结构兼容。消费点：`SetModeMessage.state` 与
+ * `worker-dispatch.ts` 的 `onSetMode(mode, state)` 形参。 */
+export interface SyncRenderStateLike {
+  posX: number;
+  posY: number;
+  posZ: number;
+  yaw: number;
+  pitch: number;
+  velX: number;
+  velY: number;
+  velZ: number;
+  onGround: boolean;
+  eyeHeight: number;
+}
+
+/** 存点全量恢复形状的结构等价声明。与 `apps/game/src/savepoint.ts` 的 `SavePoint`
+ * 同字段，差别只在 `t`：本声明可选，那边的 `SavePoint.t` 是必需的时间戳（列表排序用）。
+ * 消费点：`SetHoldMessage.release` 与 `worker-dispatch.ts` 的
+ * `onSetHold(hold, release)` 形参。 */
+export interface SavePointLike {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  pitch: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  onGround: boolean;
+  t?: number;
+}
+
+/** `set-hold` 消息注入的冻结态。字段与 `src/ts-shared/auth/auth-loop.ts` 的
+ * `HoldSnapshot` 逐一同名同类型——两端各就地声明、不做模块间类型依赖。 */
+export interface HoldState {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  pitch: number;
+  onGround: boolean;
+}
 
 /** 共享分派器认识的入站 `type` 字面量全集（判别用；消息接口见下方各 interface）。 */
 export type WorkerInboundType =
