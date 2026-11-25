@@ -157,8 +157,9 @@ void main() {
 `;
 
 /**
- * 灯光晕光片元 + 视角方向性炫光：背对灯头暗淡（灯罩遮挡感），侧面柔和，
- * 沿照射方向正对灯头时触发强白芯核、水平镜头拉丝与十字星芒（进入 BloomPostFx 触发真实泛光）。
+ * 灯光晕光片元 + 视角方向性炫光（仿真实光学镜头炫光）：
+ * - 不被墙面/地面深度截成半圆（由 SpotBeamRig 节流 LOS 射线控制可见性平滑淡入淡出，depthTest=false）；
+ * - 不进 BloomPostFx 防止糊成过曝白球（vbspNoGlow=true），在片元内直接绘制锐利针尖芯、6 瓣星芒、水平拉丝与边缘色散月牙弧。
  */
 const GLARE_VERT = `
 uniform vec3 uSpotDir;
@@ -177,8 +178,8 @@ void main() {
 	float onAxis = smoothstep(0.42, 0.995, vFacing);
 	vGlare = onAxis * onAxis;
 	vCamFade = smoothstep(0.0, ${SHADEOUT_DISTANCE.toFixed(1)}, dist);
-	float distBoost = clamp(dist / 360.0, 0.85, 2.2);
-	float scale = uBaseSize * (0.65 + 0.35 * max(0.0, vFacing) + 1.85 * vGlare * distBoost);
+	float distBoost = clamp(dist / 320.0, 0.75, 1.55);
+	float scale = uBaseSize * (0.65 + 0.25 * max(0.0, vFacing) + 1.15 * vGlare * distBoost);
 	vec4 mv = viewMatrix * worldOrigin;
 	mv.xy += position.xy * scale;
 	gl_Position = projectionMatrix * mv;
@@ -188,31 +189,51 @@ void main() {
 const GLARE_FRAG = `
 uniform vec3 uColor;
 uniform float uGain;
+uniform float uVis;
 varying vec2 vUv;
 varying float vFacing;
 varying float vGlare;
 varying float vCamFade;
 void main() {
+	if (uVis <= 0.002) discard;
 	vec2 p = vUv * 2.0 - 1.0;
 	float r2 = dot(p, p);
 	if (r2 >= 1.0) discard;
+	float r = sqrt(r2);
 	float edge = 1.0 - r2;
-	float halo = (0.55 * exp(-r2 * 7.0) + 0.45 * exp(-r2 * 2.1)) * edge * edge;
-	float core = exp(-r2 * 28.0) * edge;
-	float streak = exp(-p.y * p.y * 85.0) * exp(-p.x * p.x * 3.8) * edge;
-	float star = exp(-abs(p.x) * 26.0) * exp(-abs(p.y) * 5.0)
-		+ exp(-abs(p.y) * 26.0) * exp(-abs(p.x) * 5.0);
-	star *= edge * edge;
-	float backDim = mix(0.14, 0.45, smoothstep(-0.25, 0.35, vFacing));
-	float intensity = uGain * vCamFade * (
-		halo * (backDim + 1.15 * vGlare)
-		+ core * (0.18 + 1.65 * vGlare)
-		+ (streak * 0.42 + star * 0.22) * vGlare
-	);
-	if (intensity <= 0.001) discard;
-	float hot = clamp(core * (0.35 + 0.65 * vGlare) + vGlare * 0.35 * halo, 0.0, 1.0);
-	vec3 tint = mix(uColor, vec3(1.0), hot);
-	gl_FragColor = vec4(tint * intensity, 1.0);
+	float edge2 = edge * edge;
+
+	// 1. 针尖白热芯 + 克制的内外柔晕（不再糊成大白球）
+	float pinpoint = exp(-r2 * 180.0);
+	float halo = exp(-r2 * 16.0) * 0.28 + exp(-r2 * 3.0) * edge2 * 0.14;
+
+	// 2. 六瓣光学衍射星芒（正对光轴时显现）
+	float ang = atan(p.y, p.x);
+	float ray6 = pow(abs(cos(ang * 3.0 + 0.35)), 22.0)
+		+ pow(abs(cos(ang * 3.0 - 0.17)), 32.0) * 0.55;
+	float rays = ray6 * exp(-r * 3.4) * smoothstep(0.01, 0.08, r) * edge;
+
+	// 3. 水平变形镜头拉丝
+	float streak = exp(-p.y * p.y * 55.0) * exp(-p.x * p.x * 2.4) * edge;
+
+	// 4. 左右边缘色散月牙弧（chromatic crescent lens arcs）
+	float sideMask = smoothstep(0.15, 0.75, abs(p.x)) * exp(-p.y * p.y * 3.5) * edge;
+	vec3 arcRgb = vec3(
+		exp(-pow((r - 0.54) * 14.0, 2.0)),
+		exp(-pow((r - 0.58) * 14.0, 2.0)),
+		exp(-pow((r - 0.62) * 14.0, 2.0))
+	) * sideMask * 0.28;
+
+	float backDim = mix(0.12, 0.42, smoothstep(-0.25, 0.35, vFacing));
+	float baseTerm = halo * (backDim + 0.45 * vGlare) + pinpoint * (0.35 + 1.05 * vGlare);
+	float opticalTerm = (rays * 0.68 + streak * 0.42) * vGlare;
+
+	vec3 baseTint = mix(uColor, vec3(1.0), clamp(pinpoint * 0.88 + halo * 0.18 * vGlare, 0.0, 1.0));
+	vec3 rayTint = mix(uColor, vec3(0.88, 0.94, 1.0), 0.55);
+	vec3 col = baseTint * baseTerm + rayTint * opticalTerm + arcRgb * mix(uColor, vec3(1.0), 0.35) * vGlare;
+	col *= uGain * vCamFade * uVis;
+	if (max(col.r, max(col.g, col.b)) <= 0.002) discard;
+	gl_FragColor = vec4(col, 1.0);
 }
 `;
 
@@ -231,6 +252,9 @@ interface RigEntry {
 	baseDir: THREE.Vector3;
 	length: number;
 	ancestors: number[];
+	visTarget: number;
+	visCurrent: number;
+	lastCheckAt: number;
 }
 
 interface AncestorMeta {
@@ -265,10 +289,72 @@ export class SpotBeamRig {
 	private readonly tmpEuler = new THREE.Euler(0, 0, 0, 'XYZ');
 	private readonly tmpQuat = new THREE.Quaternion();
 	private readonly upAxis = new THREE.Vector3(0, 1, 0);
+	private readonly raycaster = new THREE.Raycaster();
+	private readonly camForward = new THREE.Vector3();
+	private readonly tmpTarget = new THREE.Vector3();
+	private readonly tmpRayDir = new THREE.Vector3();
+	private cursor = 0;
+	private lastOcclAt = 0;
 
 	/** @internal 装配期登记一条射灯实例。 */
 	addEntry(entry: RigEntry): void {
 		this.entries.push(entry);
+	}
+
+	/** 节流视线遮挡检测（每帧最多 2 次射线，每盏 ≥55ms 复查一次），驱动炫光平滑淡入淡出而非被地板硬切。 */
+	updateOcclusion(camera: THREE.Camera, root: THREE.Object3D | null, nowMs: number): void {
+		const dt = this.lastOcclAt > 0 ? Math.min(0.1, (nowMs - this.lastOcclAt) / 1000) : 1 / 60;
+		this.lastOcclAt = nowMs;
+		const len = this.entries.length;
+		if (len === 0) return;
+
+		camera.getWorldPosition(this.tmpPos);
+		camera.getWorldDirection(this.camForward);
+		let checks = 0;
+		for (let step = 0; step < len; step++) {
+			const idx = (this.cursor + step) % len;
+			const entry = this.entries[idx];
+			if (!entry.glare.visible) {
+				entry.visTarget = 0;
+				continue;
+			}
+			const gp = entry.glare.position;
+			const dx = gp.x - this.tmpPos.x;
+			const dy = gp.y - this.tmpPos.y;
+			const dz = gp.z - this.tmpPos.z;
+			const distSq = dx * dx + dy * dy + dz * dz;
+			const fwd = dx * this.camForward.x + dy * this.camForward.y + dz * this.camForward.z;
+			if (distSq > 4500 * 4500 || fwd <= 0) {
+				entry.visTarget = 0;
+				continue;
+			}
+			if (root && checks < 2 && nowMs - entry.lastCheckAt >= 55) {
+				entry.lastCheckAt = nowMs;
+				checks++;
+				this.cursor = (idx + 1) % len;
+				const sd = entry.spot.direction;
+				this.tmpTarget.set(gp.x + sd[0] * 4, gp.y + sd[1] * 4, gp.z + sd[2] * 4);
+				this.tmpRayDir.subVectors(this.tmpTarget, this.tmpPos);
+				const dist = this.tmpRayDir.length();
+				if (dist <= 8) {
+					entry.visTarget = 1;
+				} else {
+					this.tmpRayDir.divideScalar(dist);
+					this.raycaster.set(this.tmpPos, this.tmpRayDir);
+					this.raycaster.near = 1;
+					this.raycaster.far = dist - 6;
+					const hits = this.raycaster.intersectObject(root, true);
+					entry.visTarget = hits.length > 0 ? 0 : 1;
+				}
+			}
+		}
+
+		const alpha = 1 - Math.exp(-dt * 18.0);
+		for (const entry of this.entries) {
+			entry.visCurrent += (entry.visTarget - entry.visCurrent) * alpha;
+			const glareMat = entry.glare.material as THREE.ShaderMaterial;
+			if (glareMat.uniforms?.uVis) glareMat.uniforms.uVis.value = entry.visCurrent;
+		}
 	}
 
 	/** 载入实体清单后解析每盏射灯的父子层级（根祖先 → 直接父级）。 */
@@ -502,7 +588,7 @@ export function buildSpotBeams(spots: PunctualSpot[], root: THREE.Object3D | nul
 		beam.visible = !startsOff;
 		group.add(beam);
 
-		// 灯头光学炫光（Mesh 走 GLOW_LAYER 泛光，正对光轴时触发强耀斑/拉丝/星芒）。
+		// 灯头光学炫光（depthTest=false + 节流 LOS uVis 遮挡 + vbspNoGlow 保留锐利星芒与色散月牙弧）。
 		const glareGeo = new THREE.BufferGeometry();
 		glareGeo.setAttribute(
 			'position',
@@ -519,14 +605,15 @@ export function buildSpotBeams(spots: PunctualSpot[], root: THREE.Object3D | nul
 			uniforms: {
 				uColor: { value: color },
 				uSpotDir: { value: axis.clone() },
-				uBaseSize: { value: Math.max(22, Math.min(54, (s.beamWidth ?? 75) * 0.48)) },
+				uBaseSize: { value: Math.max(28, Math.min(64, (s.beamWidth ?? 75) * 0.55)) },
 				uGain: { value: 1.0 },
+				uVis: { value: 1.0 },
 			},
 			vertexShader: GLARE_VERT,
 			fragmentShader: GLARE_FRAG,
 			transparent: true,
 			depthWrite: false,
-			depthTest: true,
+			depthTest: false,
 			blending: THREE.AdditiveBlending,
 			side: THREE.DoubleSide,
 			fog: false,
@@ -534,7 +621,8 @@ export function buildSpotBeams(spots: PunctualSpot[], root: THREE.Object3D | nul
 		const glare = new THREE.Mesh(glareGeo, glareMat);
 		glare.position.copy(origin);
 		glare.frustumCulled = false;
-		glare.renderOrder = 11;
+		glare.renderOrder = 15;
+		glare.userData.vbspNoGlow = true;
 		glare.visible = !startsOff;
 		group.add(glare);
 
@@ -547,6 +635,9 @@ export function buildSpotBeams(spots: PunctualSpot[], root: THREE.Object3D | nul
 			baseDir: axis.clone(),
 			length,
 			ancestors: [],
+			visTarget: 1,
+			visCurrent: 1,
+			lastCheckAt: 0,
 		});
 	}
 
