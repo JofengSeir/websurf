@@ -85,6 +85,7 @@ static_assertions::const_assert_eq!(size_of::<AnimationDescriptionHeader>(), 100
 pub struct AnimationDescription {
     pub name: String,
     pub fps: f32,
+    pub flags: i32,
     pub frame_count: usize,
     pub animations: Vec<Animation>,
 }
@@ -121,6 +122,7 @@ impl ReadRelative for AnimationDescription {
         Ok(AnimationDescription {
             name: read_single(data, header.name_offset)?,
             fps: header.fps,
+            flags: header.flags,
             frame_count: header.frame_count as usize,
             animations,
         })
@@ -215,10 +217,10 @@ struct FrameValues<'a> {
 }
 
 impl<'a> FrameValues<'a> {
-    pub fn get(&self, index: u8) -> Result<u16, ModelError> {
+    pub fn get(&self, index: u8) -> Result<i16, ModelError> {
         if self.header.total <= index {
-            let offset_count = self.header.valid + 1;
-            let offset = (offset_count as usize) * size_of::<u16>();
+            let offset_count = (self.header.valid as usize) + 1;
+            let offset = offset_count * size_of::<i16>();
             let next_header: ValueHeader = read_single(self.data, offset)?;
             let next = FrameValues {
                 header: next_header,
@@ -229,12 +231,15 @@ impl<'a> FrameValues<'a> {
             }
             next.get(index - self.header.total)
         } else {
+            if self.header.valid == 0 {
+                return Ok(0);
+            }
             let offset_count = if self.header.valid > index {
-                index + 1
+                (index as usize) + 1
             } else {
-                self.header.valid
+                self.header.valid as usize
             };
-            let offset = (offset_count as usize) * size_of::<u16>();
+            let offset = offset_count * size_of::<i16>();
             read_single(self.data, offset)
         }
     }
@@ -295,11 +300,10 @@ impl RotationData {
     fn set_scale(&mut self, scale: Vector) {
         if let RotationData::Animated(values) = self {
             values.iter_mut().for_each(|value| {
-                // scale and fixup the angles
                 *value = RadianEuler {
-                    y: value.x * scale.x,
-                    z: value.y * scale.y,
-                    x: value.z * scale.z,
+                    x: value.x * scale.x,
+                    y: value.y * scale.y,
+                    z: value.z * scale.z,
                 }
             });
         }
@@ -361,6 +365,56 @@ impl Animation {
         self.rotation_data.set_scale(bone.rot_scale);
         self.position_data.set_scale(bone.pos_scale);
     }
+
+    pub fn raw_rotation_quat(&self, frame: usize, bone: &Bone) -> Option<[f32; 4]> {
+        if self.flags.contains(AnimationFlags::STUDIO_ANIM_DELTA) {
+            return None;
+        }
+        match &self.rotation_data {
+            RotationData::Quaternion48(q) | RotationData::Quaternion64(q) => {
+                let len = (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w).sqrt();
+                if len > 1e-6 {
+                    Some([q.x / len, q.y / len, q.z / len, q.w / len])
+                } else {
+                    Some([0.0, 0.0, 0.0, 1.0])
+                }
+            }
+            RotationData::Animated(values) => {
+                let d = values
+                    .get(frame)
+                    .or_else(|| values.last())
+                    .copied()
+                    .unwrap_or_default();
+                Some(crate::shared::radian_euler_to_quat_zup(RadianEuler {
+                    x: bone.rot.x + d.x,
+                    y: bone.rot.y + d.y,
+                    z: bone.rot.z + d.z,
+                }))
+            }
+            RotationData::None => None,
+        }
+    }
+
+    pub fn raw_position_vec(&self, frame: usize, bone: &Bone) -> Option<[f32; 3]> {
+        if self.flags.contains(AnimationFlags::STUDIO_ANIM_DELTA) {
+            return None;
+        }
+        match &self.position_data {
+            PositionData::Vector48(v) => {
+                let v = Vector::from(*v);
+                Some([v.x, v.y, v.z])
+            }
+            PositionData::PositionValues(values) => {
+                let d = values
+                    .get(frame)
+                    .or_else(|| values.last())
+                    .copied()
+                    .unwrap_or_default();
+                Some([bone.pos.x + d.x, bone.pos.y + d.y, bone.pos.z + d.z])
+            }
+            PositionData::None => None,
+        }
+    }
 }
 
 fn read_animation(
@@ -387,7 +441,7 @@ fn read_animation(
         let value_data = &data[offset..];
         let values: Vec<RadianEuler> = (0..frames)
             .map(|frame| read_animation_values(value_data, frame, pointers))
-            .map(|r| r.map(|[x, y, z]| RadianEuler { x, z, y }))
+            .map(|r| r.map(|[x, y, z]| RadianEuler { x, y, z }))
             .collect::<Result<_, ModelError>>()?;
         RotationData::from(values)
     } else {

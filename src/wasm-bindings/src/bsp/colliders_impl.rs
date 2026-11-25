@@ -804,11 +804,12 @@ pub(crate) fn export_model_tri_colliders_data(
         let Some(model) = load_vmdl(m) else { continue };
 
         // ---- 局部空间顶点（Y-up，与 GLB 顶点同一变换链）----
+        let skin = model.idle_skin_matrices();
         let src = model.vertices();
         let mut local: Vec<[f32; 3]> = Vec::with_capacity(src.len());
         for v in src {
             local.push(model_integrator::map_coords(
-                model.apply_root_transform(v.position),
+                model.skin_vertex_position(&skin, v),
             ));
         }
         if local.is_empty() {

@@ -12,7 +12,7 @@ pub use crate::vtx::Vtx;
 use crate::vvd::Vertex;
 pub use crate::vvd::Vvd;
 use bytemuck::{pod_read_unaligned, Contiguous, Pod};
-use cgmath::{Matrix4, SquareMatrix, Transform, Vector3};
+use cgmath::{Matrix4, SquareMatrix};
 pub use error::*;
 pub use handle::Handle;
 use itertools::Either;
@@ -173,9 +173,184 @@ impl Model {
     }
 
     pub fn apply_root_transform(&self, vec: Vector) -> Vector {
-        let transform = self.idle_transform() * self.root_transform();
-        transform.transform_vector(Vector3::from(vec)).into()
+        let skin = self.idle_skin_matrices();
+        if let Some(m) = skin.first() {
+            let p = mat3x4_transform_point(m, [vec.x, vec.y, vec.z]);
+            Vector {
+                x: p[0],
+                y: p[1],
+                z: p[2],
+            }
+        } else {
+            vec
+        }
     }
+
+    /// Compute row-major 3x4 Source Z-up skinning matrices (`world[b] * pose_to_bone[b]`)
+    /// from the first non-delta local animation at frame 0 (falling back to bind pose `bone.pos`
+    /// and `bone.quaternion` per bone). Returns empty for `STATIC_PROP` or boneless models.
+    pub fn idle_skin_matrices(&self) -> Vec<[[f32; 4]; 3]> {
+        if self.mdl.header.flags.contains(ModelFlags::STATIC_PROP) || self.mdl.bones.is_empty() {
+            return Vec::new();
+        }
+        const STUDIO_DELTA: i32 = 0x0004;
+        let idle_anim = self
+            .mdl
+            .local_animations
+            .iter()
+            .find(|desc| (desc.flags & STUDIO_DELTA) == 0);
+
+        let bone_count = self.mdl.bones.len();
+        let mut world = Vec::with_capacity(bone_count);
+        let mut skin = Vec::with_capacity(bone_count);
+
+        for (b, bone) in self.mdl.bones.iter().enumerate() {
+            let anim_entry = idle_anim.and_then(|desc| {
+                desc.animations
+                    .iter()
+                    .find(|anim| anim.bone as usize == b)
+            });
+            let quat = anim_entry
+                .and_then(|e| e.raw_rotation_quat(0, bone))
+                .unwrap_or_else(|| {
+                    let q = bone.quaternion;
+                    let len = (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w).sqrt();
+                    if len > 1e-6 {
+                        [q.x / len, q.y / len, q.z / len, q.w / len]
+                    } else {
+                        [0.0, 0.0, 0.0, 1.0]
+                    }
+                });
+            let pos = anim_entry
+                .and_then(|e| e.raw_position_vec(0, bone))
+                .unwrap_or([bone.pos.x, bone.pos.y, bone.pos.z]);
+            let local = mat3x4_from_quat_pos(quat, pos);
+            let w = if bone.parent >= 0 && (bone.parent as usize) < b {
+                mat3x4_mul(&world[bone.parent as usize], &local)
+            } else {
+                local
+            };
+            skin.push(mat3x4_mul(&w, &bone.pose_to_bone.rows()));
+            world.push(w);
+        }
+        skin
+    }
+
+    /// Transform a `.vvd` vertex position into Source Z-up model space using precomputed skin matrices.
+    pub fn skin_vertex_position(&self, skin: &[[[f32; 4]; 3]], v: &Vertex) -> Vector {
+        if skin.is_empty() {
+            return v.position;
+        }
+        let p = [v.position.x, v.position.y, v.position.z];
+        let mut acc = [0.0f32; 3];
+        let mut total_w = 0.0f32;
+        for bw in v.bone_weights.weights() {
+            if bw.weight <= 0.0 {
+                continue;
+            }
+            let m = skin.get(bw.bone_id as usize).unwrap_or(&skin[0]);
+            let t = mat3x4_transform_point(m, p);
+            acc[0] += t[0] * bw.weight;
+            acc[1] += t[1] * bw.weight;
+            acc[2] += t[2] * bw.weight;
+            total_w += bw.weight;
+        }
+        if total_w > 1e-6 {
+            Vector {
+                x: acc[0] / total_w,
+                y: acc[1] / total_w,
+                z: acc[2] / total_w,
+            }
+        } else {
+            let t = mat3x4_transform_point(&skin[0], p);
+            Vector {
+                x: t[0],
+                y: t[1],
+                z: t[2],
+            }
+        }
+    }
+
+    /// Transform a `.vvd` vertex normal into Source Z-up model space using precomputed skin matrices.
+    pub fn skin_vertex_normal(&self, skin: &[[[f32; 4]; 3]], v: &Vertex) -> Vector {
+        if skin.is_empty() {
+            return v.normal;
+        }
+        let n = [v.normal.x, v.normal.y, v.normal.z];
+        let mut acc = [0.0f32; 3];
+        let mut any = false;
+        for bw in v.bone_weights.weights() {
+            if bw.weight <= 0.0 {
+                continue;
+            }
+            let m = skin.get(bw.bone_id as usize).unwrap_or(&skin[0]);
+            let t = mat3x4_transform_vector(m, n);
+            acc[0] += t[0] * bw.weight;
+            acc[1] += t[1] * bw.weight;
+            acc[2] += t[2] * bw.weight;
+            any = true;
+        }
+        let raw = if any {
+            acc
+        } else {
+            mat3x4_transform_vector(&skin[0], n)
+        };
+        let len = (raw[0] * raw[0] + raw[1] * raw[1] + raw[2] * raw[2]).sqrt();
+        if len > 1e-6 {
+            Vector {
+                x: raw[0] / len,
+                y: raw[1] / len,
+                z: raw[2] / len,
+            }
+        } else {
+            v.normal
+        }
+    }
+}
+
+pub fn mat3x4_from_quat_pos(q: [f32; 4], t: [f32; 3]) -> [[f32; 4]; 3] {
+    let [x, y, z, w] = q;
+    let xx = x * x;
+    let yy = y * y;
+    let zz = z * z;
+    let xy = x * y;
+    let xz = x * z;
+    let yz = y * z;
+    let wx = w * x;
+    let wy = w * y;
+    let wz = w * z;
+    [
+        [1.0 - 2.0 * (yy + zz), 2.0 * (xy - wz), 2.0 * (xz + wy), t[0]],
+        [2.0 * (xy + wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz - wx), t[1]],
+        [2.0 * (xz - wy), 2.0 * (yz + wx), 1.0 - 2.0 * (xx + yy), t[2]],
+    ]
+}
+
+pub fn mat3x4_mul(a: &[[f32; 4]; 3], b: &[[f32; 4]; 3]) -> [[f32; 4]; 3] {
+    let mut out = [[0.0f32; 4]; 3];
+    for r in 0..3 {
+        for c in 0..3 {
+            out[r][c] = a[r][0] * b[0][c] + a[r][1] * b[1][c] + a[r][2] * b[2][c];
+        }
+        out[r][3] = a[r][0] * b[0][3] + a[r][1] * b[1][3] + a[r][2] * b[2][3] + a[r][3];
+    }
+    out
+}
+
+pub fn mat3x4_transform_point(m: &[[f32; 4]; 3], p: [f32; 3]) -> [f32; 3] {
+    [
+        m[0][0] * p[0] + m[0][1] * p[1] + m[0][2] * p[2] + m[0][3],
+        m[1][0] * p[0] + m[1][1] * p[1] + m[1][2] * p[2] + m[1][3],
+        m[2][0] * p[0] + m[2][1] * p[1] + m[2][2] * p[2] + m[2][3],
+    ]
+}
+
+pub fn mat3x4_transform_vector(m: &[[f32; 4]; 3], v: [f32; 3]) -> [f32; 3] {
+    [
+        m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+        m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+        m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
+    ]
 }
 
 pub struct SkinTable<'a> {

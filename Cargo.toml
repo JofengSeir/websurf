@@ -23,11 +23,12 @@
 # ── vmdl vendor patch ──────────────────────────────────────────────
 # websurf-wasm-core 依赖 vmdl 0.2，本 workspace 用 [patch.crates-io] 把它换成仓库内副本
 # src/vendor/vmdl（该 manifest 自报 name = "vmdl"、version = "0.2.0"）。
-# 相对 crates.io vmdl-0.2.0，副本改写了 2 个文件：
+# 相对 crates.io vmdl-0.2.0，副本主要修补：
 # - `src/vendor/vmdl/src/vtx/mod.rs` 的 `Strip::indices`（循环边界 0..len → 0..len.saturating_sub(2)，
 #   索引公式 idx+1-cw → idx+1+cw）；
-# - `src/vendor/vmdl/src/lib.rs` 的两处返回类型生命周期标注（`SkinTable<'_>` / `Mesh<'_>`）。
-# [patch] 只对声明它的 workspace 生效（根这份管 websurf-wasm-core）；三个工程各自一份同款。
+# - `src/vendor/vmdl/src/lib.rs` 的 `SkinTable<'_>` / `Mesh<'_>` 生命周期标注，以及非 `STATIC_PROP`
+#   模型的完整 Source Z-up 骨骼蒙皮 `idle_skin_matrices()`（`world[b] * pose_to_bone[b]`）与
+#   `shared.rs` / `animation.rs` / `vvd/raw.rs` 里的 RLE 动画 `i16` 解码、Z-up 欧拉角与权重修正。
 
 [workspace]
 resolver = "2"

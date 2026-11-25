@@ -89,7 +89,8 @@ pub struct BoneWeights {
 impl BoneWeights {
     pub fn weights(&self) -> impl Iterator<Item = BoneWeight> + '_ {
         (0..min(self.bone_count as usize, 3)).map(|i| BoneWeight {
-            weight: self.weight[i] / self.bone_count as f32,
+            // Source .vvd stores already-normalized weights summing to 1.0 (not scaled by bone_count).
+            weight: self.weight[i],
             bone_id: self.bone[i],
         })
     }

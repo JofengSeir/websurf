@@ -185,6 +185,25 @@ impl From<RadianEuler> for Euler<Deg<f32>> {
     }
 }
 
+/// Exact Source SDK `AngleQuaternion` in Z-up coordinates (`Rz(yaw=z) * Ry(pitch=y) * Rx(roll=x)`),
+/// returning `[x, y, z, w]`. Note: `Bone.rot` / `STUDIO_ANIM_ANIMROT` store `(x, y, z)` in radians
+/// in Source Z-up (matching `studiohdr`'s `RadianEuler rot`, NOT `(pitch, yaw, roll)`).
+pub fn radian_euler_to_quat_zup(e: RadianEuler) -> [f32; 4] {
+    let (sx, cx) = (e.x * 0.5).sin_cos();
+    let (sy, cy) = (e.y * 0.5).sin_cos();
+    let (sz, cz) = (e.z * 0.5).sin_cos();
+    let x = sx * cy * cz - cx * sy * sz;
+    let y = cx * sy * cz + sx * cy * sz;
+    let z = cx * cy * sz - sx * sy * cz;
+    let w = cx * cy * cz + sx * sy * sz;
+    let len = (x * x + y * y + z * z + w * w).sqrt();
+    if len > 1e-6 {
+        [x / len, y / len, z / len, w / len]
+    } else {
+        [0.0, 0.0, 0.0, 1.0]
+    }
+}
+
 impl From<RadianEuler> for cgmath::Quaternion<f32> {
     fn from(value: RadianEuler) -> Self {
         // angles are applied in roll, pitch, yaw order
@@ -309,6 +328,10 @@ impl Transform3x4 {
             self.transform[2][3],
         ]
         .into()
+    }
+
+    pub fn rows(&self) -> [[f32; 4]; 3] {
+        self.transform
     }
 }
 

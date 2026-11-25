@@ -401,16 +401,21 @@ impl ModelIntegrator {
         let view_start = gltf.buffer_views.len() as u32;
         let vertex_count = model.vertices().len() as u64;
 
-        let (min, max) = model.bounding_box();
-        let min = map_coords(model.apply_root_transform(min));
-        let max = map_coords(model.apply_root_transform(max));
-
-        let vertex_data = model
-            .vertices()
-            .iter()
-            .map(|vert| ModelVertex::from(vert, model))
-            .flat_map(|vert| bytemuck::cast::<_, [u8; mem::size_of::<ModelVertex>()]>(vert));
-        buffer.extend(vertex_data);
+        let skin = model.idle_skin_matrices();
+        let mut min = [f32::INFINITY; 3];
+        let mut max = [f32::NEG_INFINITY; 3];
+        for vert in model.vertices() {
+            let v = ModelVertex::from(vert, model, &skin);
+            for i in 0..3 {
+                min[i] = min[i].min(v.position[i]);
+                max[i] = max[i].max(v.position[i]);
+            }
+            buffer.extend_from_slice(&bytemuck::cast::<_, [u8; mem::size_of::<ModelVertex>()]>(v));
+        }
+        if vertex_count == 0 {
+            min = [0.0; 3];
+            max = [0.0; 3];
+        }
 
         let vertex_buffer_view = json::buffer::View {
             buffer: Index::new(0),
@@ -1602,12 +1607,12 @@ pub struct ModelVertex {
 }
 
 impl ModelVertex {
-    /// 从 vmdl 顶点创建模型顶点（**位置与法线都走 `map_coords`**：两者必须同轴序，否则按法线的光照会把方向贴错）
-    fn from(vertex: &vmdl::vvd::Vertex, model: &VmdlModel) -> Self {
+    /// 从 vmdl 顶点创建模型顶点（**位置与法线都走同源骨骼蒙皮 + `map_coords`**：两者必须同轴序，否则按法线的光照会把方向贴错）
+    fn from(vertex: &vmdl::vvd::Vertex, model: &VmdlModel, skin: &[[[f32; 4]; 3]]) -> Self {
         ModelVertex {
-            position: map_coords(model.apply_root_transform(vertex.position)),
+            position: map_coords(model.skin_vertex_position(skin, vertex)),
             uv: vertex.texture_coordinates,
-            normal: map_coords(model.apply_root_transform(vertex.normal)),
+            normal: map_coords(model.skin_vertex_normal(skin, vertex)),
         }
     }
 }
@@ -1679,5 +1684,132 @@ pub fn collect_model_entities(bsp: &crate::vbsp::Bsp) -> Vec<ModelEntity> {
         });
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn radian_euler_to_quat_zup_matches_source_x_minus_90() {
+        // Bone.rot = [-pi/2, 0, 0] in Z-up should match quat = [-sqrt(2)/2, 0, 0, sqrt(2)/2].
+        let q = vmdl::radian_euler_to_quat_zup(vmdl::RadianEuler {
+            x: -std::f32::consts::FRAC_PI_2,
+            y: 0.0,
+            z: 0.0,
+        });
+        let s = std::f32::consts::FRAC_1_SQRT_2;
+        assert!((q[0] - (-s)).abs() < 1e-5);
+        assert!(q[1].abs() < 1e-5);
+        assert!(q[2].abs() < 1e-5);
+        assert!((q[3] - s).abs() < 1e-5);
+
+        let m = vmdl::mat3x4_from_quat_pos(q, [1.0, 2.0, 3.0]);
+        let inv = [
+            [1.0, 0.0, 0.0, -1.0],
+            [0.0, 0.0, -1.0, 3.0],
+            [0.0, 1.0, 0.0, -2.0],
+        ];
+        let id = vmdl::mat3x4_mul(&m, &inv);
+        for r in 0..3 {
+            for c in 0..4 {
+                let expected = if r == c { 1.0 } else { 0.0 };
+                assert!(
+                    (id[r][c] - expected).abs() < 1e-5,
+                    "cell [{r}][{c}] = {}, expected {expected}",
+                    id[r][c]
+                );
+            }
+        }
+    }
+
+    fn skinned_source_bounds(model: &VmdlModel) -> ([f32; 3], [f32; 3]) {
+        let skin = model.idle_skin_matrices();
+        let mut mn = [f32::INFINITY; 3];
+        let mut mx = [f32::NEG_INFINITY; 3];
+        for v in model.vertices() {
+            let p = model.skin_vertex_position(&skin, v);
+            let coords = [p.x, p.y, p.z];
+            for i in 0..3 {
+                mn[i] = mn[i].min(coords[i]);
+                mx[i] = mx[i].max(coords[i]);
+            }
+        }
+        (mn, mx)
+    }
+
+    fn load_pak_model(bsp: &crate::vbsp::Bsp, mdl_path: &str) -> Option<VmdlModel> {
+        let mdl_bytes = bsp.pack.get(mdl_path).ok().flatten()?;
+        let vtx_bytes = bsp
+            .pack
+            .get(&mdl_path.replace(".mdl", ".dx90.vtx"))
+            .ok()
+            .flatten()?;
+        let vvd_bytes = bsp
+            .pack
+            .get(&mdl_path.replace(".mdl", ".vvd"))
+            .ok()
+            .flatten()?;
+        let mdl = Mdl::read(&mdl_bytes).ok()?;
+        let vtx = Vtx::read(&vtx_bytes).ok()?;
+        let vvd = Vvd::read(&vvd_bytes).ok()?;
+        Some(VmdlModel::from_parts(mdl, vtx, vvd))
+    }
+
+    #[test]
+    fn non_static_models_stand_upright_against_mdl_bbox() {
+        let ze_path = Path::new("../../test/maps/ze_cursed_bear_tales_v1_2.bsp");
+        if let Ok(bytes) = std::fs::read(ze_path) {
+            let bsp = crate::vbsp::Bsp::read(&bytes).expect("parse ze_cursed");
+            // wagon.mdl + single/multi-bone non-STATIC_PROP models with nonzero bone0.rot
+            for mdl_name in [
+                "models/raphi/props_bisou/wagon.mdl",
+                "models/raphi/healthvial.mdl",
+                "models/raphi/items/battery.mdl",
+                "models/raphi/items/nounours.mdl",
+                "models/raphi/props_lakeside_event/wof_plane2.mdl",
+                "models/raphi/props_manor/grandfather_clock_01.mdl",
+            ] {
+                let model = load_pak_model(&bsp, mdl_name)
+                    .unwrap_or_else(|| panic!("missing {mdl_name}"));
+                let (hmin, hmax) = model.bounding_box();
+                let (smin, smax) = skinned_source_bounds(&model);
+                let tol = 3.5;
+                assert!(
+                    (smin[2] - hmin.z).abs() <= tol && (smax[2] - hmax.z).abs() <= tol,
+                    "{mdl_name} Z mismatch: skinned=[{}, {}], bbox=[{}, {}]",
+                    smin[2],
+                    smax[2],
+                    hmin.z,
+                    hmax.z
+                );
+                assert!(
+                    (smin[0] - hmin.x).abs() <= tol && (smax[0] - hmax.x).abs() <= tol,
+                    "{mdl_name} X mismatch: skinned=[{}, {}], bbox=[{}, {}]",
+                    smin[0],
+                    smax[0],
+                    hmin.x,
+                    hmax.x
+                );
+            }
+        }
+
+        let surf_path = Path::new("../../test/maps/surf_666.bsp");
+        if let Ok(bytes) = std::fs::read(surf_path) {
+            let bsp = crate::vbsp::Bsp::read(&bytes).expect("parse surf_666");
+            let cow = load_pak_model(&bsp, "models/thespectator/cow.mdl")
+                .expect("missing cow.mdl");
+            let (hmin, hmax) = cow.bounding_box();
+            let (smin, smax) = skinned_source_bounds(&cow);
+            assert!(
+                (smin[2] - hmin.z).abs() <= 5.0 && (smax[2] - hmax.z).abs() <= 5.0,
+                "cow.mdl Z mismatch: skinned=[{}, {}], bbox=[{}, {}]",
+                smin[2],
+                smax[2],
+                hmin.z,
+                hmax.z
+            );
+        }
+    }
 }
 
