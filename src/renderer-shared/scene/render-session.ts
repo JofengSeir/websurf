@@ -1217,7 +1217,7 @@ export class RenderSession {
     }
     const frameNow = performance.now();
     this.dynamicAmbient.update(this.pvs, frameNow);
-    (this.spotBeams?.userData.rig as SpotBeamRig | undefined)?.updateOcclusion(this.camera, this.root, frameNow);
+    (this.spotBeams?.userData.rig as SpotBeamRig | undefined)?.updateOcclusion(this.camera, this.laserPhysTrace, frameNow);
     // 动态对象（旋钮 pivot 等）刚改过变换：本帧在这里刷新一次世界矩阵，后面 6~9 趟
     // `renderer.render` 直接复用（`scene.matrixWorldAutoUpdate` 在构造函数里关掉了）。
     this.scene.updateMatrixWorld();

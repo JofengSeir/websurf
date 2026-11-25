@@ -157,14 +157,17 @@ void main() {
 `;
 
 /**
- * 灯光晕光片元 + 视角方向性炫光（仿真实光学镜头炫光）：
- * - 不被墙面/地面深度截成半圆（由 SpotBeamRig 节流 LOS 射线控制可见性平滑淡入淡出，depthTest=false）；
- * - 不进 BloomPostFx 防止糊成过曝白球（vbspNoGlow=true），在片元内直接绘制锐利针尖芯、6 瓣星芒、水平拉丝与边缘色散月牙弧。
+ * 屏幕空间光学镜头炫光：
+ * - 结合光源朝向与准星夹角（aimFactor），仅在正对灯头且靠近屏幕中心时展开覆盖大半视口的柔和致盲泛光、
+ *   大幅彩虹色散衍射弧、非均匀多谐波星芒与水平拉丝；
+ * - 未正对时保持紧凑小光斑，极大节省像素填充开销；
+ * - 遮挡检测走 Rust WASM 空间网格 physTrace（~0.005ms，无 JS 三角形遍历卡顿）。
  */
 const GLARE_VERT = `
 uniform vec3 uSpotDir;
-uniform float uBaseSize;
+uniform float uAspect;
 varying vec2 vUv;
+varying vec2 vNdc;
 varying float vFacing;
 varying float vGlare;
 varying float vCamFade;
@@ -175,14 +178,23 @@ void main() {
 	float dist = max(1.0, length(toCam));
 	vec3 viewDir = toCam / dist;
 	vFacing = dot(normalize(uSpotDir), viewDir);
-	float onAxis = smoothstep(0.42, 0.995, vFacing);
-	vGlare = onAxis * onAxis;
 	vCamFade = smoothstep(0.0, ${SHADEOUT_DISTANCE.toFixed(1)}, dist);
-	float distBoost = clamp(dist / 320.0, 0.75, 1.55);
-	float scale = uBaseSize * (0.65 + 0.25 * max(0.0, vFacing) + 1.15 * vGlare * distBoost);
-	vec4 mv = viewMatrix * worldOrigin;
-	mv.xy += position.xy * scale;
-	gl_Position = projectionMatrix * mv;
+	vec4 clip = projectionMatrix * viewMatrix * worldOrigin;
+	if (clip.w <= 0.1) {
+		vNdc = vec2(2.0);
+		vGlare = 0.0;
+		gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+		return;
+	}
+	vec2 ndc = clip.xy / clip.w;
+	vNdc = ndc;
+	float aimFactor = exp(-dot(ndc, ndc) * 1.4);
+	float onAxis = smoothstep(0.38, 0.99, vFacing);
+	vGlare = onAxis * onAxis * (0.28 + 0.72 * aimFactor);
+	float distScale = clamp(420.0 / (dist + 180.0), 0.45, 1.15);
+	float scale = mix(0.08 * distScale, 1.35, vGlare);
+	vec2 halfExt = vec2(scale / max(0.5, uAspect), scale);
+	gl_Position = vec4(ndc + position.xy * 2.0 * halfExt, 0.0, 1.0);
 }
 `;
 
@@ -190,7 +202,9 @@ const GLARE_FRAG = `
 uniform vec3 uColor;
 uniform float uGain;
 uniform float uVis;
+uniform float uSeed;
 varying vec2 vUv;
+varying vec2 vNdc;
 varying float vFacing;
 varying float vGlare;
 varying float vCamFade;
@@ -203,34 +217,41 @@ void main() {
 	float edge = 1.0 - r2;
 	float edge2 = edge * edge;
 
-	// 1. 针尖白热芯 + 克制的内外柔晕（不再糊成大白球）
-	float pinpoint = exp(-r2 * 180.0);
-	float halo = exp(-r2 * 16.0) * 0.28 + exp(-r2 * 3.0) * edge2 * 0.14;
+	float pinpoint = exp(-r2 * 260.0);
+	float innerHalo = exp(-r2 * 24.0) * 0.24 + exp(-r2 * 6.5) * edge2 * 0.12;
+	float veiling = exp(-r2 * 1.35) * 0.19 * vGlare * edge;
 
-	// 2. 六瓣光学衍射星芒（正对光轴时显现）
-	float ang = atan(p.y, p.x);
-	float ray6 = pow(abs(cos(ang * 3.0 + 0.35)), 22.0)
-		+ pow(abs(cos(ang * 3.0 - 0.17)), 32.0) * 0.55;
-	float rays = ray6 * exp(-r * 3.4) * smoothstep(0.01, 0.08, r) * edge;
+	float ang = atan(p.y, p.x) + uSeed + vNdc.x * 0.45 - vNdc.y * 0.35;
+	float h1 = pow(abs(cos(ang * 3.0 + 0.4)), 24.0);
+	float h2 = pow(abs(cos(ang * 5.0 - 1.1)), 18.0) * 0.65;
+	float h3 = pow(abs(cos(ang * 7.0 + 2.3)), 28.0) * 0.50;
+	float h4 = pow(abs(cos(ang * 11.0 - 0.7)), 32.0) * 0.35;
+	float rayMod = 0.65 + 0.35 * sin(ang * 3.0 + uSeed * 6.28);
+	float rays = (h1 + h2 + h3 + h4) * rayMod * exp(-r * 2.8) * smoothstep(0.01, 0.06, r) * edge;
 
-	// 3. 水平变形镜头拉丝
-	float streak = exp(-p.y * p.y * 55.0) * exp(-p.x * p.x * 2.4) * edge;
+	float streak = exp(-p.y * p.y * 65.0) * exp(-p.x * p.x * 2.2) * edge;
 
-	// 4. 左右边缘色散月牙弧（chromatic crescent lens arcs）
-	float sideMask = smoothstep(0.15, 0.75, abs(p.x)) * exp(-p.y * p.y * 3.5) * edge;
-	vec3 arcRgb = vec3(
-		exp(-pow((r - 0.54) * 14.0, 2.0)),
-		exp(-pow((r - 0.58) * 14.0, 2.0)),
-		exp(-pow((r - 0.62) * 14.0, 2.0))
-	) * sideMask * 0.28;
+	float sideMask = smoothstep(0.10, 0.65, abs(p.x)) * exp(-p.y * p.y * 2.1) * edge;
+	vec3 arcPrimary = vec3(
+		exp(-pow((r - 0.56) * 11.0, 2.0)),
+		exp(-pow((r - 0.62) * 11.0, 2.0)),
+		exp(-pow((r - 0.68) * 11.0, 2.0))
+	);
+	vec3 arcOuter = vec3(
+		exp(-pow((r - 0.78) * 14.0, 2.0)),
+		exp(-pow((r - 0.82) * 14.0, 2.0)),
+		exp(-pow((r - 0.86) * 14.0, 2.0))
+	) * 0.45;
+	vec3 rainbow = (arcPrimary + arcOuter) * sideMask * 0.42 * vGlare;
 
-	float backDim = mix(0.12, 0.42, smoothstep(-0.25, 0.35, vFacing));
-	float baseTerm = halo * (backDim + 0.45 * vGlare) + pinpoint * (0.35 + 1.05 * vGlare);
-	float opticalTerm = (rays * 0.68 + streak * 0.42) * vGlare;
+	float backDim = mix(0.12, 0.40, smoothstep(-0.25, 0.35, vFacing));
+	float baseTerm = innerHalo * (backDim + 0.35 * vGlare) + pinpoint * (0.35 + 1.15 * vGlare) + veiling;
+	float opticalTerm = (rays * 0.72 + streak * 0.45) * vGlare;
 
-	vec3 baseTint = mix(uColor, vec3(1.0), clamp(pinpoint * 0.88 + halo * 0.18 * vGlare, 0.0, 1.0));
-	vec3 rayTint = mix(uColor, vec3(0.88, 0.94, 1.0), 0.55);
-	vec3 col = baseTint * baseTerm + rayTint * opticalTerm + arcRgb * mix(uColor, vec3(1.0), 0.35) * vGlare;
+	vec3 baseTint = mix(uColor, vec3(1.0), clamp(pinpoint * 0.90 + veiling * 0.45, 0.0, 1.0));
+	vec3 rayTint = mix(uColor, vec3(0.90, 0.95, 1.0), 0.58);
+	vec3 arcTint = mix(vec3(1.0), uColor, 0.28);
+	vec3 col = baseTint * baseTerm + rayTint * opticalTerm + rainbow * arcTint;
 	col *= uGain * vCamFade * uVis;
 	if (max(col.r, max(col.g, col.b)) <= 0.002) discard;
 	gl_FragColor = vec4(col, 1.0);
@@ -289,10 +310,8 @@ export class SpotBeamRig {
 	private readonly tmpEuler = new THREE.Euler(0, 0, 0, 'XYZ');
 	private readonly tmpQuat = new THREE.Quaternion();
 	private readonly upAxis = new THREE.Vector3(0, 1, 0);
-	private readonly raycaster = new THREE.Raycaster();
 	private readonly camForward = new THREE.Vector3();
 	private readonly tmpTarget = new THREE.Vector3();
-	private readonly tmpRayDir = new THREE.Vector3();
 	private cursor = 0;
 	private lastOcclAt = 0;
 
@@ -301,16 +320,21 @@ export class SpotBeamRig {
 		this.entries.push(entry);
 	}
 
-	/** 节流视线遮挡检测（每帧最多 2 次射线，每盏 ≥55ms 复查一次），驱动炫光平滑淡入淡出而非被地板硬切。 */
-	updateOcclusion(camera: THREE.Camera, root: THREE.Object3D | null, nowMs: number): void {
+	/** 节流视线遮挡检测（走 Rust WASM 物理空间网格，每帧最多 1 次，冷却 ≥80ms），并同步画幅纵横比。 */
+	updateOcclusion(
+		camera: THREE.Camera,
+		physTrace: ((start: THREE.Vector3, end: THREE.Vector3) => number) | null,
+		nowMs: number,
+	): void {
 		const dt = this.lastOcclAt > 0 ? Math.min(0.1, (nowMs - this.lastOcclAt) / 1000) : 1 / 60;
 		this.lastOcclAt = nowMs;
 		const len = this.entries.length;
 		if (len === 0) return;
 
+		const aspect = (camera as THREE.PerspectiveCamera).aspect || 16 / 9;
 		camera.getWorldPosition(this.tmpPos);
 		camera.getWorldDirection(this.camForward);
-		let checks = 0;
+		let checked = false;
 		for (let step = 0; step < len; step++) {
 			const idx = (this.cursor + step) % len;
 			const entry = this.entries[idx];
@@ -324,28 +348,22 @@ export class SpotBeamRig {
 			const dz = gp.z - this.tmpPos.z;
 			const distSq = dx * dx + dy * dy + dz * dz;
 			const fwd = dx * this.camForward.x + dy * this.camForward.y + dz * this.camForward.z;
-			if (distSq > 4500 * 4500 || fwd <= 0) {
+			if (distSq > 3000 * 3000 || fwd <= 0) {
 				entry.visTarget = 0;
 				continue;
 			}
-			if (root && checks < 2 && nowMs - entry.lastCheckAt >= 55) {
+			if (!physTrace) {
+				entry.visTarget = 1;
+				continue;
+			}
+			if (!checked && nowMs - entry.lastCheckAt >= 80) {
 				entry.lastCheckAt = nowMs;
-				checks++;
+				checked = true;
 				this.cursor = (idx + 1) % len;
 				const sd = entry.spot.direction;
 				this.tmpTarget.set(gp.x + sd[0] * 4, gp.y + sd[1] * 4, gp.z + sd[2] * 4);
-				this.tmpRayDir.subVectors(this.tmpTarget, this.tmpPos);
-				const dist = this.tmpRayDir.length();
-				if (dist <= 8) {
-					entry.visTarget = 1;
-				} else {
-					this.tmpRayDir.divideScalar(dist);
-					this.raycaster.set(this.tmpPos, this.tmpRayDir);
-					this.raycaster.near = 1;
-					this.raycaster.far = dist - 6;
-					const hits = this.raycaster.intersectObject(root, true);
-					entry.visTarget = hits.length > 0 ? 0 : 1;
-				}
+				const frac = physTrace(this.tmpPos, this.tmpTarget);
+				entry.visTarget = frac < 0.96 ? 0 : 1;
 			}
 		}
 
@@ -354,6 +372,7 @@ export class SpotBeamRig {
 			entry.visCurrent += (entry.visTarget - entry.visCurrent) * alpha;
 			const glareMat = entry.glare.material as THREE.ShaderMaterial;
 			if (glareMat.uniforms?.uVis) glareMat.uniforms.uVis.value = entry.visCurrent;
+			if (glareMat.uniforms?.uAspect) glareMat.uniforms.uAspect.value = aspect;
 		}
 	}
 
@@ -605,9 +624,10 @@ export function buildSpotBeams(spots: PunctualSpot[], root: THREE.Object3D | nul
 			uniforms: {
 				uColor: { value: color },
 				uSpotDir: { value: axis.clone() },
-				uBaseSize: { value: Math.max(28, Math.min(64, (s.beamWidth ?? 75) * 0.55)) },
+				uAspect: { value: 16 / 9 },
 				uGain: { value: 1.0 },
 				uVis: { value: 1.0 },
+				uSeed: { value: ((s.entityIndex ?? activeSpots.length) * 1.6180339) % 1.0 },
 			},
 			vertexShader: GLARE_VERT,
 			fragmentShader: GLARE_FRAG,

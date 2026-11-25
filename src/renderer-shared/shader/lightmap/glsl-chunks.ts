@@ -201,6 +201,7 @@ uniform float vbspDLightScale;
 varying vec3 vbspSpotWPos;
 
 vec3 vbspSpotLight(vec3 P) {
+	if (vbspSpotCount <= 0 && vbspDLightCount <= 0) return vec3(0.0);
 	vec3 N = normalize(cross(dFdx(P), dFdy(P)));
 	vec3 V = normalize(cameraPosition - P);
 	vec3 sum = vec3(0.0);
@@ -220,8 +221,12 @@ vec3 vbspSpotLight(vec3 P) {
 		float near = clamp(1.0 - d / spillR, 0.0, 1.0);
 		float spill = near * near * (0.28 + 0.52 * ndl) * 0.75;
 		float contrib = max(att * cone * ndl, spill);
+		if (contrib <= 0.001) continue;
 		vec3 H = normalize(L + V);
-		float sheen = pow(abs(dot(N, H)), 12.0) * 0.45;
+		float nh = abs(dot(N, H));
+		float nh2 = nh * nh;
+		float nh4 = nh2 * nh2;
+		float sheen = nh4 * nh4 * nh4 * 0.45;
 		sum += vbspSpotColor[i] * (contrib * (1.0 + sheen));
 	}
 	for (int i = 0; i < ${DLIGHT_MAX}; i++) {
