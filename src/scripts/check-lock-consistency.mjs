@@ -223,9 +223,11 @@ const FEATURE_CLOSURE = {
  *  `__wasm_bindgen_unstable` 描述符没有 `#[used]`，存留是链接 GC 的副作用，随 workspace
  *  布局 / -C metadata 哈希变化，不是稳定契约）。features 推导差集不享受此豁免。 */
 const DEP_GRAPH_EXPORTS = { debug: ['ChromaSampling'], game: [], viewer: [] };
-/** `.wasm` 体积真基线（字节；D-131 在 wt/t-d131 的干净构建实测）与容忍度（±3% 区间）。
- *  下界与上界都判：体积异常变小通常意味着导出面/feature 被误删，与 ⑥ 的逐名基线互为补充。 */
-const WASM_SIZE_BASELINE = { debug: 4241462, game: 4032115, viewer: 3669980 };
+/** `.wasm` 体积真基线（字节；T-D134b 启用 wasm-opt `-Os` 后的干净构建实测）与容忍度（±3% 区间）。
+ *  下界与上界都判：体积异常变小通常意味着导出面/feature 被误删，与 ⑥ 的逐名基线互为补充。
+ *  T-D134b 压缩前基线（wasm-opt = false）：debug 4,241,462 / game 4,032,115 / viewer 3,669,980 B；
+ *  启用 `-Os` 后：debug 3,338,344（−21.3%）/ game 3,178,055（−21.2%）/ viewer 2,868,249（−21.8%）。 */
+const WASM_SIZE_BASELINE = { debug: 3338344, game: 3178055, viewer: 2868249 };
 const WASM_SIZE_TOLERANCE = 0.03;
 /** pkg 导出面逐名基线（task-85 B4）。
  *  来源：task-81 在 36cf19a 的干净构建（`.tmp/verifyA/baseline-real/exports-real.json`），

@@ -52,7 +52,7 @@ npm run verify:full            # 全量：rust + 三端 build:wasm + check:api +
 # 常规构建与本地服务：
 npm ci                         # 仓库根：shared 层的 three（0.165.0 精确锁）
 cd apps/<app> && npm ci        # debug / game / viewer 各自装
-npm run build:wasm             # wasm-pack → pkg/，并复制到 web/（离线需 PATH 含 .wasm-pack-cache/wasm-bindgen-*）
+npm run build:wasm             # wasm-pack → pkg/，并复制到 web/（离线需 PATH 含 .wasm-pack-cache/wasm-bindgen-* 与 binaryen-*/bin 的 wasm-opt）
 npm run typecheck              # TS 类型检查
 npm run build:ts               # typecheck + esbuild（app.js + worker.js 两个 bundle）
 npm run build:app              # 只编 web/app.js；prebuild:app 钩子会自动先重建 web/worker.js
@@ -60,6 +60,8 @@ npm run build:dist             # 打包 dist/（single 或 --multi）
 npm run dev                    # 起本地服务（Node serve.mjs；debug 8080 / game 8090 / viewer 8100）
 npm run dev:check              # 三端产物完整性 / mtime 过期 STALE 提醒 / 端口自检
 ```
+
+> **release wasm 需要 Binaryen `wasm-opt`**（D-134b 起四个 `Cargo.toml` 均为 `wasm-opt = ["-Os"]`，体积约 −22%）：把 `bin/wasm-opt[.exe]` 放在 `.wasm-pack-cache/binaryen-version_133/` 下，或加入 `PATH`；`verify.mjs` 会递归查找并自动前置（找不到时构建前直接报错并给出放置路径）。
 
 > 静态服务是 `src/scripts/serve.mjs`（Node，不依赖系统 Python）；`serve.py` 只为旧脚本兼容。打包模板 `dist/serve.mjs` 同样带 COOP/COEP 响应头。
 
@@ -85,7 +87,7 @@ cargo +stable-x86_64-pc-windows-msvc test -p websurf-wasm-core
 
 ### 2.4 CI
 
-CI 跑 `.github/workflows/ci-gates.yml`：`cargo test -p websurf-phys`、`cargo test -p websurf-wasm-core`（宿主；缺夹具时相关测试自行跳过）、viewer `check-wasm-api --source-only` 源码契约、`check-render-parity.mjs`、`check-shader-anchors.mjs`（校验 `three@0.165.0` 的 `ShaderChunk`/`ShaderLib` 锚点 + 反空洞守卫）、三端 `typecheck`、`test-ts-shared.mjs`（`node:test`：`sim-clock` / `shared-state` / `config-sync` 纯逻辑单测）+ `check-entity-io.mjs`（合成自测 A1–A20；CI 无 `test/maps` 时地图组 SKIP 并 exit 0）+ `check-entity-start-solid.mjs`（Rust ↔ TS 的 `start-solid-cases.json` 跨端单源契约）+ `check-entity-cycles.mjs`（`src/ts-shared/entity` 的 import 有向图无环；反空洞守卫 文件 ≥ 10 / 边 ≥ 20）、三端 wasm 构建 + `check:api` + 共享产物指纹 / 锁、workspace 与导出一致性（`check-lock-consistency.mjs`：唯一根 `Cargo.lock`、三端 `apps/*/Cargo.{toml,lock}` 不得复生、根 workspace members 6 个、wasm-bindgen/serde/serde_json/js-sys 单源；该门禁的 `DEP_GRAPH_EXPORTS`——依赖图偶然带出的 wasm-bindgen 导出——采用**可选登记**：出现必须已登记、消失不报错，绑定 features 推导的差集仍逐名严格比对）/ GLB 一致性（GLB 无地图夹具时 SKIP）；debug/game 各有一份 wasm+TS 构建冒烟。CI 只随 push `main` 与 PR 跑（推 `dev` 不触发、纯 `*.md` 改动不触发）。
+CI 跑 `.github/workflows/ci-gates.yml`：`cargo test -p websurf-phys`、`cargo test -p websurf-wasm-core`（宿主；缺夹具时相关测试自行跳过；D-134a 起带 `--features phys-debug` 再跑一遍，`verify.mjs rust` 同样两遍）、viewer `check-wasm-api --source-only` 源码契约、`check-render-parity.mjs`、`check-shader-anchors.mjs`（校验 `three@0.165.0` 的 `ShaderChunk`/`ShaderLib` 锚点 + 反空洞守卫）、三端 `typecheck`、`test-ts-shared.mjs`（`node:test`：`sim-clock` / `shared-state` / `config-sync` 纯逻辑单测）+ `check-entity-io.mjs`（合成自测 A1–A20；CI 无 `test/maps` 时地图组 SKIP 并 exit 0）+ `check-entity-start-solid.mjs`（Rust ↔ TS 的 `start-solid-cases.json` 跨端单源契约）+ `check-entity-cycles.mjs`（`src/ts-shared/entity` 的 import 有向图无环；反空洞守卫 文件 ≥ 10 / 边 ≥ 20）、三端 wasm 构建 + `check:api` + 共享产物指纹 / 锁、workspace 与导出一致性（`check-lock-consistency.mjs`：唯一根 `Cargo.lock`、三端 `apps/*/Cargo.{toml,lock}` 不得复生、根 workspace members 6 个、wasm-bindgen/serde/serde_json/js-sys 单源；该门禁的 `DEP_GRAPH_EXPORTS`——依赖图偶然带出的 wasm-bindgen 导出——采用**可选登记**：出现必须已登记、消失不报错，绑定 features 推导的差集仍逐名严格比对）/ GLB 一致性（GLB 无地图夹具时 SKIP）；wasm 构建前安装 Binaryen `version_133`（`ci-gates.yml`/`deploy-pages.yml` 用缓存 + 下载 tar 放到 `~/binaryen`，`wasm-opt -Os` 由 `Cargo.toml` 启用）；debug/game 各有一份 wasm+TS 构建冒烟。CI 只随 push `main` 与 PR 跑（推 `dev` 不触发、纯 `*.md` 改动不触发）。
 
 **提交前**至少跑与改动对应档位的 `npm run verify:*`；**没跑成功的项要在提交信息里写清楚**。
 

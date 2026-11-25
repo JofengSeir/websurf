@@ -76,4 +76,4 @@ gltf = "1.4.1"
 # zip、byteorder、texpresso、parse-display、getrandom、getrandom_03、path-dedot、ahash。
 
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = false
+wasm-opt = ["-Os"]

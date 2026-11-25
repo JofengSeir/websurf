@@ -28,11 +28,15 @@ if (!profile || !PROFILES.includes(profile)) {
   process.exit(1);
 }
 
-/** 从仓内 `.wasm-pack-cache` 查找本地预置的 `wasm-bindgen` 可执行目录（离线/沙箱免联网）。 */
-function findWasmBindgenDir(repoRoot) {
+/**
+ * 从仓内 `.wasm-pack-cache` 查找本地预置的可执行文件目录（离线/沙箱免联网）。
+ * 目前需要两类二进制：`wasm-bindgen`（wasm-pack 生成 JS 胶水）与
+ * `wasm-opt`（release profile 的 `wasm-opt = ["-Os"]`，D-134b 起启用）。
+ */
+function findCacheBinaryDir(repoRoot, binName) {
   const cacheRoot = join(repoRoot, '.wasm-pack-cache');
   if (!existsSync(cacheRoot)) return null;
-  const binName = process.platform === 'win32' ? 'wasm-bindgen.exe' : 'wasm-bindgen';
+  const exeName = process.platform === 'win32' ? `${binName}.exe` : binName;
   const stack = [cacheRoot];
   while (stack.length > 0) {
     const dir = stack.pop();
@@ -44,9 +48,18 @@ function findWasmBindgenDir(repoRoot) {
     }
     for (const ent of entries) {
       const full = join(dir, ent.name);
-      if (ent.isFile() && ent.name.toLowerCase() === binName) return dir;
+      if (ent.isFile() && ent.name.toLowerCase() === exeName) return dir;
       if (ent.isDirectory()) stack.push(full);
     }
+  }
+  return null;
+}
+
+/** 在系统 PATH 中查找可执行文件（用于判断是否已由系统包管理器安装）。 */
+function findOnPath(binName) {
+  const exeName = process.platform === 'win32' ? `${binName}.exe` : binName;
+  for (const dir of (process.env.PATH ?? process.env.Path ?? '').split(delimiter)) {
+    if (dir && existsSync(join(dir, exeName))) return dir;
   }
   return null;
 }
@@ -155,27 +168,43 @@ function buildSteps(name) {
   ];
 }
 
-const wasmBindgenDir = findWasmBindgenDir(REPO);
+const wasmBindgenDir = findCacheBinaryDir(REPO, 'wasm-bindgen');
+const wasmOptDir = findCacheBinaryDir(REPO, 'wasm-opt') ?? findOnPath('wasm-opt');
 const steps = buildSteps(profile);
+const wasmBuildSteps = steps.filter((step) => step.needsWasmCache).length;
 
 if (listOnly) {
-  console.log(`[verify:${profile}] 共 ${steps.length} 步（wasm-bindgen 缓存: ${wasmBindgenDir ?? '未命中，走系统 PATH'}）:`);
+  console.log(
+    `[verify:${profile}] 共 ${steps.length} 步（wasm-bindgen 缓存: ${wasmBindgenDir ?? '未命中，走系统 PATH'}；` +
+      `wasm-opt: ${wasmOptDir ?? '未命中'}）:`,
+  );
   steps.forEach((step, idx) => {
     console.log(`  ${String(idx + 1).padStart(2, ' ')}. ${step.label}`);
   });
   process.exit(0);
 }
 
+// D-134b：三端 release profile 已启用 `wasm-opt = ["-Os"]`。缺二进制时 wasm-pack 要么报错、
+// 要么联网下载（离线/沙箱环境不可用），这里提前给出可执行的准备指引，而不是让它跑到一半才炸。
+if (wasmBuildSteps > 0 && !wasmOptDir) {
+  console.error('[verify] 未找到 wasm-opt：D-134b 起 release 构建需要 Binaryen wasm-opt。');
+  console.error(
+    '[verify] 解决：把 Binaryen version_133 解压到 .wasm-pack-cache/binaryen-version_133/（含 bin/wasm-opt[.exe]），或安装后加入系统 PATH。',
+  );
+  process.exit(1);
+}
+
 function runStep(step, index, total) {
   const started = Date.now();
   console.log(`\n[verify:${profile}] (${index + 1}/${total}) ${step.label}`);
   const env = { ...process.env };
-  if (step.needsWasmCache && wasmBindgenDir) {
+  if (step.needsWasmCache && (wasmBindgenDir || wasmOptDir)) {
     // Windows 的 PATH 常以 `Path` 大小写存在；直接写 env.PATH 会新建一条空 PATH，
     // 导致 spawn('cmd.exe') 找不到系统目录（ENOENT），verify:full 无法启动 wasm 构建。
     // 按实际键名前置，保留系统 PATH 的其余段。
     const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
-    env[pathKey] = `${wasmBindgenDir}${delimiter}${env[pathKey] ?? ''}`;
+    const cacheDirs = [...new Set([wasmBindgenDir, wasmOptDir].filter(Boolean))];
+    env[pathKey] = `${cacheDirs.join(delimiter)}${delimiter}${env[pathKey] ?? ''}`;
   }
   let res;
   if (step.kind === 'node') {

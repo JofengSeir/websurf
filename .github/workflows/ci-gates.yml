@@ -284,6 +284,29 @@ jobs:
           fi
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
+      # Binaryen wasm-opt：三端 release profile 自 D-134b 起启用 `wasm-opt = ["-Os"]`。
+      # 缺二进制时 wasm-pack 会失败（离线）或自行下载最新版（体积基线随版本漂移）；这里固定 version_133。
+      - name: Cache Binaryen wasm-opt
+        uses: actions/cache@v4
+        with:
+          path: ~/binaryen
+          key: binaryen-version_133-x86_64-linux
+
+      - name: Install Binaryen wasm-opt version_133
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/binaryen"
+          if [ ! -x "$HOME/binaryen/bin/wasm-opt" ]; then
+            curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 \
+              "https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-linux.tar.gz" \
+              -o "$RUNNER_TEMP/binaryen.tar.gz"
+            tar -xzf "$RUNNER_TEMP/binaryen.tar.gz" -C "$RUNNER_TEMP"
+            cp -R "$RUNNER_TEMP/binaryen-version_133/." "$HOME/binaryen/"
+          fi
+          echo "$HOME/binaryen/bin" >> "$GITHUB_PATH"
+          "$HOME/binaryen/bin/wasm-opt" --version
+
       # renderer-shared（共享渲染层）依赖 three，three 的单实例装在仓库根 node_modules
       # —— 必须先装根级，再装工程级（工程 package.json 已不含 three）。
       - name: Install root shared dependencies
@@ -365,6 +388,29 @@ jobs:
           fi
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
+      # Binaryen wasm-opt：三端 release profile 自 D-134b 起启用 `wasm-opt = ["-Os"]`。
+      # 缺二进制时 wasm-pack 会失败（离线）或自行下载最新版（体积基线随版本漂移）；这里固定 version_133。
+      - name: Cache Binaryen wasm-opt
+        uses: actions/cache@v4
+        with:
+          path: ~/binaryen
+          key: binaryen-version_133-x86_64-linux
+
+      - name: Install Binaryen wasm-opt version_133
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/binaryen"
+          if [ ! -x "$HOME/binaryen/bin/wasm-opt" ]; then
+            curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 \
+              "https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-linux.tar.gz" \
+              -o "$RUNNER_TEMP/binaryen.tar.gz"
+            tar -xzf "$RUNNER_TEMP/binaryen.tar.gz" -C "$RUNNER_TEMP"
+            cp -R "$RUNNER_TEMP/binaryen-version_133/." "$HOME/binaryen/"
+          fi
+          echo "$HOME/binaryen/bin" >> "$GITHUB_PATH"
+          "$HOME/binaryen/bin/wasm-opt" --version
+
       # 根级 three（renderer-shared 依赖）：与 debug-gates 同理，先根后工程。
       - name: Install root shared dependencies
         run: npm ci
@@ -442,6 +488,29 @@ jobs:
             cargo install wasm-bindgen-cli --version "${VERSION}" --locked
           fi
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      # Binaryen wasm-opt：三端 release profile 自 D-134b 起启用 `wasm-opt = ["-Os"]`。
+      # 缺二进制时 wasm-pack 会失败（离线）或自行下载最新版（体积基线随版本漂移）；这里固定 version_133。
+      - name: Cache Binaryen wasm-opt
+        uses: actions/cache@v4
+        with:
+          path: ~/binaryen
+          key: binaryen-version_133-x86_64-linux
+
+      - name: Install Binaryen wasm-opt version_133
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/binaryen"
+          if [ ! -x "$HOME/binaryen/bin/wasm-opt" ]; then
+            curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 \
+              "https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-linux.tar.gz" \
+              -o "$RUNNER_TEMP/binaryen.tar.gz"
+            tar -xzf "$RUNNER_TEMP/binaryen.tar.gz" -C "$RUNNER_TEMP"
+            cp -R "$RUNNER_TEMP/binaryen-version_133/." "$HOME/binaryen/"
+          fi
+          echo "$HOME/binaryen/bin" >> "$GITHUB_PATH"
+          "$HOME/binaryen/bin/wasm-opt" --version
 
       # 根级 three（renderer-shared 依赖）：与 debug-gates 同理，先根后工程。
       - name: Install root shared dependencies
