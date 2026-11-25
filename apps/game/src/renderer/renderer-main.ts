@@ -444,10 +444,12 @@ export class RendererMain {
       onBrushOffsetChange: (entity, offset) => {
         this.onBrushOffsetForAuthority?.(entity, [offset[0], offset[1], offset[2]]);
         this.brushVisibility?.setEntityOffset(entity, offset);
+        this.session?.setEntityOffset(entity, offset);
       },
       // 旋转 brush 角度 → 动态实体组绕 BSP origin 旋转（仅影响渲染几何，碰撞保持出生姿态）。
       onBrushRotationChange: (entity, angles) => {
         this.brushVisibility?.setEntityRotation(entity, angles);
+        this.session?.setEntityRotation(entity, angles);
       },
       // prop_dynamic TurnOn/TurnOff 与 StartDisabled 初态 → 隐藏/显示 prop_ 合并区间（不改碰撞）。
       onPropVisibleChange: (entity, visible) => {

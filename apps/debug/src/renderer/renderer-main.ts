@@ -953,11 +953,13 @@ export class RendererMain {
       // 插件接管可见性时同样让位：两套实例写同一批顶点会互相覆盖，插件不负责位移。
       onBrushOffsetChange: (entity, offset) => {
         this.onBrushOffsetForAuthority?.(entity, [offset[0], offset[1], offset[2]]);
+        this.session?.setEntityOffset(entity, offset);
         if (this.brushVisibilityDeferred) return;
         this.brushVisibility?.setEntityOffset(entity, offset);
       },
       // 旋转 brush 角度 → 动态实体组绕 BSP origin 旋转（插件接管可见性时同样让位）。
       onBrushRotationChange: (entity, angles) => {
+        this.session?.setEntityRotation(entity, angles);
         if (this.brushVisibilityDeferred) return;
         this.brushVisibility?.setEntityRotation(entity, angles);
       },

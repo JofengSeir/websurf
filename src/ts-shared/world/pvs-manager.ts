@@ -75,6 +75,8 @@ export class PvsManager {
   private readonly faceClusters: number[];
   /** 解码后的 PVS 位图；`hasPvs` 为 false 时是长度 0 的空数组（此时不会被读）。 */
   private readonly pvsBits: Uint8Array;
+  /** 每 leaf 25B（valid + 6×RGBExp32）的紧凑环境光表；缺省或长度不符时为 null。 */
+  private readonly leafAmbient: Uint8Array | null;
   /** cluster 总数，同时是位图位索引的上界。 */
   private readonly clusterCount: number;
   /** 每行字节数，用于把 cluster 映射到 `pvsBits` 的行首。 */
@@ -110,6 +112,12 @@ export class PvsManager {
     this.pvsBits = this.hasPvs
       ? base64ToBytes(data.pvsBitsBase64)
       : new Uint8Array(0);
+    if (typeof data.leafAmbientB64 === 'string' && data.leafAmbientB64.length > 0) {
+      const decoded = base64ToBytes(data.leafAmbientB64);
+      this.leafAmbient = decoded.length === this.leaves.length * 25 ? decoded : null;
+    } else {
+      this.leafAmbient = null;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -497,6 +505,38 @@ export class PvsManager {
    */
   get currentClusterId(): number {
     return this.currentCluster;
+  }
+
+  /** 是否带有紧凑 leaf ambient cube 数据，用于动态实体运行期实时环境光重采。 */
+  hasLeafAmbient(): boolean {
+    return this.leafAmbient !== null && this.nodes.length > 0;
+  }
+
+  /**
+   * 按世界坐标（Y-up）从 BSP 树定位所在 leaf，解码 6 面线性 RGB ambient cube 写入 `out`（长度 >= 18）。
+   * 命中固体 leaf / 越界 / 无采样数据时返回 false（调用方保持上一次有效样本）。
+   */
+  getAmbientCubeAt(pos: PvsVec3, out: Float32Array): boolean {
+    if (!this.leafAmbient || this.nodes.length === 0 || out.length < 18) {
+      return false;
+    }
+    const li = this.findLeaf(pos);
+    if (li < 0 || li >= this.leaves.length || this.leaves[li].isSolid) {
+      return false;
+    }
+    const off = li * 25;
+    if (this.leafAmbient[off] === 0) {
+      return false;
+    }
+    for (let j = 0; j < 6; j++) {
+      const foff = off + 1 + j * 4;
+      const exp = (this.leafAmbient[foff + 3] << 24) >> 24;
+      const scale = Math.pow(2, exp);
+      out[j * 3] = this.leafAmbient[foff] * scale;
+      out[j * 3 + 1] = this.leafAmbient[foff + 1] * scale;
+      out[j * 3 + 2] = this.leafAmbient[foff + 2] * scale;
+    }
+    return true;
   }
 
   /** 当前可见集的元素个数。**本仓零调用点**（同数据可从 `getStats().visibleCount` 取）。 */

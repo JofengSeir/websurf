@@ -75,6 +75,8 @@ import {
 import { createRenderFrameContext, mirrorFrameContext, type RenderFrameContext } from './render-context.js';
 import { TransparentSorter } from './transparent-sorter.js';
 import { SpotLightSelector } from './spot-light-selector.js';
+import type { SpotBeamRig } from './spot-beams.js';
+import { DynamicAmbientTracker } from './dynamic-ambient.js';
 import { mergeMainRoots } from './merge-main.js';
 import { FrameBudgetController } from './frame-budget.js';
 import { runPrewarmPasses } from './prewarm.js';
@@ -250,6 +252,8 @@ export class RenderSession {
   private spotBeams: THREE.Group | null = null;
   /** 每帧 Top-8 spot / Top-2 dlight 筛选（见 `SpotLightSelector`，零分配）。 */
   private readonly spots = new SpotLightSelector();
+  /** 动态实体实时光照：节流重采 BSP leaf ambientCube + 平滑插值。 */
+  private readonly dynamicAmbient = new DynamicAmbientTracker();
   /**
    * 场景扩展图元：`env_laser` 光束、PCF 粒子系统，以及「有数据、零消费者」的地图资产实体
    * （`env_sprite` / `env_sprite_clientside`、`point_worldtext`、`move_rope`+`keyframe_rope`、
@@ -613,6 +617,12 @@ export class RenderSession {
     // spot 光源的可见光柱（起源 point_spotlight 的锥面/光斑观感）：不参与剔块，单独挂场景。
     this.spotBeams = asm.spotBeams;
     if (this.spotBeams) this.scene.add(this.spotBeams);
+    if (entityBlocks && entityBlocks.length > 0) {
+      (this.spotBeams?.userData.rig as SpotBeamRig | undefined)?.attachEntityHierarchy(entityBlocks);
+    }
+    if (this.dynGroups.size > 0) {
+      this.dynamicAmbient.collect(this.dynGroups);
+    }
     // 合并后的块把顶点烘焙成世界坐标、local 矩阵清成单位阵，但 `matrixWorld` 要等一次
     // updateMatrixWorld 才会跟上（mergeIntoChunks 里只调了 `m.updateMatrix()`，从未刷新
     // matrixWorld；`renderer.compile` 也不刷）。PVS 采样按 `mesh.matrixWorld` 把几何点变换到
@@ -742,6 +752,7 @@ export class RenderSession {
     }
     this.scene.traverse((obj) => {
       if (obj.userData.vbspRotPivot === true) return;
+      if (obj.userData.vbspDynamicSpot === true) return;
       // T-P1-5a/5b：组节点运行期要改 `position`，祖先也要保持可更新；组内子节点照常冻结。
       if (groupNodes.has(obj) || groupAncestors.has(obj)) return;
       obj.matrixAutoUpdate = false;
@@ -781,6 +792,7 @@ export class RenderSession {
     // T-P1-5a：动态实体组属于旧根（mesh 随 root 一起 dispose），引用与待标记集合都要清，
     // 否则下一张图会沿用旧图的下标集合。
     this.dynGroups = new Map();
+    this.dynamicAmbient.clear();
     this.pendingDynamicEntityIndices = null;
     this.lastFrameAt = 0;
     if (this.root) {
@@ -954,6 +966,18 @@ export class RenderSession {
       return false;
     }
     return false;
+  }
+
+  /** 更新实体平移偏移：同步随 parentname 挂载的 point_spotlight 与动态实体实时光照采样。 */
+  setEntityOffset(entityIndex: number, offset: readonly [number, number, number]): void {
+    (this.spotBeams?.userData.rig as SpotBeamRig | undefined)?.setEntityOffset(entityIndex, offset);
+    this.dynamicAmbient.markMoved(entityIndex);
+  }
+
+  /** 更新实体旋转角度（Source pitch/yaw/roll）：同步随 parentname 挂载的 point_spotlight。 */
+  setEntityRotation(entityIndex: number, angles: readonly [number, number, number]): void {
+    (this.spotBeams?.userData.rig as SpotBeamRig | undefined)?.setEntityRotation(entityIndex, angles);
+    this.dynamicAmbient.markMoved(entityIndex);
   }
 
   /** 释放场景扩展图元（激光束 / PCF 粒子 / 地图资产实体）及其根节点；幂等。 */
@@ -1191,6 +1215,7 @@ export class RenderSession {
         this.entityExtras.update(this.camera);
       }
     }
+    this.dynamicAmbient.update(this.pvs, performance.now());
     // 动态对象（旋钮 pivot 等）刚改过变换：本帧在这里刷新一次世界矩阵，后面 6~9 趟
     // `renderer.render` 直接复用（`scene.matrixWorldAutoUpdate` 在构造函数里关掉了）。
     this.scene.updateMatrixWorld();

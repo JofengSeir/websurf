@@ -1,17 +1,16 @@
 /**
- * `KHR_lights_punctual` 里 spot 光源的**可见光柱 + 灯头光晕**。
+ * `KHR_lights_punctual` 里 spot 光源的**可见光柱 + 灯头光晕 + 运行期父级跟随**。
  *
- * 起源的 `point_spotlight` 在运行时画一束可见光柱：不是 3D 锥壳，而是一条**朝向相机的
- * ribbon 四边形**（`CBeam`），沿宽度方向软边、沿长度线性淡出、贴脸时淡出，加法混合。
- * 这里按同样的做法还原（见 `source-sdk-2013` 的 `point_spotlight.cpp` / `beam_shared.cpp`）：
- * - 几何只有 2 个三角形，顶点在灯位、末端在光柱命中点；
- * - 顶点着色器在视图空间把窄带朝相机展开（`cross(axis, toEye)`），永远不退化；
- * - 片元 `pow(1-|u|,1.6) * (1-v)` 双衰减，边缘与末端都收到 0，看不到多边形硬边；
- * - 加法混合、不写深度、受深度测试遮挡（打到墙就停在墙前）。
- *
- * 灯头光晕 sprite 只给 `point_spotlight`（起源里它才带 halo）。
+ * 起源的 `point_spotlight` 在运行时画一束可见光柱：不是硬边 3D 锥壳，而是一条**朝向相机的
+ * ribbon 四边形**（`CBeam`），带热灯丝核心与柔和体积光锥外晕、掠射消隐与距离淡出，加法混合。
+ * 通用特性：
+ * - 从 `KHR_lights_punctual` 读取真实 `rendercolor`、`vbspEntityIndex`、`vbspParentName`、`vbspSpawnFlags`；
+ * - 从紧致底座 `halfStart` 随距离张开为广角柔边光锥 `halfEnd`，不再出现灯头大矩形块；
+ * - 若带 `parentname`（例如挂在 `func_movelinear` / `func_rotating` / `func_door` 上的车载/机械射灯），
+ *   通过 `SpotBeamRig` 实时跟随祖先实体的平移与旋转，同时驱动光束几何、`SpotLightSelector` 与 `dlight` 光斑。
  */
 import * as THREE from 'three';
+import type { EntityBlockRecords } from './particles.js';
 
 export interface PunctualSpot {
 	position: [number, number, number];
@@ -26,12 +25,17 @@ export interface PunctualSpot {
 	beamWidth: number | null;
 	/** 起源 `point_spotlight` 的 `spotlightlength`（HU）；其余 spot 为 null。 */
 	beamLength: number | null;
+	/** BSP 实体枚举下标；缺失时为 null。 */
+	entityIndex: number | null;
+	/** 父实体 targetname（如车载旋转/平移动台）；缺失时为 null。 */
+	parentName: string | null;
+	/** `point_spotlight` spawnflags（bit0=Start On, bit1=No Dynamic Light）；缺失时为 null。 */
+	spawnFlags: number | null;
 }
 
-/** 起源 `beam_shared.cpp` 的 `MAX_BEAM_WIDTH`。 */
 const MAX_BEAM_WIDTH = 102.3;
-/** `CBeam::SetBrightness(64)` → 64/255，再加一点让它在暗场里读得出来。 */
-const BEAM_PEAK = 0.32;
+/** 双层体积光锥基准亮度：核心过白丝、外层柔和锥雾，适配泛光管线不刺眼。 */
+const BEAM_PEAK = 0.42;
 /** 起源 `FBEAM_SHADEOUT` 的近似：贴脸 30 HU 内淡出。 */
 const SHADEOUT_DISTANCE = 30;
 
@@ -94,6 +98,9 @@ export function collectPunctualSpots(json: unknown): PunctualSpot[] {
 			outerConeAngle: Number(spot.outerConeAngle) || Math.PI / 4,
 			beamWidth: typeof raw.vbspSpotlightWidth === 'number' ? raw.vbspSpotlightWidth : null,
 			beamLength: typeof raw.vbspSpotlightLength === 'number' ? raw.vbspSpotlightLength : null,
+			entityIndex: typeof raw.vbspEntityIndex === 'number' ? raw.vbspEntityIndex : null,
+			parentName: typeof raw.vbspParentName === 'string' && raw.vbspParentName !== '' ? raw.vbspParentName : null,
+			spawnFlags: typeof raw.vbspSpawnFlags === 'number' ? raw.vbspSpawnFlags : null,
 		});
 	}
 	return out;
@@ -109,6 +116,7 @@ const BEAM_VERT = `
 attribute float aHalf;
 varying vec2 vBeamUv;
 varying vec3 vBeamWorld;
+varying float vViewFade;
 void main() {
 	vBeamUv = uv;
 	vec4 world = modelMatrix * vec4(position, 1.0);
@@ -118,6 +126,7 @@ void main() {
 	vec3 toEye = normalize(-mv.xyz);
 	vec3 side = cross(axisView, toEye);
 	float len = length(side);
+	vViewFade = smoothstep(0.04, 0.32, len);
 	side = len > 1e-4 ? side / len : vec3(1.0, 0.0, 0.0);
 	mv.xyz += side * (position.x * 2.0 * aHalf);
 	gl_Position = projectionMatrix * mv;
@@ -125,27 +134,31 @@ void main() {
 `;
 
 /**
- * 光柱片元：`across` 软边 + `v` 线性长度衰减 + 贴脸淡出。
- *
- * 起源里 `CBeam` 的亮度是 64/255≈0.25、沿长度线性淡到 0、`FBEAM_SHADEOUT` 近处淡出。
+ * 体积射灯光锥片元：高热中心芯（gauss） + 柔和体积外散射（pow） + 灯口渐入/尾端渐出/掠射消隐。
  */
 const BEAM_FRAG = `
 uniform vec3 uColor;
 uniform float uPeak;
 varying vec2 vBeamUv;
 varying vec3 vBeamWorld;
+varying float vViewFade;
 void main() {
 	float across = abs(vBeamUv.x * 2.0 - 1.0);
-	float a = uPeak * pow(max(0.0, 1.0 - across), 1.6) * (1.0 - vBeamUv.y);
-	a *= smoothstep(0.0, ${SHADEOUT_DISTANCE.toFixed(1)}, distance(cameraPosition, vBeamWorld));
+	float core = exp(-across * across * 6.5);
+	float cone = pow(max(0.0, 1.0 - across), 2.3);
+	float radial = core * 0.55 + cone * 0.45;
+	float along = smoothstep(0.0, 0.05, vBeamUv.y) * pow(max(0.0, 1.0 - vBeamUv.y), 1.65);
+	float camFade = smoothstep(0.0, ${SHADEOUT_DISTANCE.toFixed(1)}, distance(cameraPosition, vBeamWorld));
+	float a = uPeak * radial * along * camFade * vViewFade;
 	if (a <= 0.001) discard;
-	gl_FragColor = vec4(uColor * a, a);
+	vec3 tint = mix(uColor, vec3(1.0), core * 0.42);
+	gl_FragColor = vec4(tint * a, a);
 }
 `;
 
 let glowTexture: THREE.Texture | null = null;
 
-/** 径向渐变贴图（白色→透明），只建一次；多盏灯共享。 */
+/** 径向渐变贴图（高热中心 + 柔和外光晕），只建一次；多盏灯共享。 */
 function getGlowTexture(): THREE.Texture {
 	if (glowTexture) return glowTexture;
 	const size = 128;
@@ -156,8 +169,9 @@ function getGlowTexture(): THREE.Texture {
 	if (ctx) {
 		const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
 		g.addColorStop(0, 'rgba(255,255,255,1)');
-		g.addColorStop(0.2, 'rgba(255,255,255,0.7)');
-		g.addColorStop(0.5, 'rgba(255,255,255,0.18)');
+		g.addColorStop(0.12, 'rgba(255,255,255,0.85)');
+		g.addColorStop(0.35, 'rgba(255,255,255,0.28)');
+		g.addColorStop(0.68, 'rgba(255,255,255,0.06)');
 		g.addColorStop(1, 'rgba(255,255,255,0)');
 		ctx.fillStyle = g;
 		ctx.fillRect(0, 0, size, size);
@@ -166,6 +180,171 @@ function getGlowTexture(): THREE.Texture {
 	tex.colorSpace = THREE.SRGBColorSpace;
 	glowTexture = tex;
 	return tex;
+}
+
+export interface SpotDLightEntry {
+	position: [number, number, number];
+	color: [number, number, number];
+	range: number;
+}
+
+interface RigEntry {
+	spot: PunctualSpot;
+	dlight: SpotDLightEntry | null;
+	beam: THREE.Mesh;
+	sprite: THREE.Sprite | null;
+	baseOrigin: THREE.Vector3;
+	baseDir: THREE.Vector3;
+	length: number;
+	ancestors: number[];
+}
+
+interface AncestorMeta {
+	pivot: THREE.Vector3;
+}
+
+const ZERO_VEC3: readonly [number, number, number] = [0, 0, 0];
+
+function parseOriginTuple(raw: unknown): THREE.Vector3 {
+	if (typeof raw !== 'string') return new THREE.Vector3();
+	const p = raw.trim().split(/\s+/).map(Number);
+	if (p.length < 3 || !Number.isFinite(p[0]) || !Number.isFinite(p[1]) || !Number.isFinite(p[2])) {
+		return new THREE.Vector3();
+	}
+	// Source [x, y, z] → 本仓 Y-up [y, z, x]
+	return new THREE.Vector3(p[1], p[2], p[0]);
+}
+
+/**
+ * 通用父级射灯刚体跟随控制器：把 `parentname` 绑定到实时移动/旋转的动态实体上，
+ * 同步更新体积光锥（beam）、灯头光晕（sprite）、聚光直接光（spot）与地面光斑（dlight）。
+ */
+export class SpotBeamRig {
+	private readonly entries: RigEntry[] = [];
+	private readonly byAncestor = new Map<number, RigEntry[]>();
+	private readonly ancestorMeta = new Map<number, AncestorMeta>();
+	private readonly offsets = new Map<number, readonly [number, number, number]>();
+	private readonly rotations = new Map<number, readonly [number, number, number]>();
+	private readonly tmpPos = new THREE.Vector3();
+	private readonly tmpDir = new THREE.Vector3();
+	private readonly tmpPivot = new THREE.Vector3();
+	private readonly tmpEuler = new THREE.Euler(0, 0, 0, 'XYZ');
+	private readonly tmpQuat = new THREE.Quaternion();
+	private readonly upAxis = new THREE.Vector3(0, 1, 0);
+
+	/** @internal 装配期登记一条射灯实例。 */
+	addEntry(entry: RigEntry): void {
+		this.entries.push(entry);
+	}
+
+	/** 载入实体清单后解析每盏射灯的父子层级（根祖先 → 直接父级）。 */
+	attachEntityHierarchy(entityBlocks: EntityBlockRecords): void {
+		this.byAncestor.clear();
+		this.ancestorMeta.clear();
+		const byTargetName = new Map<string, number>();
+		for (let i = 0; i < entityBlocks.length; i++) {
+			const tn = entityBlocks[i]?.targetname;
+			if (typeof tn !== 'string') continue;
+			const key = tn.trim().toLowerCase();
+			if (key && !byTargetName.has(key)) byTargetName.set(key, i);
+		}
+		for (const entry of this.entries) {
+			entry.ancestors.length = 0;
+			let curParent = entry.spot.parentName?.trim().toLowerCase() ?? '';
+			const visited = new Set<number>();
+			const chain: number[] = [];
+			for (let depth = 0; depth < 16 && curParent; depth++) {
+				const idx = byTargetName.get(curParent);
+				if (idx === undefined || visited.has(idx)) break;
+				visited.add(idx);
+				chain.push(idx);
+				if (!this.ancestorMeta.has(idx)) {
+					this.ancestorMeta.set(idx, { pivot: parseOriginTuple(entityBlocks[idx]?.origin) });
+				}
+				const next = entityBlocks[idx]?.parentname;
+				curParent = typeof next === 'string' ? next.trim().toLowerCase() : '';
+			}
+			if (chain.length === 0) continue;
+			chain.reverse(); // 根祖先在前，直接父级在后
+			entry.ancestors.push(...chain);
+			entry.beam.userData.vbspDynamicSpot = true;
+			if (entry.sprite) entry.sprite.userData.vbspDynamicSpot = true;
+			for (const ancIdx of chain) {
+				let list = this.byAncestor.get(ancIdx);
+				if (!list) {
+					list = [];
+					this.byAncestor.set(ancIdx, list);
+				}
+				list.push(entry);
+			}
+		}
+	}
+
+	setEntityOffset(entityIndex: number, offset: readonly [number, number, number]): void {
+		const affected = this.byAncestor.get(entityIndex);
+		if (!affected) return;
+		this.offsets.set(entityIndex, [offset[0], offset[1], offset[2]]);
+		for (const entry of affected) this.recompute(entry);
+	}
+
+	setEntityRotation(entityIndex: number, angles: readonly [number, number, number]): void {
+		const affected = this.byAncestor.get(entityIndex);
+		if (!affected) return;
+		this.rotations.set(entityIndex, [angles[0], angles[1], angles[2]]);
+		for (const entry of affected) this.recompute(entry);
+	}
+
+	private recompute(entry: RigEntry): void {
+		const pos = this.tmpPos.copy(entry.baseOrigin);
+		const dir = this.tmpDir.copy(entry.baseDir);
+		let prevOx = 0;
+		let prevOy = 0;
+		let prevOz = 0;
+		for (const ancIdx of entry.ancestors) {
+			const off = this.offsets.get(ancIdx) ?? ZERO_VEC3;
+			pos.x += off[0] - prevOx;
+			pos.y += off[1] - prevOy;
+			pos.z += off[2] - prevOz;
+			prevOx = off[0];
+			prevOy = off[1];
+			prevOz = off[2];
+			const rot = this.rotations.get(ancIdx);
+			if (rot && (rot[0] !== 0 || rot[1] !== 0 || rot[2] !== 0)) {
+				const meta = this.ancestorMeta.get(ancIdx);
+				const pivot = this.tmpPivot.copy(meta ? meta.pivot : ZERO_VEC3 as unknown as THREE.Vector3);
+				if (meta) {
+					this.tmpPivot.set(meta.pivot.x + off[0], meta.pivot.y + off[1], meta.pivot.z + off[2]);
+				} else {
+					this.tmpPivot.set(off[0], off[1], off[2]);
+				}
+				void pivot;
+				this.tmpEuler.set(rot[0], rot[1], rot[2], 'XYZ');
+				this.tmpQuat.setFromEuler(this.tmpEuler);
+				pos.sub(this.tmpPivot).applyQuaternion(this.tmpQuat).add(this.tmpPivot);
+				dir.applyQuaternion(this.tmpQuat).normalize();
+			}
+		}
+		entry.beam.position.copy(pos);
+		entry.beam.quaternion.setFromUnitVectors(this.upAxis, dir);
+		entry.beam.updateMatrix();
+		entry.beam.updateMatrixWorld(true);
+		if (entry.sprite) {
+			entry.sprite.position.copy(pos);
+			entry.sprite.updateMatrix();
+			entry.sprite.updateMatrixWorld(true);
+		}
+		entry.spot.position[0] = pos.x;
+		entry.spot.position[1] = pos.y;
+		entry.spot.position[2] = pos.z;
+		entry.spot.direction[0] = dir.x;
+		entry.spot.direction[1] = dir.y;
+		entry.spot.direction[2] = dir.z;
+		if (entry.dlight) {
+			entry.dlight.position[0] = pos.x + dir.x * entry.length;
+			entry.dlight.position[1] = pos.y + dir.y * entry.length + 5;
+			entry.dlight.position[2] = pos.z + dir.z * entry.length;
+		}
+	}
 }
 
 /** 沿光线找光柱被什么挡住（墙），用来决定末端半宽、长度与 dlight 位置。 */
@@ -202,29 +381,33 @@ export function buildSpotBeams(spots: PunctualSpot[], root: THREE.Object3D | nul
 
 	const glow = getGlowTexture();
 	const up = new THREE.Vector3(0, 1, 0);
-	const dlights: { position: [number, number, number]; color: [number, number, number]; range: number }[] = [];
+	const dlights: SpotDLightEntry[] = [];
+	const rig = new SpotBeamRig();
 
 	for (const s of spots) {
 		const isPointSpot = s.beamWidth !== null;
+		const startsOff = isPointSpot && s.spawnFlags !== null && (s.spawnFlags & 1) === 0;
+		const noDLight = isPointSpot && s.spawnFlags !== null && (s.spawnFlags & 2) !== 0;
+		if (startsOff) s.intensity = 0;
 		const axis = new THREE.Vector3(s.direction[0], s.direction[1], s.direction[2]).normalize();
 		const origin = new THREE.Vector3(s.position[0], s.position[1], s.position[2]);
 		const maxLength = Math.max(48, s.beamLength ?? Math.min(s.range, 900));
 		const hit = traceBeamHit(origin, axis, maxLength, root);
 		const length = hit.length;
 		const width = Math.min(MAX_BEAM_WIDTH, isPointSpot ? (s.beamWidth as number) : 2 * Math.tan(s.outerConeAngle) * length);
-		// 起源：起点宽 = spotlightwidth，末端宽 = width × 命中距离 / spotlightlength。
-		const halfStart = Math.max(2, width / 2);
-		const halfEnd = Math.max(2, (width / 2) * (length / maxLength));
+		// 灯头紧凑聚拢（halfStart 窄口）→ 随照射距离自然散开成体积光锥，消除旧版大矩形灯头。
+		const halfStart = isPointSpot ? Math.max(2.2, Math.min(7.5, width * 0.12)) : Math.max(2.0, width * 0.08);
+		const halfEnd = Math.max(halfStart + 4, (width * 0.5) * (0.28 + 0.72 * (length / maxLength)));
 		const color = new THREE.Color(s.color[0], s.color[1], s.color[2]);
-		// 起源 `CL_AllocDlight`：命中点往 +Z 抬 5 HU，半径 = 5.4 × 末端半宽。
-		// 亮度归一化到「1 = 默认 200×5 的灯」，避免和 spot 的 intensity 量纲直接相乘爆掉。
-		if (isPointSpot) {
-			const k = Math.min(1.5, Math.max(0.2, s.intensity / 1000));
-			dlights.push({
+		let dlight: SpotDLightEntry | null = null;
+		if (isPointSpot && !noDLight && !startsOff) {
+			const k = Math.min(1.5, Math.max(0.25, s.intensity / 1000));
+			dlight = {
 				position: [hit.point.x, hit.point.y + 5, hit.point.z],
 				color: [s.color[0] * k, s.color[1] * k, s.color[2] * k],
 				range: Math.max(48, 5.4 * halfEnd),
-			});
+			};
+			dlights.push(dlight);
 		}
 
 		const geometry = new THREE.BufferGeometry();
@@ -261,29 +444,44 @@ export function buildSpotBeams(spots: PunctualSpot[], root: THREE.Object3D | nul
 		beam.quaternion.setFromUnitVectors(up, axis);
 		beam.frustumCulled = false;
 		beam.renderOrder = 10;
+		beam.visible = !startsOff;
 		group.add(beam);
 
 		// 灯头辉光：起源里 `point_spotlight` 带 `light_glow03` halo。
+		let sprite: THREE.Sprite | null = null;
 		if (isPointSpot) {
 			const spriteMat = new THREE.SpriteMaterial({
 				map: glow,
 				color,
 				transparent: true,
-				opacity: 0.25,
+				opacity: 0.45,
 				depthWrite: false,
 				depthTest: true,
 				blending: THREE.AdditiveBlending,
 				fog: false,
 			});
-			const sprite = new THREE.Sprite(spriteMat);
+			sprite = new THREE.Sprite(spriteMat);
 			sprite.position.copy(origin);
-			sprite.scale.setScalar(Math.max(24, Math.min(MAX_BEAM_WIDTH, s.beamWidth ?? 96) * 0.5));
+			sprite.scale.setScalar(Math.max(18, Math.min(48, (s.beamWidth ?? 75) * 0.42)));
 			sprite.renderOrder = 11;
+			sprite.visible = !startsOff;
 			group.add(sprite);
 		}
+
+		rig.addEntry({
+			spot: s,
+			dlight,
+			beam,
+			sprite,
+			baseOrigin: origin.clone(),
+			baseDir: axis.clone(),
+			length,
+			ancestors: [],
+		});
 	}
 
 	group.userData.spots = spots;
 	group.userData.dlights = dlights;
+	group.userData.rig = rig;
 	return group;
 }

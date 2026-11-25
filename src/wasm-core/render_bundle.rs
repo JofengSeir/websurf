@@ -244,7 +244,7 @@ pub fn collect_pakfile_models(
 pub fn collect_light_entities(bsp: &vbsp::Bsp) -> Vec<model_integrator::Entity> {
     const LIGHT_CLASSNAMES: &[&str] = &["light", "light_spot", "point_spotlight", "light_environment"];
     let mut out = Vec::new();
-    for ent in bsp.entities.iter() {
+    for (idx, ent) in bsp.entities.iter().enumerate() {
         let Ok(classname) = ent.prop("classname") else {
             continue;
         };
@@ -259,7 +259,9 @@ pub fn collect_light_entities(bsp: &vbsp::Bsp) -> Vec<model_integrator::Entity> 
                 origin: prop("origin"),
                 angles: prop("angles"),
                 scale: prop("scale"),
-                light: prop("_light"),
+                // `point_spotlight` 使用 `rendercolor` 而非 `_light`；缺失 `_light` 时回落 `rendercolor`
+                // 使红色/绿色等彩色射灯不再退化成纯白。
+                light: prop("_light").or_else(|| prop("rendercolor")),
                 cone: prop("_cone"),
                 inner_cone: prop("_inner_cone"),
                 constant_attn: prop("_constant_attn"),
@@ -268,7 +270,11 @@ pub fn collect_light_entities(bsp: &vbsp::Bsp) -> Vec<model_integrator::Entity> 
                 pitch: prop("pitch"),
                 spotlight_width: prop("spotlightwidth"),
                 spotlight_length: prop("spotlightlength"),
-            }, ambient_cube: None, // 灯实体没有模型，不查 leaf ambient cube
+                entity_index: Some(idx as u32),
+                parentname: prop("parentname").filter(|s| !s.is_empty()),
+                spawnflags: prop("spawnflags").and_then(|s| s.trim().parse::<u32>().ok()),
+            },
+            ambient_cube: None, // 灯实体没有模型，不查 leaf ambient cube
         });
     }
     out
@@ -1195,5 +1201,42 @@ mod tests {
         assert!(!entity_is_non_solid("func_wall_toggle"));
         assert!(!entity_is_non_solid("func_door"));
         assert!(!entity_is_non_solid("worldspawn"));
+    }
+
+    #[test]
+    fn point_spotlight_collects_rendercolor_parent_and_spawnflags() {
+        let ze_path = std::path::Path::new("../../test/maps/ze_cursed_bear_tales_v1_2.bsp");
+        let Ok(bytes) = std::fs::read(ze_path) else {
+            return;
+        };
+        let bsp = crate::vbsp::Bsp::read(&bytes).expect("parse ze_cursed");
+        let lights = super::collect_light_entities(&bsp);
+        let spots: Vec<_> = lights
+            .iter()
+            .filter(|e| e.properties.classname == "point_spotlight")
+            .collect();
+        assert!(!spots.is_empty(), "ze_cursed 应包含 point_spotlight 实体");
+        let mut saw_colored = false;
+        let mut saw_parented = false;
+        for s in &spots {
+            assert!(
+                s.properties.entity_index.is_some(),
+                "point_spotlight 应保留 BSP 实体下标"
+            );
+            assert!(
+                s.properties.spawnflags.is_some(),
+                "point_spotlight 应保留 spawnflags"
+            );
+            if let Some(color) = s.properties.light.as_deref() {
+                if color != "255 255 255" && color != "255 255 255 200" {
+                    saw_colored = true;
+                }
+            }
+            if s.properties.parentname.as_deref().is_some_and(|p| !p.is_empty()) {
+                saw_parented = true;
+            }
+        }
+        assert!(saw_colored, "point_spotlight 应回退读取 rendercolor（非全白）");
+        assert!(saw_parented, "point_spotlight 应保留 parentname 层级");
     }
 }

@@ -966,7 +966,9 @@ impl ModelIntegrator {
                         light.insert("range".to_string(), serde_json::json!(r));
                     }
 
-                    // spot 光源额外加 innerConeAngle / outerConeAngle
+                    // `point_spotlight` 在起源里是引擎运行时生成光锥/光斑的射灯：
+                    // 优先用实体的真实 `rendercolor`（经 `light` 字段传入），补上 `vbspSpotlightWidth` /
+                    // `vbspSpotlightLength` 及实体/父级元数据供渲染端跟随运动。
                     if has_spot {
                         let (inner, outer) = self.parse_cone_angle(light_entity);
                         let mut spot = serde_json::Map::new();
@@ -980,6 +982,17 @@ impl ModelIntegrator {
                             light.insert("vbspSpotlightWidth".to_string(), serde_json::json!(w));
                             light.insert("vbspSpotlightLength".to_string(), serde_json::json!(l));
                         }
+                    }
+                    if let Some(idx) = light_entity.properties.entity_index {
+                        light.insert("vbspEntityIndex".to_string(), serde_json::json!(idx));
+                    }
+                    if let Some(parent) = &light_entity.properties.parentname {
+                        if !parent.is_empty() {
+                            light.insert("vbspParentName".to_string(), serde_json::json!(parent));
+                        }
+                    }
+                    if let Some(sf) = light_entity.properties.spawnflags {
+                        light.insert("vbspSpawnFlags".to_string(), serde_json::json!(sf));
                     }
 
                     // spot / directional 额外加 direction
@@ -1231,6 +1244,13 @@ pub struct EntityProperties {
     pub spotlight_width: Option<String>,
     #[serde(rename = "spotlightlength")]
     pub spotlight_length: Option<String>,
+    /// BSP 实体枚举下标、`parentname` 与 `spawnflags`（用于 `point_spotlight` 跟随父级移动/旋转与初态门控）。
+    #[serde(default)]
+    pub entity_index: Option<u32>,
+    #[serde(default)]
+    pub parentname: Option<String>,
+    #[serde(default)]
+    pub spawnflags: Option<u32>,
 }
 
 /// 实体
@@ -1669,6 +1689,9 @@ pub fn collect_model_entities(bsp: &crate::vbsp::Bsp) -> Vec<ModelEntity> {
                 pitch: None,
                 spotlight_width: None,
                 spotlight_length: None,
+                entity_index: None,
+                parentname: None,
+                spawnflags: None,
             },
             ambient_cube: prop("origin").and_then(|o| parse_origin_source(&o)).and_then(|p| bsp.ambient_cube_at_point(p)),
             source: PlacementSource {

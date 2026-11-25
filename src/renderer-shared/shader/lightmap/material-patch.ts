@@ -1030,6 +1030,8 @@ function applyAmbientCubeIfAny(mesh: THREE.Mesh, mat: THREE.MeshBasicMaterial): 
 			new THREE.Vector3(cube[i * 3], cube[i * 3 + 1], cube[i * 3 + 2]),
 		),
 	};
+	// 暴露可变 uniform 向量数组：动态实体移出室内后由 DynamicAmbientTracker 平滑原地更新，免重编译。
+	(mat.userData as Record<string, unknown>).__vbspAmbCubeUniform = uniformValue;
 	mat.onBeforeCompile = (shader) => {
 		shader.uniforms.vbspAmbCube = uniformValue;
 		shader.uniforms.vbspExposure = exposureUniform; registerInjectedMaterial(mat); registerInjection(mat, 'ambient-cube', String(fogMaxDensity));
@@ -1037,15 +1039,20 @@ function applyAmbientCubeIfAny(mesh: THREE.Mesh, mat: THREE.MeshBasicMaterial): 
 		shader.uniforms.vbspLightFloor = lightFloorUniform;
 		shader.uniforms.vbspAmbientScale = ambientScaleUniform;
 		shader.uniforms.vbspBakedMix = bakedMixUniform;
+		shader.uniforms = Object.assign(shader.uniforms, spotUniforms);
 		const vs = shader.vertexShader;
 		const vsA = vs.replace(
 			'#include <common>',
-			'varying vec3 vbspWNormal;\n#include <common>',
+			SPOT_VERT_DECL + 'varying vec3 vbspWNormal;\n#include <common>',
 		);
-		const vsB =
+		const vsB0 =
 			vsA !== vs
 				? vsA.replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvbspWNormal = normalize( mat3( modelMatrix ) * normal );')
 				: vsA;
+		const vsB =
+			vsB0 !== vsA
+				? vsB0.replace('#include <project_vertex>', '#include <project_vertex>\n\tvbspSpotWPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;')
+				: vsB0;
 		const vsChanged = vsB !== vs;
 		const fs = shader.fragmentShader;
 		const ambFn = [
@@ -1058,6 +1065,7 @@ function applyAmbientCubeIfAny(mesh: THREE.Mesh, mat: THREE.MeshBasicMaterial): 
 			"vec3 vbspAmbientRaw() {",
 			"	vec3 n = normalize( vbspWNormal );",
 			"	vec3 c = vec3( 0.0 );",
+			// Source 轴由 Three 世界轴换回（Sx=n.z, Sy=n.x, Sz=n.y），再按面序 +X/-X/+Y/-Y/+Z/-Z 加权。
 			"	c += vbspAmbCube[ n.z < 0.0 ? 1 : 0 ] * ( n.z * n.z );",
 			"	c += vbspAmbCube[ n.x < 0.0 ? 3 : 2 ] * ( n.x * n.x );",
 			"	c += vbspAmbCube[ n.y < 0.0 ? 5 : 4 ] * ( n.y * n.y );",
@@ -1077,8 +1085,11 @@ function applyAmbientCubeIfAny(mesh: THREE.Mesh, mat: THREE.MeshBasicMaterial): 
 		const mulSrc =
 			'reflectedLight.indirectDiffuse *= diffuseColor.rgb;';
 		const fsA = fs
-			.replace('#include <common>', ambFn + '\n#include <common>')
-			.replace(mulSrc, mulSrc.slice(0, -1) + ' * vbspAmbientWeight();')
+			.replace('#include <common>', SPOT_FRAG_DECLS + '\n' + ambFn + '\n#include <common>')
+			.replace(
+				mulSrc,
+				mulSrc.slice(0, -1) + ' * vbspAmbientWeight();\n\treflectedLight.indirectDiffuse += vbspSpotLight(vbspSpotWPos) * diffuseColor.rgb;',
+			)
 			// 同上：`$envmap` 反射要被第 2 级 ambient 光照调制
 			.replace(ENVMAP_INCLUDE_SRC, ENVMAP_MODULATED('vbspAmbientWeight()'));
 		const fsChanged = fsA !== fs;

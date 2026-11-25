@@ -782,3 +782,65 @@ test('world-builder: both 档同时保留二进制与两份 JSON', async () => {
   assert.notEqual(bundle.triJson, '[]');
 });
 
+const { PvsManager } = await loadTsBundle('src/ts-shared/world/pvs-manager.ts', 'pvs-manager');
+
+test('pvs-manager: hasLeafAmbient 与 getAmbientCubeAt 正确解码正负指数与实心 leaf', () => {
+  const makeLeafAmbientEntry = (valid, faces) => {
+    const buf = new Uint8Array(25);
+    buf[0] = valid ? 1 : 0;
+    for (let f = 0; f < 6; f++) {
+      const [r, g, b, exp] = faces[f] ?? [0, 0, 0, 0];
+      const off = 1 + f * 4;
+      buf[off] = r & 0xff;
+      buf[off + 1] = g & 0xff;
+      buf[off + 2] = b & 0xff;
+      buf[off + 3] = exp & 0xff;
+    }
+    return buf;
+  };
+
+  const leaf0 = makeLeafAmbientEntry(true, [
+    [255, 128, 0, 0],    // +X: exp=0 -> [255, 128, 0]
+    [255, 0, 0, 2],      // -X: exp=+2 -> [1020, 0, 0]
+    [0, 255, 0, -2],     // +Y: exp=-2 -> [0, 63.75, 0]
+    [0, 0, 255, -1],     // -Y: exp=-1 -> [0, 0, 127.5]
+    [128, 128, 128, 1],  // +Z: exp=+1 -> [256, 256, 256]
+    [64, 64, 64, 0],     // -Z
+  ]);
+  const leaf1 = makeLeafAmbientEntry(false, []);
+  const packed = new Uint8Array(50);
+  packed.set(leaf0, 0);
+  packed.set(leaf1, 25);
+  const leafAmbientB64 = Buffer.from(packed).toString('base64');
+
+  const basePvs = {
+    rootNode: 0,
+    nodes: [{ normal: [0, 1, 0], dist: 0, children: [-1, -2] }],
+    leaves: [
+      { cluster: 0, mins: [-100, 0, -100], maxs: [100, 100, 100], isSolid: false },
+      { cluster: -1, mins: [-100, -100, -100], maxs: [100, 0, 100], isSolid: true },
+    ],
+    faceClusters: [],
+    pvsBitsBase64: '',
+    clusterCount: 1,
+    bytesPerRow: 1,
+  };
+
+  const withoutAmb = new PvsManager(JSON.stringify(basePvs));
+  assert.equal(withoutAmb.hasLeafAmbient(), false);
+  const cubeOut = new Float32Array(18);
+  assert.equal(withoutAmb.getAmbientCubeAt({ x: 0, y: 10, z: 0 }, cubeOut), false);
+
+  const withAmb = new PvsManager(JSON.stringify({ ...basePvs, leafAmbientB64 }));
+  assert.equal(withAmb.hasLeafAmbient(), true);
+  assert.equal(withAmb.getAmbientCubeAt({ x: 0, y: 10, z: 0 }, cubeOut), true);
+  assert.ok(Math.abs(cubeOut[0] - 255) < 1e-4);
+  assert.ok(Math.abs(cubeOut[1] - 128) < 1e-4);
+  assert.equal(cubeOut[2], 0);
+  assert.ok(Math.abs(cubeOut[3] - 1020) < 1e-4); // 正指数 2^2
+  assert.ok(Math.abs(cubeOut[7] - 63.75) < 1e-4); // 负指数 2^-2
+  assert.ok(Math.abs(cubeOut[11] - 127.5) < 1e-4); // 负指数 2^-1
+  assert.equal(withAmb.getAmbientCubeAt({ x: 0, y: -10, z: 0 }, cubeOut), false, '实心 leaf / valid=0 应返回 false');
+});
+
+

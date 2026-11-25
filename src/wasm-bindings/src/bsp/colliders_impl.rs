@@ -510,6 +510,8 @@ pub(crate) fn parse_pvs_data(bsp: &vbsp::Bsp) -> Result<String, JsValue> {
         pvs_bits_base64: String,
         cluster_count: u32,
         bytes_per_row: usize,
+        /// 每 leaf 25B（`valid: u8` + 6×4B `ColorRgbExp32`），供运行期动态实体按实时位置重采 ambient cube。
+        leaf_ambient_b64: String,
     }
 
     // 坐标旋转 [x,y,z]→[y,z,x]（BSP Z-up → Three.js Y-up），与其他导出函数保持一致
@@ -601,6 +603,37 @@ pub(crate) fn parse_pvs_data(bsp: &vbsp::Bsp) -> Result<String, JsValue> {
         base64::engine::general_purpose::STANDARD.encode(&pvs_bits)
     };
 
+    // ---- 5. 紧凑导出每 leaf 的 ambient cube（25B/leaf: valid + 6x ColorRgbExp32），与 Bsp::ambient_cube_at_point 同 HDR/LDR 口径 ----
+    let use_hdr = bsp.leaf_ambient_lighting_hdr.len() > bsp.leaf_ambient_lighting.len();
+    let (amb_indices, amb_samples) = if use_hdr {
+        (&bsp.leaf_ambient_indices_hdr, &bsp.leaf_ambient_lighting_hdr)
+    } else {
+        (&bsp.leaf_ambient_indices, &bsp.leaf_ambient_lighting)
+    };
+    let leaf_ambient_b64 = if !amb_indices.is_empty() && !amb_samples.is_empty() {
+        let mut raw = vec![0u8; bsp.leaves.len() * 25];
+        for (li, idx) in amb_indices.iter().take(bsp.leaves.len()).enumerate() {
+            if idx.ambient_sample_count == 0 {
+                continue;
+            }
+            if let Some(sample) = amb_samples.get(idx.first_ambient_sample as usize) {
+                let off = li * 25;
+                raw[off] = 1;
+                for (j, face) in sample.cube.iter().enumerate() {
+                    let foff = off + 1 + j * 4;
+                    raw[foff] = face.r;
+                    raw[foff + 1] = face.g;
+                    raw[foff + 2] = face.b;
+                    raw[foff + 3] = face.exponent as u8;
+                }
+            }
+        }
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(&raw)
+    } else {
+        String::new()
+    };
+
     let pvs_data = PvsData {
         root_node: 0,
         nodes,
@@ -609,6 +642,7 @@ pub(crate) fn parse_pvs_data(bsp: &vbsp::Bsp) -> Result<String, JsValue> {
         pvs_bits_base64,
         cluster_count,
         bytes_per_row,
+        leaf_ambient_b64,
     };
 
     serde_json::to_string(&pvs_data).map_err(|e| to_js_err(e, "序列化 PVS 数据失败"))

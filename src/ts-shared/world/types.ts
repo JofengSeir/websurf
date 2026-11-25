@@ -64,4 +64,6 @@ export interface WasmPvsData {
   clusterCount: number;
   /** 每个 cluster 行的字节数 = `ceil(clusterCount / 8)`。 */
   bytesPerRow: number;
+  /** 每 leaf 25 字节（valid + 6×RGBExp32）紧凑 ambient cube 表，base64 编码；缺省或空串即不可用。 */
+  leafAmbientB64?: string;
 }
