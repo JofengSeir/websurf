@@ -17,10 +17,15 @@
 import * as THREE from 'three';
 
 import { parseEntityBlocks as parseEntityBlocksShared, type KeyValuePair } from '../../ts-shared/entity/map-data.js';
+import { particleStartsActive } from './entity-extras/entity-state.js';
 
 /** 一条 `info_particle_system` 实体（已换算到 Y-up 世界坐标）。 */
 export interface ParticleEntity {
   effect: string;
+  /** 实体块下标（= `vbsp_entity_index`，运行期 Start/Stop 按它寻址）；旧调用方缺省 -1。 */
+  entityIndex?: number;
+  /** `start_active`（`CParticleSystem::Activate`）：false ⇒ 载入后不发射，等 I/O `Start`。 */
+  startActive?: boolean;
   /** 世界坐标（Y-up，HU）。 */
   origin: [number, number, number];
   /** Source angles（pitch yaw roll，度）。 */
@@ -297,14 +302,22 @@ export function collectParticleEntities(
   entityIoJsonOrBlocks?: string | EntityBlockRecords | null,
 ): ParticleEntity[] {
   const out: ParticleEntity[] = [];
-  for (const block of resolveEntityBlocks(entityIoJsonOrBlocks)) {
+  const blocks = resolveEntityBlocks(entityIoJsonOrBlocks);
+  for (let entityIndex = 0; entityIndex < blocks.length; entityIndex++) {
+    const block = blocks[entityIndex];
     if (block['classname'] !== 'info_particle_system') continue;
     const effect = block['effect_name'];
     if (!effect) continue;
     const src = parseVec3(block['origin'], [0, 0, 0]);
     const angles = parseVec3(block['angles'], [0, 0, 0]);
     // Source Z-up → 引擎 Y-up：world = (src.y, src.z, src.x)
-    out.push({ effect, origin: [src[1], src[2], src[0]], angles });
+    out.push({
+      effect,
+      entityIndex,
+      startActive: particleStartsActive(block),
+      origin: [src[1], src[2], src[0]],
+      angles,
+    });
   }
   return out;
 }
@@ -773,6 +786,8 @@ interface RopeLayerGroup {
  * 每帧动画语义不变（模拟只有一份：4 层参数完全相同，原本就是 4 份等价模拟）。
  */
 class RopeRibbon {
+  /** 实体块下标（运行期 Start/Stop 门控）。 */
+  readonly entityIndex: number;
   /** 按贴图分组后的网格（beam 层组 / softBar 层组），每组 1 个 draw。 */
   readonly meshes: THREE.Mesh[] = [];
   private readonly groups: RopeLayerGroup[] = [];
@@ -784,6 +799,7 @@ class RopeRibbon {
   private readonly scrollOffset = { value: 0 };
 
   constructor(entity: ParticleEntity, profile: RopeProfile, textures: { beam: THREE.Texture; softBar: THREE.Texture }) {
+    this.entityIndex = entity.entityIndex ?? -1;
     this.profile = profile;
     this.origin = new THREE.Vector3(entity.origin[0], entity.origin[1], entity.origin[2]);
     this.maxPoints = Math.ceil(profile.rate * profile.lifetime) + 2;
@@ -976,6 +992,8 @@ class RopeRibbon {
  * 一批小的加法点精灵，沿光柱高度缓慢上升、随机横向漂移、按高度渐隐。
  */
 class BeamMotes {
+  /** 实体块下标（运行期 Start/Stop 门控）。 */
+  readonly entityIndex: number;
   readonly points: THREE.Points;
   private readonly baseY: Float32Array;
   private readonly phase: Float32Array;
@@ -986,7 +1004,8 @@ class BeamMotes {
   private readonly positions: Float32Array;
   private elapsed = 0;
 
-  constructor(origin: THREE.Vector3, beamWidth: number, height: number, count: number, texture: THREE.Texture, color: number) {
+  constructor(origin: THREE.Vector3, beamWidth: number, height: number, count: number, texture: THREE.Texture, color: number, entityIndex: number) {
+    this.entityIndex = entityIndex;
     this.count = count;
     this.height = height;
     this.baseY = new Float32Array(count);
@@ -1056,6 +1075,8 @@ interface StaticBillboard {
 }
 
 interface GlowCluster {
+  /** 拥有该光团的实体下标（运行期 Start/Stop 门控）。 */
+  ownerIndex: number;
   basePositions: THREE.Vector3[];
   phases: number[];
   drift: number[];
@@ -1120,6 +1141,8 @@ interface AlchTrailParticle {
 class AlchParticleField {
   /** 站点中心（世界空间）；父层光点与子层拖尾都从这里散布。 */
   readonly origin: THREE.Vector3;
+  /** 实体块下标（运行期 Start/Stop 门控）。 */
+  readonly entityIndex: number;
   /** 剔除用粗包围球半径：粒子会向上飘，要把「散布距离 + 上飘位移」都包住。 */
   readonly cullRadius: number;
   /** 父层光点占用的槽位数（诊断 stats 用）。 */
@@ -1149,6 +1172,7 @@ class AlchParticleField {
     trailSlot: number,
   ) {
     this.origin = new THREE.Vector3(entity.origin[0], entity.origin[1], entity.origin[2]);
+    this.entityIndex = entity.entityIndex ?? -1;
     this.profile = profile;
     this.spriteCount = profile.sprite.maxParticles;
     this.spriteBatch = spriteBatch;
@@ -1318,6 +1342,16 @@ class AlchParticleField {
     for (let i = active; i < trailLayer.maxParticles; i++) this.trailBatch.collapseAt(this.trailSlot + i);
   }
 
+  /** 运行期 Stop / 初态 `start_active=0`：两层槽位全塌；模拟状态保留，`Start` 后接着跑。 */
+  collapse(): void {
+    for (let i = 0; i < this.profile.sprite.maxParticles; i++) {
+      this.spriteBatch.collapseAt(this.spriteSlot + i);
+    }
+    for (let i = 0; i < this.profile.trail.maxParticles; i++) {
+      this.trailBatch.collapseAt(this.trailSlot + i);
+    }
+  }
+
   dispose(): void {
     this.spriteParticles.length = 0;
     this.trailParticles.length = 0;
@@ -1385,9 +1419,15 @@ export class ParticleSystems {
   private readonly motes: BeamMotes[] = [];
   /** 符文祭坛（alch）的两层 PCF 粒子（环几何由 brush 实体负责，不在这里）。 */
   private readonly alchFields: AlchParticleField[] = [];
+  /**
+   * 被 I/O `Stop`（或初态 `start_active=0`）关掉的 `info_particle_system` 实体：
+   * 不推进模拟、槽位全塌、顶层对象强制不可见；`Start` 从集合里移除即可恢复（模拟状态未销毁）。
+   */
+  private readonly suppressed = new Set<number>();
   /** rope 底部光球/底光斑的静态参数（合批后每帧按相机基向量摆 quad）。 */
   private readonly ropeBillboards: {
     ribbon: RopeRibbon;
+    entityIndex: number;
     balls: StaticBillboard[];
     flares: StaticBillboard[];
     ballSlot: number;
@@ -1453,6 +1493,8 @@ export class ParticleSystems {
     let trailSlot = 0;
 
     for (const entity of entities) {
+      const entityIndex = entity.entityIndex ?? -1;
+      const startActive = entity.startActive !== false;
       const rope = ROPE_PROFILES[entity.effect];
       if (rope) {
         // 四层叠加（task-11 round-3：把「亮核宽度 w90」与「光晕翼展 w60/w40」解耦）：
@@ -1470,6 +1512,7 @@ export class ParticleSystems {
         // 模拟只跑一份（4 层参数本来完全一致）；宽度/不透明度仍按 ROPE_LAYERS 逐层生效。
         const ribbon = new RopeRibbon(entity, rope, { beam: this.beamTexture, softBar: this.softBarTexture });
         this.ropes.push(ribbon);
+        if (!startActive) this.suppressed.add(entityIndex);
         this.root.add(...ribbon.meshes);
         // 柱底「白热光球」= `tendies_endparticle04`（pcf-scout task-15 实测）：
         // render_animated_sprites + particle_glow_11，radius 800（半宽 ⇒ 单 sprite 1600 HU），
@@ -1500,7 +1543,15 @@ export class ParticleSystems {
             a: 0.085,
           });
         }
-        const motes = new BeamMotes(new THREE.Vector3(entity.origin[0], entity.origin[1], entity.origin[2]), rope.width, 4200, 42, this.glowTexture, 0xd8ccff);
+        const motes = new BeamMotes(
+          new THREE.Vector3(entity.origin[0], entity.origin[1], entity.origin[2]),
+          rope.width,
+          4200,
+          42,
+          this.glowTexture,
+          0xd8ccff,
+          entityIndex,
+        );
         this.root.add(motes.points);
         this.motes.push(motes);
         // 柱底大光斑（源 render_animated_sprites 04：radius 800 => 1600x1600 的 32 个大光斑堆在底部）
@@ -1524,7 +1575,7 @@ export class ParticleSystems {
             a: 0.009,
           });
         }
-        this.ropeBillboards.push({ ribbon, balls, flares, ballSlot, flareSlot: spriteSlot });
+        this.ropeBillboards.push({ ribbon, entityIndex, balls, flares, ballSlot, flareSlot: spriteSlot });
         ballSlot += BALL_SPRITES;
         spriteSlot += FLARE_SPRITES;
         // 柱体外围的大范围淡紫体积雾（源里来自 6 条 sprite_trail 白雾 + 04 大光斑的叠加包围感）
@@ -1546,6 +1597,8 @@ export class ParticleSystems {
         );
         haze.position.set(entity.origin[0], entity.origin[1] + 2000, entity.origin[2]);
         haze.renderOrder = 9;
+        // 门控按实体下标找对象（haze 与 rope/motes 是同一实体的三层）。
+        haze.userData.vbspParticleEntity = entityIndex;
         this.root.add(haze);
         this.hazes.push(haze);
         continue;
@@ -1553,6 +1606,7 @@ export class ParticleSystems {
       const glow = GLOW_PROFILES[entity.effect];
       if (glow) {
         this.glowClusters.push(this.buildGlow(entity, glow, spriteSlot));
+        if (!startActive) this.suppressed.add(entityIndex);
         spriteSlot += glow.count;
         continue;
       }
@@ -1561,6 +1615,7 @@ export class ParticleSystems {
         // task-32：父层光点 / 子层拖尾都写进共享批（不再各自建 Sprite / Mesh）。
         const field = new AlchParticleField(entity, alch, this.spriteBatch, spriteSlot, this.trailBatch, trailSlot);
         this.alchFields.push(field);
+        if (!startActive) this.suppressed.add(entityIndex);
         spriteSlot += alch.sprite.maxParticles;
         trailSlot += alch.trail.maxParticles;
       }
@@ -1568,6 +1623,30 @@ export class ParticleSystems {
     // 所有光效对象都是「实体挂件」，不进合并块 ⇒ 块级 PVS/距离剔除管不到它们，
     // 由 `update()` 里按视锥 + 距离做粗剔除。包围球必须等第一帧模拟跑完再算：
     // 构造时 rope/尾迹的顶点缓冲还是空的，算出来的包围球贴在原点，会把整片光效误剔除。
+  }
+
+  /**
+   * 运行期 I/O `Start` / `Stop`（`particle_system.cpp:117-118`）：只改门控集合，不销毁模拟状态。
+   * 返回 false 表示该实体没有可门控的粒子对象（effect 未命中本实现的 profile）。
+   */
+  setEntityActive(entityIndex: number, active: boolean): boolean {
+    const owned =
+      this.ropes.some((r) => r.entityIndex === entityIndex) ||
+      this.glowClusters.some((c) => c.ownerIndex === entityIndex) ||
+      this.alchFields.some((f) => f.entityIndex === entityIndex);
+    if (!owned) return false;
+    if (active) this.suppressed.delete(entityIndex);
+    else this.suppressed.add(entityIndex);
+    return true;
+  }
+
+  /** 该实体当前的粒子门控状态（诊断用；没有对象时返回 null）。 */
+  isEntityActive(entityIndex: number): boolean | null {
+    let owned = false;
+    for (const r of this.ropes) if (r.entityIndex === entityIndex) owned = true;
+    for (const c of this.glowClusters) if (c.ownerIndex === entityIndex) owned = true;
+    for (const f of this.alchFields) if (f.entityIndex === entityIndex) owned = true;
+    return owned ? !this.suppressed.has(entityIndex) : null;
   }
 
   /**
@@ -1594,6 +1673,7 @@ export class ParticleSystems {
       drift.push(8 + Math.random() * 18);
     }
     return {
+      ownerIndex: entity.entityIndex ?? -1,
       basePositions,
       phases,
       drift,
@@ -1609,9 +1689,16 @@ export class ParticleSystems {
   /** 每帧推进：`dt` 秒；`camera` 用于 billboard 与朝向。 */
   update(dt: number, camera: THREE.Camera): void {
     this.elapsed += dt;
-    for (const rope of this.ropes) rope.update(dt, camera);
-    for (const motes of this.motes) motes.update(dt);
+    for (const rope of this.ropes) {
+      if (this.suppressed.has(rope.entityIndex)) continue;
+      rope.update(dt, camera);
+    }
+    for (const motes of this.motes) {
+      if (this.suppressed.has(motes.entityIndex)) continue;
+      motes.update(dt);
+    }
     for (const haze of this.hazes) {
+      if (this.suppressed.has(haze.userData.vbspParticleEntity as number)) continue;
       haze.quaternion.copy(camera.quaternion);
       haze.rotateY(Math.PI);
     }
@@ -1623,6 +1710,8 @@ export class ParticleSystems {
       this.cullTagged = true;
     }
     this.cullByCamera(camera);
+    // 门控必须压在剔除之后：剔除会按包围球把 rope/haze/motes 重新置 visible。
+    this.applyEntityGate();
 
     // task-32：光效四边形全部写进三张共享批。drawRange 恒定，所以每帧每个槽位要么写
     // 真实四边形、要么塌成零面积（否则会残留上一帧的顶点）。
@@ -1654,6 +1743,10 @@ export class ParticleSystems {
     // 等价于原来每个 Sprite 各自的包围球距离剔除。
     const maxDist = PARTICLE_CULL_DISTANCE;
     for (const cluster of this.glowClusters) {
+      if (this.suppressed.has(cluster.ownerIndex)) {
+        for (let i = 0; i < cluster.count; i++) this.spriteBatch.collapseAt(cluster.slots[i]);
+        continue;
+      }
       cluster.elapsed += dt;
       for (let i = 0; i < cluster.count; i++) {
         const base = cluster.basePositions[i];
@@ -1682,10 +1775,28 @@ export class ParticleSystems {
       }
     }
     // alch 站点自己处理父层/子层槽位（内含弹道模拟与距离粗剔除）。
-    for (const field of this.alchFields) field.update(dt, camera, this.basis);
+    for (const field of this.alchFields) {
+      if (this.suppressed.has(field.entityIndex)) field.collapse();
+      else field.update(dt, camera, this.basis);
+    }
     this.ballBatch.end();
     this.spriteBatch.end();
     this.trailBatch.end();
+  }
+
+  /** 初态 `start_active=0` / 运行期 `Stop` 的实体：顶层对象强制不可见（槽位在写批时塌掉）。 */
+  private applyEntityGate(): void {
+    if (this.suppressed.size === 0) return;
+    for (const rope of this.ropes) {
+      if (!this.suppressed.has(rope.entityIndex)) continue;
+      for (const mesh of rope.meshes) mesh.visible = false;
+    }
+    for (const motes of this.motes) {
+      if (this.suppressed.has(motes.entityIndex)) motes.points.visible = false;
+    }
+    for (const haze of this.hazes) {
+      if (this.suppressed.has(haze.userData.vbspParticleEntity as number)) haze.visible = false;
+    }
   }
 
   /**

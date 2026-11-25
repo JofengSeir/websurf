@@ -105,6 +105,21 @@ export interface EntityHost {
   setBrushOffset?(entityIndex: number, offset: Vec3): void;
   /** `trigger_gravity` 改玩家重力倍数；不实现时该 trigger 只记录状态。 */
   setPlayerGravity?(value: number): void;
+  /**
+   * `env_sprite` 的 ShowSprite / HideSprite / ToggleSprite（`Sprite.cpp:590-602`）。
+   * sprite 不占 brush 几何，单独走一个钩子，避免把「可见性」和「碰撞开关」混在一起。
+   */
+  setSpriteVisible?(entityIndex: number, visible: boolean): void;
+  /**
+   * `info_particle_system` 的 Start / Stop（`particle_system.cpp:117-118`）。
+   * `active` 只表示发射开关，不改 `effect_name` / `start_active` 的初始状态。
+   */
+  setParticleActive?(entityIndex: number, active: boolean): void;
+  /**
+   * `prop_dynamic` 的 TurnOn / TurnOff（`props.cpp:1927-1930` 的 `EF_NODRAW`）。
+   * 只改可见性：`StartDisabled` 的道具在 SDK 里仍然有碰撞，不能用 brush 的碰撞开关代替。
+   */
+  setPropVisible?(entityIndex: number, visible: boolean): void;
   /** 诊断日志（默认丢弃）。 */
   log?(message: string): void;
 }

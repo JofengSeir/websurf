@@ -28,6 +28,12 @@ export interface EntityEffectSink {
   brushEnabled?(entityIndex: number, enabled: boolean): void;
   /** 移动 brush（`func_movelinear` / 门）的绝对位移（相对 BSP 出生位置，Y-up）。 */
   brushOffset?(entityIndex: number, offset: Vec3): void;
+  /** `env_sprite` 的 ShowSprite / HideSprite / ToggleSprite。 */
+  spriteVisible?(entityIndex: number, visible: boolean): void;
+  /** `info_particle_system` 的 Start / Stop。 */
+  particleActive?(entityIndex: number, active: boolean): void;
+  /** `prop_dynamic` 的 TurnOn / TurnOff（只改可见性，不动碰撞）。 */
+  propVisible?(entityIndex: number, visible: boolean): void;
   script?(code: string, context: {
     kind: 'code' | 'file' | 'function';
     entity: EntityRef;
@@ -63,6 +69,9 @@ export function createObservingHost(
     stopSound: (soundName, entityIndex) => sink.stopSound?.(soundName, entityIndex),
     setBrushEnabled: (entityIndex, enabled) => sink.brushEnabled?.(entityIndex, enabled),
     setBrushOffset: (entityIndex, offset) => sink.brushOffset?.(entityIndex, offset),
+    setSpriteVisible: (entityIndex, visible) => sink.spriteVisible?.(entityIndex, visible),
+    setParticleActive: (entityIndex, active) => sink.particleActive?.(entityIndex, active),
+    setPropVisible: (entityIndex, visible) => sink.propVisible?.(entityIndex, visible),
     evalScript: (code, context) => sink.script?.(code, context),
     terminateScriptScope: (entityIndex) => sink.terminateScriptScope?.(entityIndex),
     log: (message) => sink.log?.(message),

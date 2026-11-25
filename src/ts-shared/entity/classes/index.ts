@@ -15,6 +15,7 @@ import { registerLogicClasses } from './logic.js';
 import { registerBrushClasses } from './brush.js';
 import { registerFilterClasses } from './filters.js';
 import { registerMiscClasses } from './misc.js';
+import { registerExtrasClasses } from './extras.js';
 
 let installed = false;
 
@@ -30,6 +31,9 @@ export function installEntityClasses(force = false): void {
   registerLogicClasses();
   registerBrushClasses();
   registerMiscClasses();
+  // 装饰/特效实体（env_sprite / prop_dynamic / info_particle_system / point_worldtext）
+  // 必须在 Misc 之后：Misc 不再注册 info_particle_system，这里给出带 I/O 的完整类。
+  registerExtrasClasses();
   installed = true;
 }
 

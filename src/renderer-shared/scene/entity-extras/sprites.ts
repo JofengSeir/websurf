@@ -19,6 +19,7 @@ import * as THREE from 'three';
 import { parseVec3, type EntityBlockRecords } from '../particles.js';
 import { BillboardQuadBatch, billboardBasisOf, type BillboardBasis } from './billboard-batch.js';
 import { parseEntityColor } from './colors.js';
+import { spriteStartsVisible } from './entity-state.js';
 import { makeGlowTexture } from './textures.js';
 
 /**
@@ -40,6 +41,10 @@ const SPRITE_RENDER_ORDER = 12;
 
 /** 一条 `env_sprite`（已换算到 Y-up 世界坐标）。 */
 export interface SpriteEntity {
+  /** 实体块下标（= `vbsp_entity_index`，运行期 ShowSprite/HideSprite 按它寻址）。 */
+  entityIndex: number;
+  /** `CSprite::Spawn` 的初态（见 `entity-state.ts`）：有 targetname 且未置 bit0 ⇒ false。 */
+  startVisible: boolean;
   /** 世界坐标（Y-up，HU）。 */
   origin: [number, number, number];
   /** 世界尺寸（HU，= 模型基准尺寸 × `scale`）。 */
@@ -53,7 +58,8 @@ export interface SpriteEntity {
 /** 从实体键值块里收集 `env_sprite` / `env_sprite_clientside`。 */
 export function collectSpriteEntities(blocks: EntityBlockRecords): SpriteEntity[] {
   const out: SpriteEntity[] = [];
-  for (const block of blocks) {
+  for (let entityIndex = 0; entityIndex < blocks.length; entityIndex++) {
+    const block = blocks[entityIndex];
     const cls = block['classname'];
     if (cls !== 'env_sprite' && cls !== 'env_sprite_clientside') continue;
     const src = parseVec3(block['origin'], [0, 0, 0]);
@@ -64,7 +70,14 @@ export function collectSpriteEntities(blocks: EntityBlockRecords): SpriteEntity[
     const color = new THREE.Color();
     parseEntityColor(block['rendercolor'], block['renderamt'], color);
     // Source Z-up → 引擎 Y-up：world = (src.y, src.z, src.x)。
-    out.push({ origin: [src[1], src[2], src[0]], size: base * scale, color, model });
+    out.push({
+      entityIndex,
+      startVisible: spriteStartsVisible(block),
+      origin: [src[1], src[2], src[0]],
+      size: base * scale,
+      color,
+      model,
+    });
   }
   return out;
 }
@@ -75,6 +88,10 @@ export class SpriteGlows {
   /** 采到的实体数（含尺寸为 0 的，仍算「已覆盖」）。 */
   readonly count: number;
   private readonly entities: SpriteEntity[];
+  /** 每个 batch 槽位的当前可见性（初值来自 `startVisible`，之后由 I/O 改）。 */
+  private readonly visible: boolean[];
+  /** `entityIndex → batch 槽位`；运行期 ShowSprite/HideSprite 用。 */
+  private readonly slotByEntity = new Map<number, number>();
   private readonly texture: THREE.Texture;
   private readonly batch: BillboardQuadBatch;
   private readonly basis: BillboardBasis = { rx: 1, ry: 0, rz: 0, ux: 0, uy: 1, uz: 0 };
@@ -82,6 +99,8 @@ export class SpriteGlows {
   constructor(entities: SpriteEntity[]) {
     this.entities = entities;
     this.count = entities.length;
+    this.visible = entities.map((e) => e.startVisible);
+    for (let i = 0; i < entities.length; i++) this.slotByEntity.set(entities[i].entityIndex, i);
     this.root.name = 'entity-sprites';
     this.texture = makeGlowTexture();
     this.batch = new BillboardQuadBatch(
@@ -97,12 +116,37 @@ export class SpriteGlows {
     return this.batch.draws;
   }
 
+  /** 当前点亮（未被 HideSprite/TurnOff 关掉）的 sprite 数。 */
+  get visibleCount(): number {
+    let n = 0;
+    for (const on of this.visible) if (on) n++;
+    return n;
+  }
+
+  /** 运行期 `ShowSprite` / `HideSprite` / `ToggleSprite`；未知下标返回 false。 */
+  setEntityVisible(entityIndex: number, visible: boolean): boolean {
+    const slot = this.slotByEntity.get(entityIndex);
+    if (slot === undefined) return false;
+    this.visible[slot] = visible;
+    return true;
+  }
+
+  isEntityVisible(entityIndex: number): boolean | null {
+    const slot = this.slotByEntity.get(entityIndex);
+    return slot === undefined ? null : this.visible[slot];
+  }
+
   update(camera: THREE.Camera): void {
     billboardBasisOf(camera, this.basis);
     this.batch.begin();
     for (let i = 0; i < this.entities.length; i++) {
       const entity = this.entities[i];
       const half = Math.max(0, entity.size) * 0.5;
+      if (!this.visible[i]) {
+        // 显隐走「槽位塌零面积」：batch 的 drawRange 恒定，不写顶点的话上一帧还会画出来。
+        this.batch.billboardAt(i, 0, 0, 0, 0, 0, this.basis, 0, 0, 0, 0);
+        continue;
+      }
       // alpha 恒 1：亮度已经乘进顶点色（renderamt/255）。
       this.batch.billboardAt(
         i,

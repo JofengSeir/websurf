@@ -126,6 +126,18 @@ export interface EntityGameplayOptions {
    * game 端同样需要（电梯/移动平台是可见几何，不能只在 debug 生效）。
    */
   onBrushOffsetChange?: (entity: number, offset: [number, number, number]) => void;
+  /**
+   * `env_sprite` 的 ShowSprite / HideSprite / ToggleSprite 可见性变化。
+   * 渲染侧由 RenderSession.applyEntityInput / setSpriteVisible 消费（宿主自行接线）。
+   */
+  onSpriteVisibleChange?: (entity: number, visible: boolean) => void;
+  /** `info_particle_system` 的 Start / Stop 发射开关。 */
+  onParticleActiveChange?: (entity: number, active: boolean) => void;
+  /**
+   * `prop_dynamic` 的 TurnOn / TurnOff 可见性变化（含载入时 `StartDisabled` 的初态）。
+   * 只表示「该不该画」，不动碰撞：SDK 的 `EF_NODRAW` 不影响 solid。
+   */
+  onPropVisibleChange?: (entity: number, visible: boolean) => void;
 }
 
 /** 浮点比较阈值：跳高目标值只在跨过 1e-6 时下发。 */
@@ -152,6 +164,16 @@ function parseBrushSolidDetail(detail: string | undefined): { entity: number; so
   const entity = Number.parseInt(m[1], 10);
   if (!Number.isInteger(entity) || entity < 0) return null;
   return { entity, solid: m[2] === 'true' };
+}
+
+/** 解析实体层 `sprite` / `particle` / `prop` 事件载荷 `<entityIndex>:<true|false>`。 */
+function parseToggleDetail(detail: string | undefined): { entity: number; on: boolean } | null {
+  if (!detail) return null;
+  const m = /^(-?\d+):(true|false)$/.exec(detail);
+  if (!m) return null;
+  const entity = Number.parseInt(m[1], 10);
+  if (!Number.isInteger(entity) || entity < 0) return null;
+  return { entity, on: m[2] === 'true' };
 }
 
 /** 解析实体层 `brush:offset` 事件载荷 `<entityIndex>:<x>,<y>,<z>`（Y-up 绝对位移）。 */
@@ -393,6 +415,13 @@ export class EntityGameplay {
         this.brushSolid.set(index, false);
         this.options.onBrushSolidChange?.(index, false);
       }
+      // `prop_dynamic` 的 `StartDisabled` 是纯视觉隐藏（props.cpp:1927-1930 AddEffects(EF_NODRAW)），
+      // 在 SDK 里碰撞照旧：所以只发可见性回调，绝不能写进 brushSolid / onBrushSolidChange。
+      for (const entity of attached.entList.entities) {
+        if ((entity.classname ?? '').toLowerCase() !== 'prop_dynamic') continue;
+        if (!entity.getBool('startdisabled', false)) continue;
+        this.options.onPropVisibleChange?.(entity.index, false);
+      }
       // `parentname` 父子图：本层据此把父 brush 的位移传播给后代（详细动机见字段注释）。
       this.childrenByParent.clear();
       const byName = new Map<string, number[]>();
@@ -585,6 +614,18 @@ export class EntityGameplay {
         this.applyBrushOffset(moved.entity, moved.offset);
         this.propagateBrushOffsetToDescendants(moved.entity, moved.offset);
       }
+    } else if (event.kind === 'sprite') {
+      // `env_sprite` 的 ShowSprite / HideSprite / ToggleSprite（Sprite.cpp:590-602）。
+      const v = parseToggleDetail(event.detail);
+      if (v) this.options.onSpriteVisibleChange?.(v.entity, v.on);
+    } else if (event.kind === 'particle') {
+      // `info_particle_system` 的 Start / Stop（particle_system.cpp:117-118）。
+      const v = parseToggleDetail(event.detail);
+      if (v) this.options.onParticleActiveChange?.(v.entity, v.on);
+    } else if (event.kind === 'prop') {
+      // `prop_dynamic` 的 TurnOn / TurnOff；与 brush 分开，避免误关碰撞。
+      const v = parseToggleDetail(event.detail);
+      if (v) this.options.onPropVisibleChange?.(v.entity, v.on);
     }
     this.options.onEntityEvent?.(event);
   }

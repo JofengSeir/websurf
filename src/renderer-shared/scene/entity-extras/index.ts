@@ -167,6 +167,25 @@ export class EntityExtras {
     );
   }
 
+  /**
+   * 运行期 `ShowSprite` / `HideSprite` / `ToggleSprite`（`Sprite.cpp:77-79,590-602`）。
+   * 只有 `env_sprite` 有显隐 I/O；`point_worldtext` 的 SDK datadesc 里没有
+   * StartDisabled / Show / Hide，恒可见（见 `entity-state.ts` 的类注释），这里返回 false 表示未覆盖。
+   */
+  setSpriteVisible(entityIndex: number, visible: boolean): boolean {
+    return this.sprites ? this.sprites.setEntityVisible(entityIndex, visible) : false;
+  }
+
+  /** 单个 sprite 的可见性；null = 该下标不是 env_sprite 图元。 */
+  spriteVisible(entityIndex: number): boolean | null {
+    return this.sprites ? this.sprites.isEntityVisible(entityIndex) : null;
+  }
+
+  /** 当前点亮的 sprite 数（初态按 `CSprite::Spawn`，之后随 I/O 变）。 */
+  get spriteVisibleCount(): number {
+    return this.sprites ? this.sprites.visibleCount : 0;
+  }
+
   /** 每帧推进：sprite / 文字 / 光束都是屏幕朝向的，按相机矩阵重写四边形顶点。 */
   update(camera: THREE.Camera): void {
     this.sprites?.update(camera);

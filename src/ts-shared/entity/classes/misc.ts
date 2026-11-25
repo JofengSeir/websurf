@@ -161,7 +161,7 @@ const POINT_TARGETS = [
   'info_target', 'info_teleport_destination', 'info_landmark', 'info_null',
   'info_player_start', 'info_player_deathmatch', 'info_player_terrorist',
   'info_player_counterterrorist', 'info_node', 'info_node_hint',
-  'info_map_parameters', 'info_lighting', 'info_particle_system',
+  'info_map_parameters', 'info_lighting',
   'worldspawn', 'env_sky', 'sky_camera', 'env_sun',
   'point_viewcontrol', 'point_posecontroller', 'point_energy_ball',
 ];

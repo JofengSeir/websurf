@@ -67,7 +67,11 @@ import {
 import { PvsManager } from '../../ts-shared/world/pvs-manager.js';
 import { collectTextureScrolls, updateTextureScrolls, type TextureScrollEntry } from '../shader/texture-scroll.js';
 import { setupRotButtons, updateRotButtons, type RotButtonPivot } from './rot-buttons.js';
-import { parseDynamicEntityIndices } from './dynamic-entities.js';
+import {
+  collectDynamicEntityGroups,
+  markDynamicEntities,
+  parseDynamicEntityIndices,
+} from './dynamic-entities.js';
 import { createRenderFrameContext, mirrorFrameContext, type RenderFrameContext } from './render-context.js';
 import { TransparentSorter } from './transparent-sorter.js';
 import { SpotLightSelector } from './spot-light-selector.js';
@@ -451,6 +455,16 @@ export class RenderSession {
     });
 
     this.root = asm.root;
+    // T-N6（T-P1-5b 遗留）：`merge === false` 时装配阶段不走 `mergeMain`，动态实体因此既没打标
+    // 也没收组，`dynGroups` 恒空 ⇒ 动态 brush 的矩阵冻结豁免与 docs 里的「动态组」全部失效。
+    // 这里在装配后补同一份 mark/collect；A/B 关闭（pending 为 null）时整段不执行。
+    if (input.merge === false && this.pendingDynamicEntityIndices && this.pendingDynamicEntityIndices.size > 0) {
+      const marked = markDynamicEntities(this.root, this.pendingDynamicEntityIndices);
+      this.dynGroups = collectDynamicEntityGroups(this.root);
+      if (marked > 0) {
+        console.info(`[${this.app}][dynamic] merge=false：补标动态实体 ${marked} 个，收组 ${this.dynGroups.size} 个`);
+      }
+    }
     // Source `TextureScroll` proxy（烟幕/水面流动）：装配后收集一次「共享贴图 + 每秒 UV 周期」，
     // 之后每帧在 `frame()` 里推进（见 `shader/texture-scroll.ts`）。
     this.textureScrolls = collectTextureScrolls(asm.root);
@@ -888,6 +902,58 @@ export class RenderSession {
       console.warn(`[${this.app}][extras] 场景扩展装配失败（跳过）：`, err);
       this.disposeSceneExtras();
     }
+  }
+
+  // ── 实体图元的运行期显隐/启停（T-N6）────────────────────────────────────────
+  // 三端都能用：源实体 I/O 的 ShowSprite/HideSprite/ToggleSprite（CSprite，Sprite.cpp:77-79）
+  // 与 Start/Stop（CParticleSystem，particle_system.cpp:117-118）落到这里；装配期初态门控
+  // 也走同一条路径（见 `entity-state.ts` 的逐类口径）。点实体没有图元时返回 false。
+
+  /** 运行期 `ShowSprite` / `HideSprite`；未知下标（不是 env_sprite）返回 false。 */
+  setSpriteVisible(entityIndex: number, visible: boolean): boolean {
+    return this.entityExtras ? this.entityExtras.setSpriteVisible(entityIndex, visible) : false;
+  }
+
+  /** 当前 sprite 可见性；null = 没有该实体的图元。 */
+  spriteVisible(entityIndex: number): boolean | null {
+    return this.entityExtras ? this.entityExtras.spriteVisible(entityIndex) : null;
+  }
+
+  /** 运行期 `Start` / `Stop`；未知/未覆盖的 effect 返回 false。 */
+  setParticleActive(entityIndex: number, active: boolean): boolean {
+    return this.particleSystems ? this.particleSystems.setEntityActive(entityIndex, active) : false;
+  }
+
+  /** 当前粒子门控状态；null = 该实体没有可门控的粒子对象。 */
+  particleActive(entityIndex: number): boolean | null {
+    return this.particleSystems ? this.particleSystems.isEntityActive(entityIndex) : null;
+  }
+
+  /**
+   * 把一条源实体输入事件（`EntityEvent.kind === 'input'` 的 `detail` = `classname.InputName`）
+   * 映射到图元显隐/启停。**只覆盖本层有图元的三类**：env_sprite、info_particle_system；
+   * prop_dynamic 的 TurnOn/TurnOff 走 brush 可见性链（brush_/prop_ 区间），point_worldtext 的
+   * SDK datadesc 里没有显隐输入（恒可见）。未覆盖的输入返回 false，调用方可继续自己的分派。
+   */
+  applyEntityInput(event: { classname: string; entityIndex: number; detail?: string }): boolean {
+    const detail = event.detail ?? '';
+    const dot = detail.lastIndexOf('.');
+    const input = dot >= 0 ? detail.slice(dot + 1) : detail;
+    if (event.classname === 'env_sprite' || event.classname === 'env_sprite_clientside') {
+      if (input === 'ShowSprite') return this.setSpriteVisible(event.entityIndex, true);
+      if (input === 'HideSprite') return this.setSpriteVisible(event.entityIndex, false);
+      if (input === 'ToggleSprite') {
+        const current = this.spriteVisible(event.entityIndex);
+        return current === null ? false : this.setSpriteVisible(event.entityIndex, !current);
+      }
+      return false;
+    }
+    if (event.classname === 'info_particle_system') {
+      if (input === 'Start') return this.setParticleActive(event.entityIndex, true);
+      if (input === 'Stop') return this.setParticleActive(event.entityIndex, false);
+      return false;
+    }
+    return false;
   }
 
   /** 释放场景扩展图元（激光束 / PCF 粒子 / 地图资产实体）及其根节点；幂等。 */
