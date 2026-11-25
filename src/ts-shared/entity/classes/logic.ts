@@ -12,11 +12,12 @@
  * 不存在「为某张地图的关卡顺序写 if」的情况 —— 顺序是地图自己的 I/O 连接图决定的。
  */
 import type { Entity, EntityClass } from '../base-entity.js';
-import { FIELD_BOOLEAN, FIELD_FLOAT, FIELD_INTEGER, FIELD_INPUT, FIELD_VOID } from '../variant.js';
+import { FIELD_BOOLEAN, FIELD_FLOAT, FIELD_INTEGER, FIELD_INPUT, FIELD_STRING, FIELD_VOID, Variant } from '../variant.js';
 import { OutputTyped } from '../entity-io.js';
 import { g_Runtime } from '../runtime.js';
 import type { InputData } from '../types.js';
-import { findAllByName, fire, fireValue, input } from './common.js';
+import { findAllByName, findByName, fire, fireValue, input } from './common.js';
+import { forceSpawnTemplate } from '../template-registry.js';
 import { registerClass } from './registry.js';
 
 // ── 引擎全局状态（对应 gGlobalState / GlobalEntity_*） ──────────────────────
@@ -688,12 +689,75 @@ export const PointTemplateClass: EntityClass = {
   })),
   inputs: [
     input('ForceSpawn', FIELD_VOID, (e, d) => {
-      // 浏览器宿主不做实体模板实例化；输出与事件仍按 SDK 触发，宿主可据此自行 spawn。
+      // 单实例闭环：先把出生时摘除的成员恢复成出生状态（多站点模板不接管，保持原行为）。
+      // 实例克隆（同模板多份并发）留给 T-N2b，见 template-registry.ts 顶部说明。
+      forceSpawnTemplate(e);
       e.runtime.emit({ kind: 'templateSpawn', detail: e.targetname });
       fire(e, 'OnEntitySpawned', d.activator as Entity | null);
     }),
   ],
   outputs: [{ name: 'OnEntitySpawned', kind: 'event' }],
+};
+
+/**
+ * env_entity_maker 的 SpawnEntity：FindEntityByName(EntityTemplate) → CreateInstance →
+ * OnEntitySpawned（env_entity_maker.cpp）。单实例闭环只转调模板的 ForceSpawn，
+ * 不复制成员几何；PostSpawnSpeed / Direction 与 CHECK_FOR_SPACE 等 spawnflags 的
+ * 初速/空间校验属于克隆路径，随 T-N2b 一起补。
+ */
+function spawnMakerInstance(maker: Entity, activator: Entity | null, originName?: string): void {
+  const templateName = maker.getString('entitytemplate', '').trim();
+  let template: Entity | null = null;
+  if (templateName) {
+    for (const candidate of findAllByName(templateName)) {
+      if (candidate.classname.toLowerCase() === 'point_template') {
+        template = candidate;
+        break;
+      }
+    }
+  }
+  if (!template) {
+    maker.runtime.log('env_entity_maker 找不到 EntityTemplate: ' + (templateName || '(empty)'));
+    fire(maker, 'OnEntityFailedSpawn', activator);
+    return;
+  }
+  if (originName) {
+    // SDK 先 FindEntityByName(anchor)，找不到就整次不生成；找到才用它的 origin/angles。
+    // 单实例闭环没有可复制的成员几何，落点随 T-N2b 的克隆路径实现。
+    if (!findByName(originName)) {
+      maker.runtime.log('env_entity_maker ForceSpawnAtEntityOrigin 找不到 anchor: ' + originName);
+      return;
+    }
+  }
+  template.acceptInput('ForceSpawn', maker, maker, Variant.void(), 0);
+  fire(maker, 'OnEntitySpawned', maker);
+}
+
+export const EnvEntityMakerClass: EntityClass = {
+  name: 'env_entity_maker',
+  base: 'point',
+  keyfields: [
+    { name: 'EntityTemplate', type: 'string', defaultValue: '' },
+    { name: 'PostSpawnDirection', type: 'vec3', defaultValue: [0, 0, 0] },
+    { name: 'PostSpawnDirectionVariance', type: 'float', defaultValue: 0 },
+    { name: 'PostSpawnSpeed', type: 'float', defaultValue: 0 },
+    { name: 'PostSpawnInheritAngles', type: 'bool', defaultValue: false },
+  ],
+  inputs: [
+    input('ForceSpawn', FIELD_VOID, (e, d) => {
+      spawnMakerInstance(e, d.activator as Entity | null);
+    }),
+    input('ForceSpawnAtEntityOrigin', FIELD_STRING, (e, d) => {
+      spawnMakerInstance(e, d.activator as Entity | null, d.value.string());
+    }),
+  ],
+  outputs: [
+    { name: 'OnEntitySpawned', kind: 'event' },
+    { name: 'OnEntityFailedSpawn', kind: 'event' },
+  ],
+  spawnFlags: {
+    AUTOSPAWN: 1, WAIT_FOR_DESTRUCTION: 2, IGNORE_FACING: 4, CHECK_FOR_SPACE: 8, CHECK_PLAYER_LOOKING: 16,
+  },
 };
 
 /** 通用"有 I/O 但不建模内部状态"的逻辑实体：保证连接不丢、可被 fire。 */
@@ -708,7 +772,7 @@ export function registerLogicClasses(): void {
     LogicRelayClass, MathCounterClass, LogicCaseClass, LogicCompareClass,
     LogicBranchClass, LogicBranchListenerClass, LogicTimerClass, LogicAutoClass,
     EnvGlobalClass, MultiSourceClass, LogicMulticompareClass,
-    LogicEventListenerClass, PointTemplateClass,
+    LogicEventListenerClass, PointTemplateClass, EnvEntityMakerClass,
   ];
   for (const cls of list) registerClass(cls);
   for (const name of PLAIN_LOGIC) registerClass({ name, base: 'logical' });

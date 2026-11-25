@@ -387,6 +387,12 @@ export class EntityGameplay {
         this.brushSolid.set(entity.index, false);
         this.options.onBrushSolidChange?.(entity.index, false);
       }
+      // point_template 成员出生摘除（template-registry.ts）：brush 成员的隐藏/非实心
+      // 同步进镜像；物理实例晚于本调用建立时由 update() 重放。
+      for (const index of attached.suppressedBrushIndices()) {
+        this.brushSolid.set(index, false);
+        this.options.onBrushSolidChange?.(index, false);
+      }
       // `parentname` 父子图：本层据此把父 brush 的位移传播给后代（详细动机见字段注释）。
       this.childrenByParent.clear();
       const byName = new Map<string, number[]>();

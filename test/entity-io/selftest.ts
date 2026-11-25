@@ -443,6 +443,123 @@ check('A20 重复键 / Hammer # 后缀：同名 output 全部保留', () => {
   sys.dispose();
 });
 
+check('A21 point_template：单站点模板出生摘除成员，ForceSpawn 恢复并派发 OnEntitySpawned', () => {
+  const blocks = [
+    block('point_template', [
+      ['targetname', 'tpl_solo'],
+      ['Template01', 'member_brush'],
+      ['Template02', 'member_trigger'],
+      ['Template03', 'member_logic'],
+      ['OnEntitySpawned', 'sv,Command,spawned,0,-1'],
+    ]),
+    block('func_brush', [['targetname', 'member_brush']]),
+    block('trigger_multiple', [['targetname', 'member_trigger']]),
+    block('logic_relay', [['targetname', 'member_logic']]),
+    block('point_servercommand', [['targetname', 'sv']]),
+    block('logic_relay', [['targetname', 'kicker'], ['OnTrigger', 'tpl_solo,ForceSpawn,,0,-1']]),
+  ];
+  const { sys, host } = fixture(blocks);
+  const find = (name: string) => {
+    const entity = sys.entList.findFirstByName(name);
+    assert(entity, '找不到实体 ' + name);
+    return entity;
+  };
+  const summary = sys.templateStats();
+  eq(summary.managed.length, 1, '接管 1 个单站点模板');
+  eq(summary.managed[0], 'tpl_solo', '接管 tpl_solo');
+  eq(summary.managedMembers, 3, '登记 3 个成员');
+
+  const brush = find('member_brush');
+  const trigger = find('member_trigger');
+  const logic = find('member_logic');
+  eq(brush.getBool('brushOn', true), false, 'brush 出生非实心');
+  eq(brush.disabled, true, 'brush 出生禁用');
+  assert(host.calls.brushEnabled.some((c) => c[0] === brush.index && c[1] === false), 'brush 隐藏已下发宿主');
+  eq(trigger.disabled, true, 'trigger 出生 disabled');
+  eq(trigger.triggerSolidFlag, false, 'trigger 出生摘除 FSOLID_TRIGGER');
+  eq(logic.disabled, true, 'logic 出生 disabled');
+
+  sys.acceptInputOn('tpl_solo', 'ForceSpawn');
+  sys.serviceEventsNow();
+  eq(brush.getBool('brushOn', true), true, 'ForceSpawn 后 brush 实心');
+  eq(brush.disabled, false, 'ForceSpawn 后 brush 启用');
+  assert(host.calls.brushEnabled.some((c) => c[0] === brush.index && c[1] === true), 'brush 恢复已下发宿主');
+  eq(trigger.disabled, false, 'ForceSpawn 后 trigger 启用');
+  eq(trigger.triggerSolidFlag, true, 'ForceSpawn 后 trigger 恢复 FSOLID_TRIGGER');
+  eq(logic.disabled, false, 'ForceSpawn 后 logic 启用');
+  assert(host.calls.commands.includes('spawned'), 'OnEntitySpawned 输出已派发');
+  sys.dispose();
+});
+
+check('A22 env_entity_maker：ForceSpawn / ForceSpawnAtEntityOrigin 转调模板', () => {
+  const blocks = [
+    block('point_template', [['targetname', 'tpl_maker'], ['Template01', 'm_brush']]),
+    block('func_brush', [['targetname', 'm_brush']]),
+    block('env_entity_maker', [
+      ['targetname', 'mk'], ['EntityTemplate', 'tpl_maker'],
+      ['OnEntitySpawned', 'sv2,Command,maker_spawned,0,-1'],
+    ]),
+    block('point_template', [['targetname', 'tpl_origin'], ['Template01', 'm_origin_brush']]),
+    block('func_brush', [['targetname', 'm_origin_brush']]),
+    block('env_entity_maker', [
+      ['targetname', 'mk2'], ['EntityTemplate', 'tpl_origin'],
+      ['OnEntitySpawned', 'sv3,Command,origin_spawned,0,-1'],
+    ]),
+    block('logic_relay', [['targetname', 'spot']]),
+    block('logic_relay', [['targetname', 'fire_maker'], ['OnTrigger', 'mk,ForceSpawn,,0,-1']]),
+    block('logic_relay', [['targetname', 'fire_origin'], ['OnTrigger', 'mk2,ForceSpawnAtEntityOrigin,spot,0,-1']]),
+    block('point_servercommand', [['targetname', 'sv2']]),
+    block('point_servercommand', [['targetname', 'sv3']]),
+  ];
+  const { sys, host } = fixture(blocks);
+  const find = (name: string) => {
+    const entity = sys.entList.findFirstByName(name);
+    assert(entity, '找不到实体 ' + name);
+    return entity;
+  };
+  const summary = sys.templateStats();
+  eq(summary.managed.length, 2, '两个单站点模板都被接管');
+  eq(find('m_brush').disabled, true, 'maker 模板成员出生摘除');
+  eq(find('m_origin_brush').disabled, true, 'origin 模板成员出生摘除');
+
+  sys.acceptInputOn('mk', 'ForceSpawn');
+  sys.serviceEventsNow();
+  eq(find('m_brush').disabled, false, 'ForceSpawn 恢复成员');
+  assert(host.calls.commands.includes('maker_spawned'), 'maker OnEntitySpawned');
+
+  sys.acceptInputOn('mk2', 'ForceSpawnAtEntityOrigin', Variant.fromString('spot'));
+  sys.serviceEventsNow();
+  eq(find('m_origin_brush').disabled, false, 'ForceSpawnAtEntityOrigin 恢复成员');
+  assert(host.calls.commands.includes('origin_spawned'), 'maker origin OnEntitySpawned');
+  sys.dispose();
+});
+
+check('A23 多站点 / DONTREMOVE：模板成员保持现状不接管', () => {
+  const blocks = [
+    block('point_template', [['targetname', 'tpl_multi'], ['Template01', 'multi_member']]),
+    block('func_brush', [['targetname', 'multi_member']]),
+    block('logic_relay', [['targetname', 'f1'], ['OnTrigger', 'tpl_multi,ForceSpawn,,0,-1']]),
+    block('logic_relay', [['targetname', 'f2'], ['OnTrigger', 'tpl_multi,ForceSpawn,,0,-1']]),
+    block('point_template', [['targetname', 'tpl_keep'], ['spawnflags', '1'], ['Template01', 'keep_member']]),
+    block('func_brush', [['targetname', 'keep_member']]),
+  ];
+  const { sys, host } = fixture(blocks);
+  const find = (name: string) => {
+    const entity = sys.entList.findFirstByName(name);
+    assert(entity, '找不到实体 ' + name);
+    return entity;
+  };
+  const summary = sys.templateStats();
+  eq(summary.managed.length, 0, '没有模板被接管');
+  eq(summary.skippedMultiSite.length, 1, '1 个多站点模板被跳过');
+  eq(summary.skippedMultiSite[0], 'tpl_multi', '跳过 tpl_multi');
+  eq(summary.skippedKeepMembers[0], 'tpl_keep', 'bit0 模板跳过');
+  eq(find('multi_member').disabled, false, '多站点成员保持可见');
+  eq(find('keep_member').disabled, false, 'bit0 成员保持可见');
+  assert(!host.calls.brushEnabled.some((c) => c[0] === find('multi_member').index), '多站点成员未下发隐藏');
+  sys.dispose();
+});
+
 // ── B. 真实地图夹具 ────────────────────────────────────────────────────────
 /**
  * 读 VBSP header 的 lump 0（entities）由 runner 用 node:fs 注入；本文件保持

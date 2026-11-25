@@ -30,6 +30,7 @@ import type {
 } from './types.js';
 import { installEntityClasses, invokeEndTouch, invokeStartTouch, invokeTouch, resolveClassChain } from './classes/index.js';
 import { globalStates, mapLoad, type MapLoadType } from './classes/logic.js';
+import { ENV_ENTITY_MAKER_AUTOSPAWN, registryFor, type TemplateSummary } from './template-registry.js';
 
 const TOUCH_EPS = 1e-4;
 
@@ -251,6 +252,18 @@ export class EntitySystem implements EntityRuntime {
     for (const entity of all) entity.spawn();
     for (const entity of all) entity.activate();
 
+    // point_template 成员摘除（单实例闭环，见 template-registry.ts）：必须在全部实体
+    // Spawn + Activate 之后做，才能把 StartDisabled 等出生状态记进快照。
+    const registry = registryFor(this);
+    registry.scan(all);
+    // env_entity_maker 的 AUTOSPAWN：SDK 在 Activate 里生成第一份实例；被模板摘除的
+    // maker 不参与（它要等所在模板 ForceSpawn 后才回到世界）。
+    for (const entity of all) {
+      if (entity.disabled || entity.classname.toLowerCase() !== 'env_entity_maker') continue;
+      if (!entity.hasSpawnFlags(ENV_ENTITY_MAKER_AUTOSPAWN)) continue;
+      entity.acceptInput('ForceSpawn', null, null, Variant.void(), 0);
+    }
+
     this.touchCandidates = all.filter((e) => e.volumes.length > 0 && hasTouchBehaviour(e));
     this.touchStamp = 0;
   }
@@ -258,6 +271,8 @@ export class EntitySystem implements EntityRuntime {
   /** 卸载地图：保留玩家伪实体，其余状态全部复位。 */
   unload(): void {
     this.bindGlobals();
+    // 先释放模板登记（成员引用不能跨图存活），再清实体表。
+    registryFor(this).reset();
     for (const entity of this.entList.entities) entity.touchLinks.clear();
     this.entList.clear();
     this.entList.add(this.playerEntity);
@@ -475,6 +490,16 @@ export class EntitySystem implements EntityRuntime {
   }
   get time(): number {
     return g_Runtime.time;
+  }
+
+  /** 本图被单实例接管的模板成员是否仍处于摘除态（EntityGameplay 装载期同步镜像用）。 */
+  suppressedBrushIndices(): number[] {
+    return registryFor(this).suppressedBrushIndices();
+  }
+
+  /** 模板接管概况（诊断 / 测试）：managed 与留给 T-N2b 的多站点清单。 */
+  templateStats(): TemplateSummary {
+    return registryFor(this).summary();
   }
 
   stats(): EntitySystemStats {
