@@ -34,8 +34,8 @@ export interface PunctualSpot {
 }
 
 const MAX_BEAM_WIDTH = 102.3;
-/** 柔和体积散射基准亮度：无尖锐高亮芯，保持半透明雾感、不刺眼。 */
-const BEAM_PEAK = 0.24;
+/** 柔和体积散射基准亮度：侧视可见度充足且无尖锐高亮芯。 */
+const BEAM_PEAK = 0.46;
 /** 起源 `FBEAM_SHADEOUT` 的近似：贴脸 30 HU 内淡出。 */
 const SHADEOUT_DISTANCE = 30;
 
@@ -189,10 +189,13 @@ void main() {
 	vec2 ndc = clip.xy / clip.w;
 	vNdc = ndc;
 	float aimFactor = exp(-dot(ndc, ndc) * 1.4);
-	float onAxis = smoothstep(0.38, 0.99, vFacing);
-	vGlare = onAxis * onAxis * (0.28 + 0.72 * aimFactor);
+	// 75°（sin 75° ≈ 0.965）之前保持克制，仅在 75°~90° 正对光轴区间非线性爬升炫光。
+	float preGlare = smoothstep(0.82, 0.965, vFacing);
+	float coreGlare = smoothstep(0.965, 0.999, vFacing);
+	float glareCurve = 0.10 * preGlare + 0.90 * pow(coreGlare, 1.5);
+	vGlare = glareCurve * (0.28 + 0.72 * aimFactor);
 	float distScale = clamp(420.0 / (dist + 180.0), 0.45, 1.15);
-	float scale = mix(0.08 * distScale, 1.35, vGlare);
+	float scale = mix(0.09 * distScale, 1.15, vGlare);
 	vec2 halfExt = vec2(scale / max(0.5, uAspect), scale);
 	gl_Position = vec4(ndc + position.xy * 2.0 * halfExt, 0.0, 1.0);
 }
@@ -219,7 +222,7 @@ void main() {
 
 	float pinpoint = exp(-r2 * 260.0);
 	float innerHalo = exp(-r2 * 24.0) * 0.24 + exp(-r2 * 6.5) * edge2 * 0.12;
-	float veiling = exp(-r2 * 1.35) * 0.19 * vGlare * edge;
+	float veiling = exp(-r2 * 1.35) * 0.11 * vGlare * edge;
 
 	float ang = atan(p.y, p.x) + uSeed + vNdc.x * 0.45 - vNdc.y * 0.35;
 	float h1 = pow(abs(cos(ang * 3.0 + 0.4)), 24.0);
@@ -242,11 +245,11 @@ void main() {
 		exp(-pow((r - 0.82) * 14.0, 2.0)),
 		exp(-pow((r - 0.86) * 14.0, 2.0))
 	) * 0.45;
-	vec3 rainbow = (arcPrimary + arcOuter) * sideMask * 0.42 * vGlare;
+	vec3 rainbow = (arcPrimary + arcOuter) * sideMask * 0.40 * vGlare;
 
 	float backDim = mix(0.12, 0.40, smoothstep(-0.25, 0.35, vFacing));
-	float baseTerm = innerHalo * (backDim + 0.35 * vGlare) + pinpoint * (0.35 + 1.15 * vGlare) + veiling;
-	float opticalTerm = (rays * 0.72 + streak * 0.45) * vGlare;
+	float baseTerm = innerHalo * (backDim + 0.20 * vGlare) + pinpoint * (0.35 + 0.65 * vGlare) + veiling;
+	float opticalTerm = (rays * 0.46 + streak * 0.26) * vGlare;
 
 	vec3 baseTint = mix(uColor, vec3(1.0), clamp(pinpoint * 0.90 + veiling * 0.45, 0.0, 1.0));
 	vec3 rayTint = mix(uColor, vec3(0.90, 0.95, 1.0), 0.58);
