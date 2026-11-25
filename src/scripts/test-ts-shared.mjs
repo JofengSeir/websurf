@@ -109,6 +109,8 @@ const {
 } = await loadTsBundle('src/ts-shared/entity/classes/brush.ts', 'entity-brush');
 // 碰撞数据编码降级：只打包共享层 TS（不碰 wasm），用桩 proc 驱动 buildWorldBundle。
 const { buildWorldBundle } = await loadTsBundle('src/ts-shared/phys/world-builder.ts', 'phys-world-builder');
+// 实体运行期宿主：验证 load() 保留出生期 func_door 镜像并在 update() 重放到 predPhys。
+const { EntityGameplay } = await loadTsBundle('src/ts-shared/gameplay/entity-gameplay.ts', 'entity-gameplay');
 
 // 旋转枢轴的「rest 零变化」不变量：组位置 = pivot、mesh 局部位置 = 原位置 - pivot 时，
 // 世界坐标在旋转 0 的情况下逐分量不变（pivot 加回本身的抵消）。
@@ -841,6 +843,65 @@ test('pvs-manager: hasLeafAmbient 与 getAmbientCubeAt 正确解码正负指数�
   assert.ok(Math.abs(cubeOut[7] - 63.75) < 1e-4); // 负指数 2^-2
   assert.ok(Math.abs(cubeOut[11] - 127.5) < 1e-4); // 负指数 2^-1
   assert.equal(withAmb.getAmbientCubeAt({ x: 0, y: -10, z: 0 }, cubeOut), false, '实心 leaf / valid=0 应返回 false');
+});
+
+test('EntityGameplay.load preserves spawn-time func_door brushSolid/brushOffset and replays them to predPhys', () => {
+  const entitiesText = [
+    '{\n"classname" "worldspawn"\n}',
+    '{\n"classname" "func_door"\n"targetname" "lvl1_door_08"\n"model" "*1"\n"spawnpos" "1"\n"movedir" "-90 0 0"\n"lip" "300"\n"speed" "100"\n}',
+  ].join('\n');
+  const entityIoJson = JSON.stringify({
+    entities_text: entitiesText,
+    volumes: [
+      {
+        index: 1,
+        model: '*1',
+        origin: [10974.5, 1208, -2912],
+        brushes: [
+          {
+            mins: [10974, 880, -2932],
+            maxs: [10975, 1536, -2892],
+            planes: [],
+          },
+        ],
+      },
+    ],
+  });
+
+  let physRef = null;
+  const gp = new EntityGameplay({
+    getPlayerState: () => ({ posX: 0, posY: 0, posZ: 0 }),
+    getPhys: () => physRef,
+  });
+
+  gp.load(entityIoJson);
+  assert.equal(gp.brushSolidOf(1), true, 'spawnpos=1 的 func_door 出生即应保留 solid=true 镜像');
+  const offAfterLoad = gp.brushOffsetOf(1);
+  assert.ok(offAfterLoad, 'spawnpos=1 的 func_door 出生即应保留 brushOffset 镜像');
+  assert.ok(Math.abs(offAfterLoad[0]) < 1e-6);
+  assert.ok(Math.abs(offAfterLoad[1] - 356) < 1e-6, `预期 y 偏移 356，实际 ${offAfterLoad[1]}`);
+  assert.ok(Math.abs(offAfterLoad[2]) < 1e-6);
+
+  const solidCalls = [];
+  const offsetCalls = [];
+  physRef = {
+    set_brush_solid(entity, solid) {
+      solidCalls.push([entity, solid]);
+      return true;
+    },
+    set_brush_offset(entity, x, y, z) {
+      offsetCalls.push([entity, x, y, z]);
+      return 1;
+    },
+  };
+
+  gp.update(0.01);
+  assert.deepEqual(solidCalls, [[1, true]], 'predPhys 建立后首次 update() 必须重放 set_brush_solid(1, true)');
+  assert.equal(offsetCalls.length, 1, 'predPhys 建立后首次 update() 必须重放 set_brush_offset');
+  assert.equal(offsetCalls[0][0], 1);
+  assert.ok(Math.abs(offsetCalls[0][1]) < 1e-6);
+  assert.ok(Math.abs(offsetCalls[0][2] - 356) < 1e-6);
+  assert.ok(Math.abs(offsetCalls[0][3]) < 1e-6);
 });
 
 

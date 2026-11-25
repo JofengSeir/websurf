@@ -407,21 +407,25 @@ export class EntityGameplay {
   /** 换图装载：装配实体系统、收集 trigger 体积与跳跃增幅区；换图时自动释放旧实例。 */
   load(entityIoJson?: string | null): void {
     this.entitySystem?.dispose();
+    // 换图/重装实体前先清空上一张图的运行期镜像与地图级覆盖：
+    // `attachEntitySystem` 内会同步执行实体 `spawn`（例如 `spawnpos=1` 的 `func_door` 会
+    // 在此发出 `brush` 实心与 `brush:offset` 位移、`logic_auto` 可能发出 `sv_maxvelocity`）；
+    // 必须先清后装，否则这些出生期写入会被后续的 `.clear()` 抹掉，导致主线程 `predPhys`
+    // 重放镜像为空、与 Worker 权威物理分叉。
+    this.jumpHeight = null;
+    // 换图后地图 `sv_maxvelocity` 会重新下发；这里只清地图值，用户设置项（userSpeedCap）保留。
+    this.mapSpeedCap = null;
+    this.brushSolid.clear();
+    this.brushOffset.clear();
+    this.brushRotation.clear();
+    this.teleportEnabled.clear();
+    this.childrenByParent.clear();
     this.entitySystem = attachEntitySystem({
       entityIoJson: entityIoJson ?? undefined,
       getPlayerState: () => playerStateFromRaw(this.options.getPlayerState()),
       onEvent: (event) => this.onEntityEvent(event),
     });
     this.collectTriggerVolumes();
-    // 换图/重装实体后由下一帧重新判定并补发跳高（世界重建会把 Rust 侧 jump_height 回默认）。
-    this.jumpHeight = null;
-    // 换图后地图 `sv_maxvelocity` 会重新下发；这里只清地图值，用户设置项（userSpeedCap）保留。
-    this.mapSpeedCap = null;
-    // 换图后实体下标空间与 Rust brush 初态都是新的：清掉上一张图的运行期开关镜像。
-    this.brushSolid.clear();
-    this.brushOffset.clear();
-    this.brushRotation.clear();
-    this.teleportEnabled.clear();
     // 出生即「关」的 brush（START_OFF 墙 / StartDisabled 的 func_brush / 拿不到 movedir 的
     // 旧式门）：Rust 侧建物理世界时已按 `start_solid=false` 排除碰撞，但渲染层没有事件就
     // 不会藏几何，于是会出现「能穿过去但看着是关着的门/墙」。这里把初态同步成渲染可见性
@@ -454,7 +458,6 @@ export class EntityGameplay {
         this.options.onPropVisibleChange?.(entity.index, false);
       }
       // `parentname` 父子图：本层据此把父 brush 的位移传播给后代（详细动机见字段注释）。
-      this.childrenByParent.clear();
       const byName = new Map<string, number[]>();
       for (const entity of attached.entList.entities) {
         const name = entity.targetname?.toLowerCase();
@@ -470,6 +473,11 @@ export class EntityGameplay {
           const kids = this.childrenByParent.get(parent);
           if (kids) kids.push(entity.index);
           else this.childrenByParent.set(parent, [entity.index]);
+        }
+      }
+      if (this.childrenByParent.size > 0 && this.brushOffset.size > 0) {
+        for (const [entity, offset] of [...this.brushOffset]) {
+          this.propagateBrushOffsetToDescendants(entity, offset);
         }
       }
     }
