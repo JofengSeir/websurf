@@ -317,7 +317,8 @@ function createPanel(bridgeImpl: InputBridge): PanelController {
         setStatus(`已读点 #${i + 1} @ (${sp.x.toFixed(0)}, ${sp.y.toFixed(0)}, ${sp.z.toFixed(0)})`, 'success');
       }
     },
-    // task-95：计算帧率上限（physics.computeRateCap，独立于物理步长 tickRate）→ 主线程模拟时钟；
+    // task-95：计算频率上限（physics.computeRateCap，独立于物理步长 tickRate）：两种权威
+    // 模式都用它泵计算时钟；main 单权威模式在计算步内按 tickRate 做固定物理步进。
     // HUD「计算 xxxHz / 呈现 xxxfps」读模拟时钟统计（未接线时传 null 即显示 —）。
     (hz) => renderer?.setComputeRateCap(hz),
     () => renderer?.simClockStats ?? null,

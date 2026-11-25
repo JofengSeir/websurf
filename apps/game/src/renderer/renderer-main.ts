@@ -31,7 +31,7 @@
 
 import * as THREE from 'three';
 import { PhysWorld, mosaic_decode, initSync } from '../../pkg/websurf_wasm.js';
-import type { RuntimeConfig } from '../config.js';
+import { LOCKED_TICK_RATE, type RuntimeConfig } from '../config.js';
 import type { SceneDataMessage } from '../worker/worker-types.js';
 import type { ShmState, MsgState } from '../../../../src/ts-shared/auth/shared-state.js';
 import { AuthorityCalibrator } from '../../../../src/ts-shared/phys/authority-calibrator.js';
@@ -60,6 +60,15 @@ import { Variant } from '../../../../src/ts-shared/entity/variant.js';
 import type { EntityEvent } from '../../../../src/ts-shared/entity/types.js';
 
 const DEG2RAD = Math.PI / 180;
+
+/** 相机位姿快照（世界坐标眼位 + 角度，度）：固定步长物理每步记录一份，rAF 在两份之间插值。 */
+interface CameraState {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  pitch: number;
+}
 
 /**
  * 渲染采样传输契约（两个实现见 `src/ts-shared/auth/shared-state.ts` 的 `ShmState` 与 `MsgState`，
@@ -126,18 +135,36 @@ export class RendererMain {
   private presentation: PlayerPresentation | null = null;
 
   /**
-   * 计算频率上限（Hz）：固定步长模拟时钟的目标频率。默认值来自共享常量
-   * `COMPUTE_CAP_DEFAULT`（1000Hz，owner 2026-11-19 指定；最高 2000）；
+   * 计算频率上限（Hz）：固定步长模拟时钟每秒泵多少次「计算步」，主线程两种权威模式都用它；
+   * 它**不是**物理 tick 率——主线程单权威模式在每次计算步里按 `physics.tickRate` 的固定
+   * 步长累积、只在攒够 1/tickRate 时推进一次 PhysWorld（见 `stepFixedSimulation`）。
+   * 默认值来自共享常量 `COMPUTE_CAP_DEFAULT`（1000Hz，owner 2026-11-19 指定；最高 2000）；
    * 量程 48–2000，由 `setComputeRateCap` 改写。
    */
   private computeRateCap = COMPUTE_CAP_DEFAULT;
 
+  // ── 相机固定步长插值（T-D132 回归修复）──────────────────────────
+  /** 上一步物理的眼位（rAF 在上一帧与当前帧之间插值；传送/重生时置空强制贴齐）。 */
+  private cameraPrev: CameraState | null = null;
+  /** 最新一步物理的眼位（`applyCamera` 每个物理步写入）。 */
+  private cameraCur: CameraState | null = null;
+  /** `cameraCur` 对应的墙钟毫秒（插值分母使用有效物理频率）。 */
+  private cameraCurAtMs = 0;
+
   /**
-   * 固定步长模拟时钟（共享 `sim-clock`）：把「模拟」从 rAF 解耦——rAF 只负责渲染，
-   * 时钟以 `1/computeRateCap` 固定步长推进预测物理/实体运行期。game 没有回放/单步模式，
-   * 正常游玩始终由时钟驱动；`holdPoint` 冻结在 hooks 的 `afterTick` 里完成。
+   * 固定步长模拟时钟（共享 `sim-clock`）：把「计算」从 rAF 解耦——rAF 只负责渲染，
+   * 时钟以 `1/computeRateCap` 泵计算步。主线程单权威模式在计算步内按 `physics.tickRate`
+   * 做固定物理步进（通常 64tick）；worker 预测线则每个计算步推进一步预测物理。
+   * game 没有回放/单步模式，正常游玩始终由时钟驱动；`holdPoint` 冻结在 hooks 的
+   * `afterTick` 里完成。
    */
   private simClock: SimClock | null = null;
+
+  /**
+   * 主线程单权威物理的固定步长累加器（秒）：simClock 按 computeRateCap 泵，物理只在
+   * 累计时间 ≥ 1/physics.tickRate 时步进，余量留到下一次，避免 1000Hz 计算改变 64tick 手感。
+   */
+  private physicsAccumulator = 0;
 
   // ── 渲染采样传输（Worker 按渲染时钟 τ 在本折线上取点后发布权威位置）──────
   // 契约见文件头（writeRenderSample / resetRenderSample）。
@@ -234,18 +261,34 @@ export class RendererMain {
           }
         },
         applyCamera: (st) => {
-          // Rust 输出角度为度 → 弧度；相机直接跟随主线程物理状态（不另做平滑）。
+          // 固定步长物理（main=tickRate 64tick；worker=预测线 computeRateCap）每步只记录一份
+          // 眼位，由 rAF 在前后两份之间插值，避免把 64Hz 的离散位置直接贴到每帧相机上。
           // 相机在 `init()` 之前可能尚未创建（手动构造、单元测试路径），此时跳过即可。
-          const cam = this.camera;
-          if (!cam) return;
-          cam.rotation.set(st.pitch * DEG2RAD, st.yaw * DEG2RAD, 0, 'YXZ');
-          cam.position.set(st.posX, st.posY + st.eyeHeight, st.posZ);
+          if (!this.camera) return;
+          const next: CameraState = {
+            x: st.posX,
+            y: st.posY + st.eyeHeight,
+            z: st.posZ,
+            yaw: st.yaw,
+            pitch: st.pitch,
+          };
+          const now = performance.now();
+          const prev = this.cameraCur;
+          if (!prev || this.shouldSnapCamera(prev, next, now)) {
+            this.cameraPrev = next;
+          } else {
+            this.cameraPrev = prev;
+          }
+          this.cameraCur = next;
+          this.cameraCurAtMs = now;
         },
       },
     });
 
-    // 固定步长模拟时钟：正常游玩时由它按 `computeRateCap` 推进预测物理/实体，
-    // rAF 只负责渲染（`tick` 不再调 `presentation.update`）；物理未就绪时 step 内部让路。
+    // 固定步长模拟时钟：正常游玩时由它按 computeRateCap 泵计算步，rAF 只负责渲染
+    // （`tick` 不再调 `presentation.update`）；物理未就绪时 step 内部让路。
+    // 主线程单权威模式在 stepFixedSimulation 内按 physics.tickRate 做固定物理步进，
+    // worker 预测线则每个计算步推进一步（权威 Worker 自己的步长由 tickRate 决定）。
     this.simClock = createSimClock({
       step: (dt) => this.stepFixedSimulation(dt),
       getTargetHz: () => this.computeRateCap,
@@ -253,10 +296,20 @@ export class RendererMain {
     });
   }
 
-  /** 计算频率上限（Hz，48–2000）；面板控件通过 `setComputeRateCap` 写入，HUD 读 `simClockStats`。 */
+  /** 计算频率上限（Hz，48–2000）：固定步长模拟时钟的泵频率（HUD「计算」读数）。
+   *  主线程单权威模式下物理按 `physics.tickRate` 累积步进，与这个泵频率解耦。 */
   setComputeRateCap(hz: number): void {
     if (!Number.isFinite(hz)) return;
     this.computeRateCap = Math.min(COMPUTE_CAP_MAX, Math.max(COMPUTE_CAP_MIN, Math.round(hz)));
+  }
+
+  /** 物理固定步进频率：主线程单权威模式取 `physics.tickRate`（48–128，锁定态 64）；
+   *  worker 双线的预测线每个计算步推进一步，因此返回 `computeRateCap`（相机插值同口径）。
+   *  config 在 `init` 才注入，构造期回落到锁定 tick。 */
+  private physicsTickHz(): number {
+    if (this.authorityMode === 'worker') return this.computeRateCap;
+    const hz = this.config?.physics.tickRate;
+    return Number.isFinite(hz) && hz > 0 ? hz : LOCKED_TICK_RATE;
   }
 
   /** 模拟时钟统计（HUD 用）：物理未就绪时返回 null，让 HUD 显示「—」。 */
@@ -284,7 +337,28 @@ export class RendererMain {
   private stepFixedSimulation(dt: number): void {
     if (!this.running || !this.predReady || !this.predPhys) return;
     if (typeof document !== 'undefined' && document.hidden) return;
-    this.presentation?.step(dt);
+    const presentation = this.presentation;
+    if (!presentation) return;
+
+    // worker 双线：预测线每个计算步推进一步（权威 Worker 自己跑 64tick）。
+    if (this.authorityMode === 'worker') {
+      presentation.step(dt);
+      return;
+    }
+
+    // main 单权威：计算时钟仍按 computeRateCap 泵（HUD 显示 1000Hz），但 PhysWorld 只在
+    // 累计到 1/tickRate 时步进；用固定 dt 推进，保持 64tick 的加速/滑行/连跳手感。
+    const step = 1 / this.physicsTickHz();
+    this.physicsAccumulator += dt;
+    // sim-clock 已按 maxCatchUpMs 截顶；这里再限一层，防异常长帧把主线程卡在补步循环。
+    const maxAccumulator = step * 8;
+    if (this.physicsAccumulator > maxAccumulator) this.physicsAccumulator = maxAccumulator;
+    let steps = 0;
+    while (this.physicsAccumulator + 1e-9 >= step && steps < 8) {
+      presentation.step(step);
+      this.physicsAccumulator -= step;
+      steps++;
+    }
   }
 
   /** 场景装载完成回调（`loadScene` 用场景包围盒最小 Y 调用一次）；`apps/game/src/app.ts` 注册它
@@ -530,6 +604,8 @@ export class RendererMain {
     this.session?.disposeScene();
     this.predPhys = null;
     this.predReady = false;
+    this.physicsAccumulator = 0;
+    this.snapCamera();
     // T-731/F4：复位物理帧时基（共享呈现循环持有 lastTickMs）。换图不清会带着上一张图的
     // 最后 rAF 时戳进入新图 —— 新图首个物理帧的 dt = (now − 旧时戳)/1000 被钳到 0.1s
     // （实测 warm reload 间隔 10.5s 时首帧 dt=0.1），一步积分 0.1 秒的物理。归零让首帧
@@ -625,6 +701,8 @@ export class RendererMain {
       return r[0];
     });
     this.predReady = true;
+    // 新世界从整步开始，不继承上一张图的物理累加余量。
+    this.physicsAccumulator = 0;
     // T-731/F4：新世界首帧 dt 取 1/64，不继承上一张图的 rAF 时戳（同 disposeScene 处的说明）
     this.presentation?.resetTimebase();
     // 权威帧校准状态清零（首帧权威帧将作为新起点）
@@ -651,6 +729,7 @@ export class RendererMain {
   /** 重生：直接让主线程物理调 `respawn`（不经 Worker），随后重启渲染采样流。 */
   respawn(): void {
     this.predPhys?.respawn();
+    this.snapCamera();
     // 位置突变 → 采样流不连续：世代 +1（Worker 丢弃旧位置缓存）
     this.bumpSampleEpoch();
   }
@@ -658,6 +737,7 @@ export class RendererMain {
   /** 传送至指定出生点索引（面板 spawn 下拉；索引空间由 `setSpawnPoints` 设入）。 */
   teleportToSpawn(idx: number): void {
     this.predPhys?.teleport_to_spawn(idx);
+    this.snapCamera();
     this.bumpSampleEpoch();
   }
 
@@ -716,6 +796,7 @@ export class RendererMain {
     onGround: boolean;
   }): void {
     this.predPhys?.set_state(sp.x, sp.y, sp.z, sp.yaw, sp.pitch, sp.vx, sp.vy, sp.vz, sp.onGround);
+    this.snapCamera();
     // 位置突变 → 采样流不连续：世代 +1（Worker 丢弃旧位置缓存）
     this.bumpSampleEpoch();
     this.clearPendingInput();
@@ -831,16 +912,59 @@ export class RendererMain {
   /** 绑定后的 rAF 回调（`start` 与 `tick` 都把它交给 rAF，避免每次 bind 产生新函数）。 */
   private readonly boundTick = this.tick.bind(this);
 
+  /** 传送/重生/读点后清空相机历史：下一步物理直接贴齐，不从旧位置插值飞过去。 */
+  private snapCamera(): void {
+    this.cameraPrev = null;
+    this.cameraCur = null;
+  }
+
+  /** 位置突变（传送/重生）或角度大跳时不做插值，避免相机穿过地图。 */
+  private shouldSnapCamera(prev: CameraState, next: CameraState, now: number): boolean {
+    const dx = next.x - prev.x;
+    const dy = next.y - prev.y;
+    const dz = next.z - prev.z;
+    if (dx * dx + dy * dy + dz * dz > 256 * 256) return true;
+    let dyaw = Math.abs(next.yaw - prev.yaw) % 360;
+    if (dyaw > 180) dyaw = 360 - dyaw;
+    if (dyaw > 90) return true;
+    if (Math.abs(next.pitch - prev.pitch) > 60) return true;
+    // 时钟停摆/页面隐藏后不要拿很旧的一步插值；直接贴当前。
+    return now - this.cameraCurAtMs > (1000 / this.physicsTickHz()) * 2;
+  }
+
+  /** 把当前/上一步相机位姿插值到 rAF 时刻（固定步长渲染的标准做法）。 */
+  private updateCamera(now: number): void {
+    const cur = this.cameraCur;
+    const cam = this.camera;
+    if (!cur || !cam) return;
+    const prev = this.cameraPrev;
+    const stepMs = 1000 / this.physicsTickHz();
+    let alpha = prev ? (now - this.cameraCurAtMs) / stepMs : 1;
+    if (!Number.isFinite(alpha)) alpha = 1;
+    alpha = Math.max(0, Math.min(1, alpha));
+    if (!prev || alpha >= 1) {
+      cam.rotation.set(cur.pitch * DEG2RAD, cur.yaw * DEG2RAD, 0, 'YXZ');
+      cam.position.set(cur.x, cur.y, cur.z);
+      return;
+    }
+    // yaw 走最短弧，避免 359°→0° 时绕一整圈。
+    let dyaw = cur.yaw - prev.yaw;
+    dyaw = ((dyaw + 180) % 360 + 360) % 360 - 180;
+    const yaw = prev.yaw + dyaw * alpha;
+    const pitch = prev.pitch + (cur.pitch - prev.pitch) * alpha;
+    cam.rotation.set(pitch * DEG2RAD, yaw * DEG2RAD, 0, 'YXZ');
+    cam.position.set(
+      prev.x + (cur.x - prev.x) * alpha,
+      prev.y + (cur.y - prev.y) * alpha,
+      prev.z + (cur.z - prev.z) * alpha,
+    );
+  }
+
   /**
-   * 每个 rAF 一次：先推进主线程物理并同步相机，再做剔除与绘制。
-   * - 物理分支（`predReady` 且 `predPhys` 非空）：dt = 与上一物理帧的间隔（首个物理帧取 1/64，
-   *   上限 0.1s）→ `shared.addInput` 把输入交给 Worker 权威帧 → `correctFromAuthority` →
-   *   `calibrateVelocity` → `predPhys.tick` → 把 dx/dy 清零（键位保留为按住状态）→ 冻结分支
-   *   （`holdPoint` 非空时每帧写回该位姿且速度 0）→ 读 `state()` → 写渲染采样 →
-   *   相机 rotation/position；
-   * - 绘制：`RenderSession.frame()`（可见性 → 近平面隔帧 → 天空/主世界两遍法）；
-   *   若 `pendingInjectReport` 置位则在其后跑一次注入统计。
-   * 副作用：写共享槽（输入与渲染采样）、改主线程物理状态、改相机与 mesh 可见性。
+   * rAF 渲染回调：相机插值到当前时刻，再走共享会话的可见性/近平面/天空与主世界绘制。
+   * 物理/实体由固定步长 `simClock` 推进（见 `stepFixedSimulation`）；时钟未启动
+   * （物理/场景未就绪）时在这里用 `presentation.update(now)` 兜底走 rAF 变步长。
+   * 副作用：改相机位姿、改 mesh 可见性、首帧后跑一次注入统计。
    */
   private tick(now: number): void {
     if (!this.running) return;
@@ -852,6 +976,7 @@ export class RendererMain {
     //    正常游玩由固定步长时钟 `simClock` 驱动（见 `stepFixedSimulation`），rAF 只负责渲染；
     //    时钟未启动（物理/场景未就绪）时由这里兜底走 rAF 变步长，保证首帧即可推进。
     if (!this.simClock?.running) this.presentation?.update(now);
+    this.updateCamera(now);
 
     // 2+3. 共享会话：可见性判定 → 近平面贴墙（隔帧）→ 天空/主世界绘制。
     // 近平面只在物理就绪后探测（物理未就绪时相机停在初始位姿，探测没有意义）。

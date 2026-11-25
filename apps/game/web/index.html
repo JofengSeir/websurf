@@ -117,14 +117,14 @@
         <!-- 物理 -->
         <div class="mod-pane" data-pane="physics">
           <div class="pane-title">物理参数</div>
-          <div class="pane-desc">权威物理 64Hz · Worker-B 预测联动 · 面板可调（计时玩法锁定）</div>
+          <div class="pane-desc">主线程权威 1000Hz 计算 · 64tick 物理（tickRate）· ?authority=worker 回切 Worker 预测 · 面板可调（计时玩法锁定）</div>
           <h4>基础</h4>
           <div class="row"><label>tickRate (Hz)</label>
             <input type="range" id="tickRate" min="48" max="128" step="1" value="64" />
             <div class="val"><input id="tickRateNum" type="number" value="64" /></div></div>
-          <!-- task-95：独立于物理步长的「计算帧率上限」：主线程固定步长模拟时钟的目标频率，
+          <!-- task-95：计算频率上限（模拟时钟泵频；main 物理按 tickRate 固定步进，不是物理频率）。
                默认 1000Hz、最高 2000Hz（owner 2026-11-19 指定），见 compute-cap.ts -->
-          <div class="row"><label>计算帧率上限 (Hz)</label>
+          <div class="row" id="computeRateCapRow"><label>计算频率上限 (Hz)</label>
             <input type="range" id="computeRateCap" min="48" max="2000" step="1" value="1000" />
             <div class="val"><input id="computeRateCapNum" type="number" value="1000" /></div></div>
           <!-- 横向限速（用户设置项，0 = 关闭）：与地图 sv_maxvelocity 取较小者生效，

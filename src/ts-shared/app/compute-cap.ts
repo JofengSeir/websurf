@@ -1,10 +1,13 @@
 /**
  * 计算频率上限（compute cap，task-95）：主线程「固定步长模拟时钟」每秒最多补算的目标频率（Hz）。
  *
- * ## 语义（2026-11-19 定稿）
- * - 三端主线程各有一个与 rAF 解耦的固定步长模拟时钟（`src/ts-shared/app/sim-clock.ts`，
- *   task-94 产物）；它只负责「每秒算多少步主线程预测/呈现」，**不改权威物理步长**——
- *   权威 Worker 的固定步长仍由 `physics.tickRate`（48..128，难度/手感旋钮）决定。
+ * ## 语义（2026-11-19 定稿；2026-11-26 修正为计算/物理解耦）
+ * - 主线程各有一个与 rAF 解耦的固定步长模拟时钟（`src/ts-shared/app/sim-clock.ts`，
+ *   task-94 产物）；它只负责「每秒算多少步主线程预测/呈现」，**不改物理步长**——
+ *   物理固定步长仍由 `physics.tickRate`（48..128，难度/手感旋钮）决定。
+ * - game 默认单权威主线程（T-D132）：时钟按本上限泵计算步，PhysWorld 在计算步内累计
+ *   1/tickRate 才推进一步（默认 1000Hz 计算 + 64tick 物理）；`?authority=worker` 回切
+ *   双线时，本上限是预测线的每步频率，Worker 权威仍是 64tick。
  * - 本模块只负责三件事：量程常量、默认值、HUD 双指标文案；不持有任何状态。
  * - 范围 48..2000 Hz、步长 1：下限 48 保证低刷屏/后台也能跑住最小模拟频率；
  *   上限 2000 对应高刷屏与「多步/帧」余量；默认 1000 Hz（owner 2026-11-19 指定）。
@@ -16,7 +19,8 @@
  *
  * ## 消费点
  * - `apps/debug/src/app.ts`：面板「计算帧率上限」行默认值 + HUD 双指标；
- * - `apps/game/src/panel/panel-controller.ts`：physics 滑块 + HUD 双指标；
+ * - `apps/game/src/panel/panel-controller.ts`：physics 滑块 + HUD 双指标（两种权威
+ *   模式都可见；main 模式只改计算泵频，不改物理 tickRate）；
  * - `apps/viewer/src/app.ts`：viewer 无主线程模拟时钟，只在 HUD 显示呈现 fps；
  * - 施加口：`rendererMain.setComputeRateCap(hz)`（debug/game 的 renderer-main 已实现）。
  */

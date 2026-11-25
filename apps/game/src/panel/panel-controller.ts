@@ -321,7 +321,7 @@ export class PanelController {
         tickRateNum.disabled = true;
       }
       this.bridge.sendConfig('physics', { tickRate: LOCKED_TICK_RATE });
-      // 计算帧率上限与 tickRate 无关：锁定态只锁物理步长，时钟仍按 computeRateCap 对齐
+      // 计算泵频率与物理步长解耦；main 单权威模式在计算步内按 tickRate 固定步进。
       this.onSyncComputeRateCap?.(this.config.physics.computeRateCap);
     } else {
       this.bindSlider('tickRate', 48, 128, 1, (v) => {
@@ -330,7 +330,7 @@ export class PanelController {
         this.pushPhysicsParams();
       });
     }
-    // 计算帧率上限（独立于物理步长 tickRate）：主线程模拟时钟目标频率，面板 48..1000。
+    // 计算频率上限（独立于物理步长 tickRate）：两种权威模式都改模拟时钟泵频。
     this.bindSlider('computeRateCap', COMPUTE_CAP_MIN, COMPUTE_CAP_MAX, 1, (v) => {
       // 手动改动标记后优先于启动探测默认值
       this.computeRateTouched = true;
@@ -851,9 +851,10 @@ export class PanelController {
   // ── task-95：计算帧率上限（physics.computeRateCap）默认值 + HUD 双指标 ─────────
 
   /**
-   * 启动默认值：`COMPUTE_CAP_DEFAULT`（1000Hz，owner 2026-11-19 指定；最高 2000Hz）。
-   * 只在「用户没手动改过、且存档也没给非默认值」时下发（config + 主线程模拟时钟）。
-   * 与物理步长 `tickRate`（48..128，控制难度）完全独立。
+   * 计算时钟启动默认值：`COMPUTE_CAP_DEFAULT`（1000Hz，owner 2026-11-19 指定；
+   * 最高 2000Hz）。只在「用户没手动改过、且存档也没给非默认值」时下发（config +
+   * 主线程模拟时钟）。与物理步长 `tickRate`（48..128，控制难度）完全独立；
+   * main 单权威模式也按它泵计算步，物理在步内按 tickRate 固定步进。
    */
   private applyDefaultComputeCap(): void {
     if (this.computeRateTouched) {

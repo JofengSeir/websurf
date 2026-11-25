@@ -34,11 +34,14 @@ export interface PhysicsConfig {
    *  `apps/game/src/input/input-bridge.ts` 的 `sendConfig`（显式附加进 physics 下发参数）、
    *  面板「模拟频率」控件（量程 48..128）、`apps/game/src/app.ts` 的 `syncFullConfig`
    *  （`lockTickRate` 为真时强制写 `LOCKED_TICK_RATE`）。
-   *  它控制权威物理步长与手感/难度，**不是**「计算帧率上限」（后者是 `computeRateCap`）。 */
+   *  它控制物理步长与手感/难度；单权威主线程模式（T-D132）下，模拟时钟按 `computeRateCap`
+   *  泵计算步，但 PhysWorld 每累计 1/tickRate 才推进一步，所以物理手感仍由它决定。
+   *  **不是**「计算频率上限」（后者是 `computeRateCap`）。 */
   tickRate: number;
-  /** 计算帧率上限（Hz）：主线程固定步长模拟时钟的目标频率（与 rAF 呈现解耦、独立于
-   *  `tickRate` 的物理步长/难度）。默认 1000Hz、最高 2000Hz（owner 2026-11-19 指定，
-   *  见 `src/ts-shared/app/compute-cap.ts`）；面板「计算帧率上限」控件 48..2000。 */
+  /** 计算频率上限（Hz）：主线程固定步长模拟时钟的泵频率（HUD「计算」读数），两种权威
+   *  模式都读它；默认 1000Hz、最高 2000Hz（owner 2026-11-19 指定，见
+   *  `src/ts-shared/app/compute-cap.ts`）。单权威主线程模式下物理按 `tickRate` 固定步进，
+   *  与这个泵频率解耦。 */
   computeRateCap: number;
   /** 横向（水平）速度模长上限（HU/s，0 = 关闭）：用户设置项，与地图 `sv_maxvelocity`
    *  取更小者生效（只钳 `hypot(vx,vz)`，竖直不受限）。JS 驱动层参数，不进 Rust 参数表；
@@ -222,7 +225,7 @@ export const DEFAULT_CONFIG: RuntimeConfig = {
     // 与 debug 物理面板对齐（D3）：默认值取共享层常量（0.1 / true），面板可调并持久化
     pushOut: PHYSICS_PARAM_DEFAULTS.pushOut,
     pushOutOnlyWhenSolid: PHYSICS_PARAM_DEFAULTS.pushOutOnlyWhenSolid,
-    // 主线程计算帧率上限（与物理步长 tickRate 解耦）：默认 1000Hz、最高 2000Hz
+    // 计算频率上限（两种权威模式都用它泵计算时钟；main 物理按 tickRate 子步进）：默认 1000Hz
     computeRateCap: COMPUTE_CAP_DEFAULT,
     // 横向限速（用户设置项）：默认 5000，0 = 关闭（只跟随地图 sv_maxvelocity）
     maxHorizontalSpeed: PHYSICS_PARAM_DEFAULTS.maxHorizontalSpeed,
