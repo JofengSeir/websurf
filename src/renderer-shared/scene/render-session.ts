@@ -269,7 +269,7 @@ export class RenderSession {
   private lastFrameAt = 0;
   /** `momentary_rot_button` 实体（符文盘等）的 pivot；空 = 本图没有旋转实体。 */
   private rotButtons: RotButtonPivot[] = [];
-  /** T-P1-5a：动态实体组（`dynamic-entities.ts` 收集）；开关关闭时恒为空 Map。 */
+  /** 动态实体组（`dynamic-entities.ts` 收集）；`__vbspDynamicEntityGroups === false` 时恒为空 Map。 */
   private dynGroups: Map<number, THREE.Group> = new Map();
   /** 本图待脱静态合并的实体下标；`loadScene` 按开关决定，关闭时为 null（零执行路径）。 */
   private pendingDynamicEntityIndices: ReadonlySet<number> | null = null;
@@ -480,8 +480,8 @@ export class RenderSession {
   }
 
   /**
-   * 动态 brush 实体组（T-P1-5a，实体下标 → 独立 `THREE.Group`）。
-   * 默认关闭；只有 `globalThis.__vbspDynamicEntityGroups === true` 时才有内容。
+   * 动态 brush 实体组（实体下标 → 独立 `THREE.Group`）。
+   * 默认开启；`globalThis.__vbspDynamicEntityGroups === false` 可关闭（A/B 逃生舱）。
    */
   get dynamicEntityGroups(): ReadonlyMap<number, THREE.Group> {
     return this.dynGroups;
@@ -528,9 +528,9 @@ export class RenderSession {
     // 而载图前后的长帧也不该算进新图的预算；档位清零让新图从默认画质起评。
     this.resetFrameBudget();
     this.disposeScene();
-    // T-P1-5a：动态 brush 实体脱静态合并默认关闭（A/B 开关 `__vbspDynamicEntityGroups`）。
+    // T-P1-5b：动态 brush 实体脱静态合并默认开启（`__vbspDynamicEntityGroups === false` 可关闭做 A/B）。
     // 关闭时 pending 为 null：mark / exclude / collect / 矩阵冻结豁免全都不执行，行为与旧版一致。
-    const dynamicGroupsOn = (globalThis as Record<string, unknown>).__vbspDynamicEntityGroups === true;
+    const dynamicGroupsOn = (globalThis as Record<string, unknown>).__vbspDynamicEntityGroups !== false;
     this.pendingDynamicEntityIndices = dynamicGroupsOn
       ? parseDynamicEntityIndices(input.entityIoJson)
       : null;
@@ -814,17 +814,20 @@ export class RenderSession {
    */
   private freezeStaticMatrices(): number {
     let frozen = 0;
-    // 开关关闭时 dynGroups 恒为空：下面的祖先链检查整段跳过，冻结循环与旧版完全一致。
-    const hasDynamicGroups = this.dynGroups.size > 0;
+    // `__vbspDynamicEntityGroups=false` 时 dynGroups 恒为空：下面的组检查整段跳过，冻结循环与旧版一致。
+    const groupNodes = new Set<THREE.Object3D>();
+    const groupAncestors = new Set<THREE.Object3D>();
+    for (const group of this.dynGroups.values()) {
+      groupNodes.add(group);
+      // 蓝图只要求豁免「组及其祖先」；组内 mesh 的几何已世界烘焙、局部矩阵恒等，
+      // 冻结后仍会随 group.matrixWorld 移动，不能因为祖先带标记就把整棵子树留在
+      // matrixAutoUpdate=true（77 组约 1804 mesh，实测会让帧时间翻倍）。
+      for (let node = group.parent; node; node = node.parent) groupAncestors.add(node);
+    }
     this.scene.traverse((obj) => {
       if (obj.userData.vbspRotPivot === true) return;
-      // T-P1-5a：动态实体组及其后代不冻结——运行期要改 `group.position/rotation`，
-      // `matrixAutoUpdate=false` 会让改动不生效（阶段 2 由 BrushEntityVisibility 驱动）。
-      if (hasDynamicGroups) {
-        for (let node: THREE.Object3D | null = obj; node; node = node.parent) {
-          if (typeof (node.userData as { vbspDynamicEntityGroup?: unknown }).vbspDynamicEntityGroup === 'number') return;
-        }
-      }
+      // T-P1-5a/5b：组节点运行期要改 `position`，祖先也要保持可更新；组内子节点照常冻结。
+      if (groupNodes.has(obj) || groupAncestors.has(obj)) return;
       obj.matrixAutoUpdate = false;
       frozen++;
     });

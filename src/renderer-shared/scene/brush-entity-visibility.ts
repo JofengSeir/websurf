@@ -42,6 +42,8 @@
 
 /** 合并来源表挂在几何 userData 上的键（与 `scene-optimizer.ts` 的 `MERGE_SOURCE_TABLE_KEY` 一致，改动需同步）。 */
 const MERGE_SOURCE_TABLE_KEY = 'websurfMergeSourceTable';
+/** 动态实体组标记（与 dynamic-entities.ts 的 DYNAMIC_ENTITY_GROUP_KEY 同值，改动需同步）。 */
+const DYNAMIC_ENTITY_GROUP_KEY = 'vbspDynamicEntityGroup';
 /**
  * 来源表里「挂在实体上的区间」名字前缀：
  * - `brush_<实体下标>`：brush 实体（门/移动平台/可碎墙…），用于隐藏与位移；
@@ -67,10 +69,32 @@ interface GeometryLike {
   readonly userData?: Record<string, unknown>;
 }
 
+interface Vector3Like {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  set(x: number, y: number, z: number): void;
+}
+
+interface Object3DLike {
+  readonly isMesh?: boolean;
+  visible?: boolean;
+  readonly parent?: Object3DLike | null;
+  readonly geometry?: GeometryLike;
+  readonly userData?: Record<string, unknown>;
+  readonly position?: Vector3Like;
+}
+
 interface MeshLike {
   readonly isMesh?: boolean;
   readonly geometry?: GeometryLike;
   readonly userData?: Record<string, unknown>;
+  readonly parent?: Object3DLike | null;
+}
+
+/** 动态实体组的最小形状：组级显隐 + 位移（three.Group 可直接满足）。 */
+interface GroupLike extends Object3DLike {
+  readonly position: Vector3Like;
 }
 
 /**
@@ -83,7 +107,7 @@ interface ClusterIndexLike {
 }
 
 interface SceneRootLike {
-  traverse(callback: (object: MeshLike) => void): void;
+  traverse(callback: (object: Object3DLike) => void): void;
 }
 
 interface SourceRangeLike {
@@ -150,8 +174,12 @@ interface EntityBinding {
 export interface BrushEntityVisibilityStats {
   /** 是否成功接收场景根并建立索引（false = 状态行显示「尚未载图」）。 */
   readonly sceneLoaded: boolean;
-  /** 已建索引的实体数。 */
+  /** 已建索引的实体数（含动态实体组；两者不重复计）。 */
   readonly entities: number;
+  /** 其中以独立组接管的动态实体数（组内不建区间槽）。 */
+  readonly groupEntities: number;
+  /** 当前被组级隐藏的动态实体数。 */
+  readonly groupHidden: number;
   /** 区间槽总数（同一实体跨多张几何/多材质会累加）。 */
   readonly slots: number;
   /** 区间覆盖的三角形总数。 */
@@ -333,6 +361,20 @@ function copyRange(array: NumericArray, offset: number, length: number): number[
   return backup;
 }
 
+/** 组节点上的实体下标；非动态实体组返回 null。 */
+function dynamicGroupIndexOf(object: Object3DLike): number | null {
+  const raw = object.userData?.[DYNAMIC_ENTITY_GROUP_KEY];
+  return typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0 ? raw : null;
+}
+
+/** 该对象是否位于某个动态实体组下（组内网格由组级显隐/位移接管，不再逐区间写 buffer）。 */
+function isInsideDynamicGroup(object: Object3DLike): boolean {
+  for (let node = object.parent ?? null; node; node = node.parent ?? null) {
+    if (dynamicGroupIndexOf(node) !== null) return true;
+  }
+  return false;
+}
+
 // ── 主体 ───────────────────────────────────────────────────────────────────
 
 /**
@@ -344,6 +386,12 @@ function copyRange(array: NumericArray, offset: number, length: number): number[
 export class BrushEntityVisibility {
   /** 本图「实体 → 区间」索引；换图/卸载时清空。 */
   private readonly bindings = new Map<number, EntityBinding>();
+  /** 动态实体组（T-P1-5b）：组级显隐/位移优先于逐区间写 buffer。 */
+  private readonly entityGroups = new Map<number, GroupLike>();
+  /** 每组的出生位置（组位移 = 出生位置 + 绝对偏移；restoreAll 归位用）。 */
+  private readonly groupBasePositions = new Map<number, [number, number, number]>();
+  /** 当前被组级隐藏的实体下标。 */
+  private readonly hiddenGroups = new Set<number>();
   /** 本图建立索引时遇到的口径/形态限制（状态行只显示条数，细节由调用方记日志）。 */
   private readonly limitations: string[] = [];
   private sceneLoaded = false;
@@ -387,8 +435,11 @@ export class BrushEntityVisibility {
     }
     this.root = root;
     this.sceneLoaded = true;
+    this.collectGroups(root);
     root.traverse((object) => {
       if (!object || object.isMesh === false) return;
+      // 动态实体组的网格由组级 visible/position 接管，不再逐区间写 buffer。
+      if (isInsideDynamicGroup(object)) return;
       const geometry = object.geometry;
       if (!geometry) return;
       this.indexGeometry(geometry, object);
@@ -412,6 +463,13 @@ export class BrushEntityVisibility {
       this.refresh();
       rebuilt = true;
     }
+    // 动态实体组优先：只切组级 visible，不写任何几何缓冲（组内网格的区间未建槽）。
+    const group = this.entityGroups.get(entityIndex);
+    if (group) {
+      if (this.hiddenGroups.has(entityIndex) === hidden) return { status: 'unchanged', rebuilt };
+      this.setGroupHidden(entityIndex, group, hidden);
+      return { status: 'changed', rebuilt, triangles: 0, slots: 0 };
+    }
     const binding = this.bindings.get(entityIndex);
     if (!binding) {
       this.unresolvedEvents += 1;
@@ -431,6 +489,14 @@ export class BrushEntityVisibility {
     let hidden = 0;
     for (const entityIndex of entityIndices) {
       this.desiredHidden.add(entityIndex);
+      const group = this.entityGroups.get(entityIndex);
+      if (group) {
+        if (!this.hiddenGroups.has(entityIndex)) {
+          this.setGroupHidden(entityIndex, group, true);
+          hidden += 1;
+        }
+        continue;
+      }
       const binding = this.bindings.get(entityIndex);
       if (binding && !binding.hidden) {
         this.setBindingHidden(binding, true);
@@ -453,6 +519,17 @@ export class BrushEntityVisibility {
       binding.offset = [0, 0, 0];
       for (const slot of binding.slots) this.writeSlotOffset(slot, [0, 0, 0]);
     }
+    // 动态组同样要回到出生状态：显隐恢复、位移归零；计数与隐藏集合同步扣减。
+    for (const entityIndex of this.hiddenGroups) {
+      const group = this.entityGroups.get(entityIndex);
+      if (group) group.visible = true;
+    }
+    this.hiddenEntities -= this.hiddenGroups.size;
+    this.hiddenGroups.clear();
+    for (const [entityIndex, group] of this.entityGroups) {
+      const base = this.groupBasePositions.get(entityIndex);
+      if (base) group.position.set(base[0], base[1], base[2]);
+    }
   }
 
   /**
@@ -473,6 +550,20 @@ export class BrushEntityVisibility {
       this.refresh();
       rebuilt = true;
     }
+    // 动态实体组优先：平移只写组级 position（组内几何已世界烘焙），不碰顶点缓冲。
+    const group = this.entityGroups.get(entityIndex);
+    if (group) {
+      if (
+        previous
+        && previous[0] === offset[0]
+        && previous[1] === offset[1]
+        && previous[2] === offset[2]
+      ) {
+        return { status: 'unchanged', rebuilt };
+      }
+      this.writeGroupOffset(entityIndex, group, offset);
+      return { status: 'changed', rebuilt, triangles: 0, slots: 0 };
+    }
     const binding = this.bindings.get(entityIndex);
     if (!binding) return { status: 'unresolved', rebuilt };
     if (
@@ -492,9 +583,15 @@ export class BrushEntityVisibility {
 
   /** 诊断快照：实体/区间/隐藏计数与限制文本（字段口径与应用层状态行一致）。 */
   stats(): BrushEntityVisibilityStats {
+    let entities = this.bindings.size;
+    for (const entityIndex of this.entityGroups.keys()) {
+      if (!this.bindings.has(entityIndex)) entities += 1;
+    }
     return {
       sceneLoaded: this.sceneLoaded,
-      entities: this.bindings.size,
+      entities,
+      groupEntities: this.entityGroups.size,
+      groupHidden: this.hiddenGroups.size,
       slots: this.bindingSlots,
       triangles: this.bindingTriangles,
       indexSlots: this.indexSlots,
@@ -525,6 +622,9 @@ export class BrushEntityVisibility {
 
   private reset(): void {
     this.bindings.clear();
+    this.entityGroups.clear();
+    this.groupBasePositions.clear();
+    this.hiddenGroups.clear();
     this.limitations.length = 0;
     this.sceneLoaded = false;
     this.root = null;
@@ -550,8 +650,11 @@ export class BrushEntityVisibility {
     this.reset();
     this.root = root;
     this.sceneLoaded = root !== null;
+    if (root) this.collectGroups(root);
     root?.traverse((object) => {
       if (!object || object.isMesh === false) return;
+      // 动态实体组在 refresh 后会被重新收集；其网格同样跳过区间索引。
+      if (isInsideDynamicGroup(object)) return;
       const geometry = object.geometry;
       if (!geometry) return;
       this.indexGeometry(geometry, object);
@@ -635,6 +738,8 @@ export class BrushEntityVisibility {
     for (const range of validated.ranges) {
       const entityIndex = entityIndexFromRangeName(range.meshName);
       if (entityIndex === null) continue; // 非 brush 区间：保持原样，绝不动
+      // 动态组实体由组级路径接管；不再建区间槽（避免同一实体被两套路径同时写）。
+      if (this.entityGroups.has(entityIndex)) continue;
       const triangleCount = range.count / 3;
       let binding = this.bindings.get(entityIndex);
       if (!binding) {
@@ -746,6 +851,38 @@ export class BrushEntityVisibility {
     this.hiddenVertexSlots += sign * binding.vertexSlots;
   }
 
+  /** 收集场景根下的动态实体组，并记录每组的出生位置。 */
+  private collectGroups(root: SceneRootLike): void {
+    root.traverse((object) => {
+      const entityIndex = dynamicGroupIndexOf(object);
+      if (entityIndex === null || object.isMesh) return;
+      const position = object.position;
+      if (!position || typeof position.set !== 'function') return;
+      if (this.entityGroups.has(entityIndex)) return;
+      this.entityGroups.set(entityIndex, object as GroupLike);
+      this.groupBasePositions.set(entityIndex, [position.x, position.y, position.z]);
+    });
+  }
+
+  /** 组级显隐：整组一次切换，不动组内几何缓冲。 */
+  private setGroupHidden(entityIndex: number, group: GroupLike, hide: boolean): void {
+    if (this.hiddenGroups.has(entityIndex) === hide) return;
+    group.visible = !hide;
+    if (hide) {
+      this.hiddenGroups.add(entityIndex);
+      this.hiddenEntities += 1;
+    } else {
+      this.hiddenGroups.delete(entityIndex);
+      this.hiddenEntities -= 1;
+    }
+  }
+
+  /** 组级位移：出生位置 + 绝对偏移（组内几何已是世界坐标，局部变换单位阵）。 */
+  private writeGroupOffset(entityIndex: number, group: GroupLike, offset: [number, number, number]): void {
+    const base = this.groupBasePositions.get(entityIndex) ?? [0, 0, 0];
+    group.position.set(base[0] + offset[0], base[1] + offset[1], base[2] + offset[2]);
+  }
+
   /** 把一个区间的顶点写成 `基准 + offset`；隐藏中的位移不写点（恢复时补写）。 */
   private writeSlotOffset(slot: Slot, offset: [number, number, number]): void {
     const vertices = slot.vertices;
@@ -759,6 +896,11 @@ export class BrushEntityVisibility {
   /** 把位移镜像应用到已建好的实体区间（PVS 重建索引后重放）。 */
   private applyDesiredOffsets(): void {
     for (const [entityIndex, offset] of this.desiredOffsets) {
+      const group = this.entityGroups.get(entityIndex);
+      if (group) {
+        this.writeGroupOffset(entityIndex, group, offset);
+        continue;
+      }
       const binding = this.bindings.get(entityIndex);
       if (!binding) continue;
       binding.offset = [offset[0], offset[1], offset[2]];
@@ -770,6 +912,11 @@ export class BrushEntityVisibility {
   /** 把「应隐藏」集合应用到已建好的实体区间（已隐藏的跳过）。 */
   private applyDesiredHidden(): void {
     for (const entityIndex of this.desiredHidden) {
+      const group = this.entityGroups.get(entityIndex);
+      if (group) {
+        this.setGroupHidden(entityIndex, group, true);
+        continue;
+      }
       const binding = this.bindings.get(entityIndex);
       if (binding && !binding.hidden) this.setBindingHidden(binding, true);
     }
