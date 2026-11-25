@@ -17,26 +17,24 @@ if (typeof window === "undefined") {
     const headers = new Headers(response.headers);
     headers.set("Cross-Origin-Embedder-Policy", "require-corp");
     headers.set("Cross-Origin-Opener-Policy", "same-origin");
+    headers.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    headers.set("Pragma", "no-cache");
+    headers.set("Expires", "0");
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,
       headers,
     });
   };
-  self.addEventListener("install", (event) => {
-    if (PRECACHE_MANIFEST && PRECACHE_MANIFEST.length > 0) {
-      event.waitUntil(
-        caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_MANIFEST)).catch(() => {})
-      );
-    }
+  self.addEventListener("install", () => {
     self.skipWaiting();
   });
   self.addEventListener("activate", (event) =>
     event.waitUntil(
       (async () => {
-        // 缓存名随预缓存内容变化，旧版本缓存在此清除
+        // 永不缓存：激活时清空全部 CacheStorage 旧条目
         const names = await caches.keys();
-        await Promise.all(names.filter((n) => n !== CACHE_NAME).map((n) => caches.delete(n)));
+        await Promise.all(names.map((n) => caches.delete(n)));
         await self.clients.claim();
       })()
     )
@@ -45,14 +43,8 @@ if (typeof window === "undefined") {
     const r = event.request;
     if (r.cache === "only-if-cached" && r.mode !== "same-origin") return;
     if (r.method !== 'GET') return;
-    // 网络优先：开发期 `npm run build:ts` 重建的 app.js 必须立刻可见；
-    // 旧实现 cache-first 会把首轮构建永久钉死（服务端 no-store 也绕不过 SW 缓存）。
-    // 离线 / 网络失败时才回缓存（预缓存清单仍由 install 期写入）。
-    event.respondWith(
-      fetch(r)
-        .then(withCOI)
-        .catch(() => caches.match(r).then((cached) => (cached ? withCOI(cached) : fetch(r))))
-    );
+    // 永不缓存：始终走网络并禁浏览器 HTTP 缓存，只附加 COOP/COEP 响应头。
+    event.respondWith(fetch(r, { cache: 'no-store' }).then(withCOI));
   });
 } else {
   // ── 页面上下文 ─────────────────────────────────────────────────────

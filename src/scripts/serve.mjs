@@ -92,7 +92,9 @@ const BASE_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Cross-Origin-Opener-Policy': 'same-origin',
   'Cross-Origin-Embedder-Policy': 'require-corp',
-  'Cache-Control': 'no-store',
+  'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+  'Pragma': 'no-cache',
+  'Expires': '0',
 };
 
 function send(res, status, body, contentType, headOnly) {

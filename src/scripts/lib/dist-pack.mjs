@@ -21,6 +21,7 @@
 import { rm, mkdir, writeFile, readFile, copyFile, readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { computeBuildRev } from './build-rev.mjs';
 
 /**
  * 两路打包共用的 esbuild 配置：bundle / target / minify / sourcemap / write /
@@ -28,7 +29,16 @@ import { dirname, join } from 'node:path';
  * `bundleEsm` 各自补齐。
  */
 export function commonEsbuildOptions({ logLevel = 'warning', inlineImportMetaUrl = false } = {}) {
-  const options = {
+  const define = {
+    __WEBSURF_BUILD_REV__: JSON.stringify(computeBuildRev()),
+  };
+  if (inlineImportMetaUrl) {
+    // 传 true 时用 define 把 import.meta.url 整体换成 JSON 字符串 'about:blank'：
+    // IIFE 形态没有模块上下文，内嵌形态也不走 fetch（读取侧见
+    // src/ts-shared/auth/worker-dispatch.ts）
+    define['import.meta.url'] = JSON.stringify('about:blank');
+  }
+  return {
     bundle: true,
     target: 'es2022',
     minify: true,
@@ -38,14 +48,8 @@ export function commonEsbuildOptions({ logLevel = 'warning', inlineImportMetaUrl
     // （全文见 src/phys/LICENSE，声明见 src/phys/NOTICE），勿改成 none
     legalComments: 'eof',
     logLevel,
+    define,
   };
-  if (inlineImportMetaUrl) {
-    // 传 true 时用 define 把 import.meta.url 整体换成 JSON 字符串 'about:blank'：
-    // IIFE 形态没有模块上下文，内嵌形态也不走 fetch（读取侧见
-    // src/ts-shared/auth/worker-dispatch.ts）
-    options.define = { 'import.meta.url': JSON.stringify('about:blank') };
-  }
-  return options;
 }
 
 /** 注入校验：build 必须是工程侧传入的 esbuild build 函数，否则抛错（硬约束 1 的负对照）。 */
@@ -59,9 +63,11 @@ export function assertBuildFunction(build) {
 /** 打包为 IIFE，返回 outputFiles 首项的 text（write:false，不写盘）。 */
 export async function bundleIife({ build, entry, options = {} }) {
   assertBuildFunction(build);
+  const common = commonEsbuildOptions({ logLevel: options.logLevel, inlineImportMetaUrl: true });
   const result = await build({
-    ...commonEsbuildOptions({ logLevel: options.logLevel, inlineImportMetaUrl: true }),
+    ...common,
     ...options,
+    define: { ...common.define, ...options.define },
     entryPoints: [entry],
     format: 'iife',
     write: false,
@@ -74,9 +80,11 @@ export async function bundleIife({ build, entry, options = {} }) {
 /** 打包为 ESM（write:false 取文本），先 mkdir -p 目标目录再写入 outfile，返回 outfile。 */
 export async function bundleEsm({ build, entry, outfile, options = {} }) {
   assertBuildFunction(build);
+  const common = commonEsbuildOptions({ logLevel: options.logLevel, inlineImportMetaUrl: false });
   const result = await build({
-    ...commonEsbuildOptions({ logLevel: options.logLevel, inlineImportMetaUrl: false }),
+    ...common,
     ...options,
+    define: { ...common.define, ...options.define },
     entryPoints: [entry],
     format: 'esm',
     write: false,
@@ -249,7 +257,9 @@ const HEADERS = {
   // 与 src/scripts/serve.mjs 的开发服务一致；缺了它们要等 coi-serviceworker 注入后重载一次。
   'Cross-Origin-Opener-Policy': 'same-origin',
   'Cross-Origin-Embedder-Policy': 'require-corp',
-  'Cache-Control': 'no-cache',
+  'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+  'Pragma': 'no-cache',
+  'Expires': '0',
 };
 
 const server = http.createServer((req, res) => {

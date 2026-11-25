@@ -514,5 +514,42 @@ fn steep_upward_pitch_grabs_ladder_and_embedded_ladder_ejects_cleanly() {
     assert!(p2.origin[1] > 960.0, "推出后应继续攀爬上升，实际 y={}", p2.origin[1]);
 }
 
+#[test]
+fn ladder_jump_off_pushes_along_normal_at_270() {
+    let mut w = ladder_world(-1, true);
+    let params = PhysParams::default();
+    let mut p = create_player([0.0, 60.0, 26.0], &params);
+    p.yaw = 0.0; // 面向 -Z（朝向梯子 +Z 面）
+    p.pitch = 20.0;
+    p.on_ground = false;
+    p.input.forward = true;
+    for _ in 0..10 {
+        player_tick(&mut w, &mut p, &params, DT);
+    }
+    assert!(p.on_ladder.is_some(), "应已抓住梯子");
+
+    // 即使 old_jump 为 true（例如一直按着跳跃上梯后再触发/继续按住），Source 语义下也应立即跳离并沿法线 +Z 弹出 270 HU/s
+    p.input.forward = false;
+    p.input.jump = true;
+    p.old_jump = true;
+    player_tick(&mut w, &mut p, &params, DT);
+    assert!(p.on_ladder.is_none(), "跳离后应立即脱离梯子");
+    assert!(
+        p.velocity[2] > 250.0,
+        "跳离应沿梯面法线 +Z 推出 ~270 HU/s，实际 vel={:?}",
+        p.velocity
+    );
+    let z_after_jump = p.origin[2];
+    for _ in 0..20 {
+        player_tick(&mut w, &mut p, &params, DT);
+    }
+    assert!(
+        p.origin[2] > z_after_jump + 40.0,
+        "跳离后应明显向梯外飞出而非原地垂直掉落，z0={z_after_jump} z_end={}",
+        p.origin[2]
+    );
+}
+
+
 
 

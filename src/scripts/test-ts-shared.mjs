@@ -111,6 +111,8 @@ const {
 const { buildWorldBundle } = await loadTsBundle('src/ts-shared/phys/world-builder.ts', 'phys-world-builder');
 // 实体运行期宿主：验证 load() 保留出生期 func_door 镜像并在 update() 重放到 predPhys。
 const { EntityGameplay } = await loadTsBundle('src/ts-shared/gameplay/entity-gameplay.ts', 'entity-gameplay');
+// 权威校准器：验证跳离梯子后 270 HU/s 推离速度不被滞后权威帧覆盖。
+const { AuthorityCalibrator } = await loadTsBundle('src/ts-shared/phys/authority-calibrator.ts', 'authority-calibrator');
 
 // 旋转枢轴的「rest 零变化」不变量：组位置 = pivot、mesh 局部位置 = 原位置 - pivot 时，
 // 世界坐标在旋转 0 的情况下逐分量不变（pivot 加回本身的抵消）。
@@ -902,6 +904,58 @@ test('EntityGameplay.load preserves spawn-time func_door brushSolid/brushOffset 
   assert.ok(Math.abs(offsetCalls[0][1]) < 1e-6);
   assert.ok(Math.abs(offsetCalls[0][2] - 356) < 1e-6);
   assert.ok(Math.abs(offsetCalls[0][3]) < 1e-6);
+});
+
+test('AuthorityCalibrator preserves ladder jump-off 270 HU/s velocity and syncs detach to authority', () => {
+  const setVelCalls = [];
+  const syncCalls = [];
+  let st = {
+    posX: 10956, posY: 960, posZ: -2912,
+    yaw: -90, pitch: 0,
+    velX: 0, velY: 200, velZ: 0,
+    onGround: false, onLadder: true, eyeHeight: 64.09,
+  };
+  let auth = {
+    va: 1,
+    frame: {
+      pos: { x: 10956, y: 960, z: -2912 },
+      yaw: -90, pitch: 0,
+      vel: { x: 0, y: 0, z: 0 },
+      eyeHeight: 64.09, onGround: false, timeMs: 100,
+    },
+  };
+  const cal = new AuthorityCalibrator({
+    getPhys: () => ({
+      state: () => st,
+      set_state: () => {},
+      set_velocity: (vx, vy, vz) => setVelCalls.push([vx, vy, vz]),
+    }),
+    readAuth: () => auth,
+    clearPendingInput: () => {},
+    onSyncRenderState: (s, teleport) => syncCalls.push({ s, teleport }),
+  });
+
+  // 首帧确立起点与 curAuth
+  cal.correctFromAuthority();
+  // 在梯上：wasOnLadder 置真，不覆盖速度
+  cal.calibrateVelocity(1000);
+  assert.equal(setVelCalls.length, 0);
+
+  // 跳离梯子：onLadder 变 false，predPhys 拿到 [-270, 0, 0]
+  st = { ...st, onLadder: false, velX: -270, velY: 0, velZ: 0 };
+  cal.calibrateVelocity(1001);
+  assert.equal(setVelCalls.length, 0, '脱离梯子当帧不能被滞后权威帧 vel=[0,0,0] 覆盖');
+  assert.equal(syncCalls.length, 1, '脱离梯子当帧应立即向权威反向同步 270 HU/s 速度');
+  assert.equal(syncCalls[0].teleport, true);
+  assert.equal(syncCalls[0].s.velX, -270);
+
+  // 豁免窗口内（< 120ms）仍不覆盖速度
+  cal.calibrateVelocity(1050);
+  assert.equal(setVelCalls.length, 0, '豁免窗口内不能被权威帧速度覆盖');
+
+  // 豁免窗口结束后恢复正常耦合
+  cal.calibrateVelocity(1130);
+  assert.equal(setVelCalls.length, 1, '豁免窗口结束后应恢复速度耦合');
 });
 
 

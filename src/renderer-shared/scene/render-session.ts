@@ -52,10 +52,14 @@ import { applyRenderPrefs, readRenderPrefs } from '../config/render-prefs.js';
 
 /**
  * 渲染代码版本标记：`__vbspCulling.state().rev` 会带出来。
- * 排查「现象还在」时先看它——不一致就说明浏览器跑的是旧包（Service Worker / 磁盘缓存），
- * 别在旧构建上做判断。改渲染语义时顺手递增。
+ * 构建期由 `build-app.mjs` / `dist-pack.mjs` 自动注入 `__WEBSURF_BUILD_REV__`
+ * （基于 git 提交与工作树指纹），未注入时回退 `'dev'`。
  */
-export const RENDER_REV = '2026-11-26.3-door-solid-mirror';
+declare const __WEBSURF_BUILD_REV__: string | undefined;
+export const RENDER_REV: string =
+  typeof __WEBSURF_BUILD_REV__ === 'string' && __WEBSURF_BUILD_REV__.length > 0
+    ? __WEBSURF_BUILD_REV__
+    : 'dev';
 
 import {
 	getLightingMode,

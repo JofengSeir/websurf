@@ -1119,8 +1119,9 @@ fn ladder_move(world: &mut World, p: &mut Player, params: &PhysParams, dt: f64, 
     // 本次攀爬朝向（附身时按玩家方位选面得出，见 `check_ladder`）。
     let facing = p.ladder_facing;
 
-    // 跳离：推离梯面
-    if p.input.jump && !p.old_jump {
+    // 跳离：Source SDK 2013 `LadderMove` (`gamemovement.cpp:2933-2939`) 直接检测 `IN_JUMP`
+    // （不要求 `!old_jump`），立即脱离梯子并沿梯面法线给 270 HU/s 推离速度。
+    if p.input.jump {
         p.velocity = [
             facing[0] * LADDER_JUMP_OFF_SPEED,
             facing[1] * LADDER_JUMP_OFF_SPEED,
@@ -1128,6 +1129,7 @@ fn ladder_move(world: &mut World, p: &mut Player, params: &PhysParams, dt: f64, 
         ];
         p.ladder_cooldown = 0.25;
         p.on_ladder = None;
+        p.on_ground = false;
         try_player_move(world, p, params, dt);
         return;
     }

@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <!-- 本端标识：渲染档按端隔离（键 vbsp:renderPrefs:game），详见 src/renderer-shared/config/render-prefs.ts -->
   <script>globalThis.__VBSP_APP__ = 'game';</script>
   <title>WebSurf-game</title>
@@ -271,11 +274,11 @@
           <p class="hint" id="lightingModeHint">预烘焙：每个像素都采光照图集并算逐顶点/环境盒烘焙光照，画面有明暗关系，代价是每帧光照开销更大。纯纹理：只上漫反射贴图，不采光照图、不算烘焙项，每帧光照开销最小——这就是给「人物移动时渲染速度不要大幅跳变」用的旋钮（实际幅度取决于 GPU / 分辨率 / 地图）。切换即时生效（不重建场景、不打断操作）。</p>
           <h4>近平面（防贴墙透视）</h4>
           <div class="row"><label title="近平面贴墙自适应探测距离：越大越斜的贴墙角度也能探测到，性能开销略增">探测距离</label>
-            <input type="range" id="nearProbeDist" min="8" max="256" step="1" value="100" />
-            <div class="val"><input id="nearProbeDistNum" type="number" min="8" max="256" step="any" value="100" /></div></div>
+            <input type="range" id="nearProbeDist" min="100" max="300" step="1" value="200" />
+            <div class="val"><input id="nearProbeDistNum" type="number" min="100" max="300" step="any" value="200" /></div></div>
           <div class="row"><label title="贴墙时 near = 最近几何距离 × 此系数：越小越不易裁墙，远处深度精度略降">收缩系数</label>
-            <input type="range" id="nearRatio" min="0.1" max="1" step="0.01" value="0.3" />
-            <div class="val"><input id="nearRatioNum" type="number" min="0.1" max="1" step="any" value="0.3" /></div></div>
+            <input type="range" id="nearRatio" min="0" max="1" step="0.01" value="0" />
+            <div class="val"><input id="nearRatioNum" type="number" min="0" max="1" step="any" value="0" /></div></div>
 
           <!-- 更多画面项（T-688）：控件由共享规格表 src/renderer-shared/config/render-panel-spec.ts 生成，
                绑定点在 src/app.ts 的 setupRenderPanel；本页已有的 FOV / 亮度 / 暗部提升 / 模型光照 /

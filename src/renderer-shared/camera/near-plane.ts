@@ -11,9 +11,9 @@ import * as THREE from 'three';
 /** near 允许的最小值（收缩与默认值都不得低于它）。 */
 const CAMERA_NEAR_MIN = 0.05;
 /** 探测距离默认值（HU）：`update` 的射线长度上限与包围球粗筛半径都由它推出。 */
-const NEAR_PROBE_DIST_DEFAULT = 100;
-/** near 收缩系数默认值：命中几何时 near = 命中距离 × 本值。 */
-const NEAR_RATIO_DEFAULT = 0.3;
+const NEAR_PROBE_DIST_DEFAULT = 200;
+/** near 收缩系数默认值：命中几何时 near = 命中距离 × 本值（0 表示直接贴到 CAMERA_NEAR_MIN）。 */
+const NEAR_RATIO_DEFAULT = 0;
 /**
  * 滞回：相机移动小于该距离（HU）且朝向变化小于阈值时复用上一次探测结果。
  *
@@ -371,13 +371,20 @@ export class NearPlaneController {
     return built;
   }
 
-  /** 面板实时调整探测距离与收缩系数：两项都只在传入正数时写，ratio 还需 ≤ 1；下一帧探测生效。 */
+  /** 面板实时调整探测距离与收缩系数：probeDist 夹到 [100, 300]，ratio 接受 [0, 1]；
+   *  任一变更会清掉滞回缓存使滑块拖动立即生效。 */
   setParams(probeDist?: number, ratio?: number): void {
-    if (probeDist !== undefined && probeDist > 0) {
-      this.nearProbeDist = probeDist;
+    let changed = false;
+    if (probeDist !== undefined && Number.isFinite(probeDist) && probeDist > 0) {
+      this.nearProbeDist = Math.min(300, Math.max(100, probeDist));
+      changed = true;
     }
-    if (ratio !== undefined && ratio > 0 && ratio <= 1) {
+    if (ratio !== undefined && Number.isFinite(ratio) && ratio >= 0 && ratio <= 1) {
       this.nearRatio = ratio;
+      changed = true;
+    }
+    if (changed) {
+      this._nearHaveLast = false;
     }
   }
 

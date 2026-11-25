@@ -319,6 +319,12 @@ export class AuthorityCalibrator {
   /** 传送/重置豁免时长（ms）：`resetTo` 用它把 `teleportExemptUntilMs` 推到当前时刻
    *  之后。 */
   static readonly TELEPORT_EXEMPT_MS = 200;
+  /** 刚脱离梯子（含跳离梯面给 270 HU/s 推离速度）后的速度保护窗口（ms）：
+   *  期间不拿滞后的权威帧速度覆盖预测物理，同时立即把脱离瞬间位置/速度反向同步给权威。 */
+  static readonly LADDER_DETACH_EXEMPT_MS = 120;
+
+  private wasOnLadder = false;
+  private ladderDetachExemptUntilMs = 0;
 
   // ── 常规反向重锚 ──────────────────────────────────────────────────────
   /**
@@ -634,7 +640,22 @@ export class AuthorityCalibrator {
     const st = phys.state() as unknown as SyncPhysState;
     // 梯上攀爬速度由当前输入与朝向零惯性瞬时决定（ladder_move），不能用延迟的权威速度 + 加速度
     // 外推去覆盖渲染物理，否则双世界时间差会反复把梯上速度拉成旧方向/零速，导致卡死或脱梯。
-    if (st.onLadder === true) return;
+    if (st.onLadder === true) {
+      this.wasOnLadder = true;
+      return;
+    }
+    // 刚从梯子脱离（含跳离梯面给 270 HU/s 推离速度）：立即把脱离瞬间的位姿与速度同步给权威，
+    // 并开启短暂豁免窗口，防止滞后的权威帧把刚赋予的 270 HU/s 弹出速度覆盖成 0。
+    if (this.wasOnLadder) {
+      this.wasOnLadder = false;
+      this.ladderDetachExemptUntilMs = now + AuthorityCalibrator.LADDER_DETACH_EXEMPT_MS;
+      this.prevAuthVel = null;
+      this.prevAuthTimeMs = 0;
+      this.accelSuppressFrames = 2;
+      this.emitTeleportSync(st);
+      return;
+    }
+    if (now < this.ladderDetachExemptUntilMs) return;
     const a = this.curAuth;
     // 帧龄基准是主线程读到该权威帧的时刻（同线程时钟）。
     // 若改用 a.timeMs（Worker 的 performance.now），两个时钟基准不同，dt 会被一个固定
@@ -701,6 +722,8 @@ export class AuthorityCalibrator {
     // 重锚节拍与加速度抑制窗一并清零（新世界/新轨迹下两者都已无意义）
     this.lastRoutineAnchorAtMs = Number.NEGATIVE_INFINITY;
     this.accelSuppressFrames = 0;
+    this.wasOnLadder = false;
+    this.ladderDetachExemptUntilMs = 0;
   }
 
   /**

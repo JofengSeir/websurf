@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "build:worker": "esbuild src/worker/main.ts --bundle --outfile=web/worker.js --format=esm --target=es2022",
     "prebuild:app": "npm run build:worker",
-    "build:app": "esbuild src/app.ts --bundle --outfile=web/app.js --format=esm --target=es2022",
+    "build:app": "node ../../src/scripts/build-app.mjs",
     "build:ts": "npm run typecheck && npm run build:app",
     "build": "npm run build:wasm && npm run build:ts",
     "build:dist": "node scripts/build-dist.mjs",

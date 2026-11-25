@@ -45,7 +45,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
         # 禁用缓存：本服务只服务本地开发，产物是固定文件名（没有内容 hash），
         # 禁缓存避免页面拿到旧的 JS / WASM
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
         super().end_headers()
 
     # 访问日志走 stderr，stdout 只留启动提示
