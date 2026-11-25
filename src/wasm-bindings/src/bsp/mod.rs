@@ -77,6 +77,10 @@ mod debug_tools;
 // 路径共用同一份实现（此前两处各写一份，game 那份缺名门控 → 回卷不受 filter 约束）。
 #[cfg(any(feature = "glb", feature = "debug-tools"))]
 mod teleport_filters;
+// 碰撞 / 传送 / PVS 导出五个函数体的共享实现（T-P1-1a）：glb.rs 与 debug_tools.rs
+// 只保留 #[wasm_bindgen] 外壳与各自的错误文案 / 日志档位；viewer-export 也编 glb.rs，故一并纳入。
+#[cfg(any(feature = "glb", feature = "debug-tools", feature = "viewer-export"))]
+mod colliders_impl;
 
 #[allow(unused_imports)]
 #[cfg(feature = "core")]
