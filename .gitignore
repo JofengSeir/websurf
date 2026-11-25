@@ -20,6 +20,13 @@
 .archify/
 __pycache__/
 *.pyc
+*.tsbuildinfo
+coverage/
+*.wasm
+*.cpuprofile
+*.heapsnapshot
+*.trace
+*.pid
 
 # ── 2. 三端 web/（只留手写的 index.html / styles.css）──────────────────
 # 其余全是生成物：app.js、worker.js、websurf_*wasm*、textures.mtz、coi-serviceworker.js。
@@ -46,6 +53,13 @@ test/replay/*
 # 仓库只带工作流骨架（AGENTS.md、skills/、.githooks/、scripts/）；记忆与项目状态留在本机。
 .amh/
 .dsh/
+.claude/
+.codex/
+.cursor/
+.gemini/
+.agents/
+.vscode/
+.idea/
 **/.workbuddy/
 progress/
 /docs/
@@ -69,6 +83,9 @@ progress/
 *.rej
 *.bak
 *.swp
+*.lnk
+*.Zone.Identifier
+*_commit_msg.txt
 *~
 .DS_Store
 Thumbs.db
