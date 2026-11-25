@@ -164,7 +164,11 @@ function runStep(step, index, total) {
   console.log(`\n[verify:${profile}] (${index + 1}/${total}) ${step.label}`);
   const env = { ...process.env };
   if (step.needsWasmCache && wasmBindgenDir) {
-    env.PATH = `${wasmBindgenDir}${delimiter}${env.PATH ?? ''}`;
+    // Windows 的 PATH 常以 `Path` 大小写存在；直接写 env.PATH 会新建一条空 PATH，
+    // 导致 spawn('cmd.exe') 找不到系统目录（ENOENT），verify:full 无法启动 wasm 构建。
+    // 按实际键名前置，保留系统 PATH 的其余段。
+    const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
+    env[pathKey] = `${wasmBindgenDir}${delimiter}${env[pathKey] ?? ''}`;
   }
   let res;
   if (step.kind === 'node') {
