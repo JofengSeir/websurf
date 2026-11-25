@@ -21,7 +21,7 @@ import { PhysWorld, initSync } from '../../pkg/websurf_wasm.js';
 import type { ShmState, MsgState } from '../../../../src/ts-shared/auth/shared-state.js';
 import type { PhysWorldLike } from '../../../../src/ts-shared/auth/auth-loop.js';
 import { createWorkerRuntime } from '../../../../src/ts-shared/app/worker-runtime.js';
-import { createConfig, applyConfigPatch, buildPhysicsParams } from '../config.js';
+import { createConfig, applyConfigPatch, applyMapPhysicsParam, buildPhysicsParams } from '../config.js';
 import type { RuntimeConfig } from '../config.js';
 
 const config: RuntimeConfig = createConfig();
@@ -49,21 +49,6 @@ function syncParamsToWasm(): void {
  * 不可直接相减。
  */
 let worldJsonRecvAt = 0;
-
-/** 地图 `servercommand` 的物理参数名（面板名）→ game config 字段名。
- *
- * 只有 `airAccelerate` 与 config 不同名（config 沿用历史短名 `airAccel`），其余同形；
- * 认不出的参数名直接忽略（映射表未列出的 servercommand 参数不会写入 config）。
- */
-const MAP_PARAM_TO_CONFIG: Record<string, keyof RuntimeConfig['physics']> = {
-  maxSpeed: 'maxSpeed',
-  accelerate: 'accelerate',
-  airAccelerate: 'airAccel',
-  friction: 'friction',
-  stopSpeed: 'stopSpeed',
-  gravity: 'gravity',
-  bhopSpeedClamp: 'bhopSpeedClamp',
-};
 
 /** 共享 Worker 运行时：权威循环/分发/采样/健康守护都在共享层，这里只注入 game 的映射与诊断。 */
 const runtime = createWorkerRuntime({
@@ -110,10 +95,8 @@ const runtime = createWorkerRuntime({
     /** 地图 convar（`sv_airaccelerate` / `sv_enablebunnyhopping` 等）落到 config 副本：
      * 之后任何一次 `syncParamsToWasm` / 换图重放都会带上地图值，不会被配置默认值冲掉。 */
     onMapPhysicsParam: (name, value) => {
-      const field = MAP_PARAM_TO_CONFIG[name];
-      if (!field) return;
-      (config.physics as unknown as Record<string, unknown>)[field] = value;
-      syncParamsToWasm();
+      // 映射表与单权威主线程模式共用（`apps/game/src/config.ts`），免得两端不同步
+      if (applyMapPhysicsParam(config, name, value)) syncParamsToWasm();
     },
   },
 });

@@ -176,8 +176,19 @@ export class RendererMain {
    *  「跳跃增幅区」离开时用这个值把跳高压回去；未 init 前保持 Rust 默认 57。 */
   private defaultJumpHeight = 57;
 
-  /** 共享状态通道（SAB 实现或消息回退实现）；校准器从它读权威帧，`tick` 向它写输入与渲染采样。 */
-  constructor(private readonly shared: ShmState | MsgState) {
+  /**
+   * 权威物理归属（T-D132）：`'main'` = 单权威主线程（没有权威帧，校准链整体让路）；
+   * `'worker'` = 旧双线（消费权威帧做校准）。由端入口显式传入。
+   */
+  private readonly authorityMode: 'main' | 'worker';
+
+  /** 共享状态通道（SAB、消息回退，或单权威模式的惰性占位）；双线模式校准器从它读权威帧，
+   *  `tick` 向它写输入与渲染采样。 */
+  constructor(
+    private readonly shared: ShmState | MsgState,
+    authorityMode: 'main' | 'worker',
+  ) {
+    this.authorityMode = authorityMode;
     this.calibrator = new AuthorityCalibrator({
       readAuth: () => this.shared.readAuthoritative(),
       getPhys: () => this.predPhys,
@@ -206,6 +217,9 @@ export class RendererMain {
       hooks: {
         beginFrame: () => ({ run: this.predReady && this.predPhys !== null }),
         beforeTick: (now) => {
+          // 单权威主线程（T-D132）：主线程物理即唯一状态，不消费权威帧、不做速度校准——
+          // 否则会把不存在的权威帧当成「无帧」反复清校准态，且让呈现线多一层无意义外推。
+          if (this.authorityMode === 'main') return;
           // 消费权威帧（只读共享槽；首帧取起点、常规反向重锚、yaw 分叉兜底都在校准器内）。
           this.correctFromAuthority();
           // 权威速度外推校准（位置不由权威覆盖）。
@@ -740,6 +754,8 @@ export class RendererMain {
    * `src/ts-shared/phys/authority-calibrator.ts` 的 `applyCollisionCorrection`。
    */
   applyCollisionCorrection(kind: 'land' | 'blocked', pos: number[], yawDeg: number, pitchDeg: number, vel?: number[]): void {
+    // 单权威主线程没有权威碰撞事件；万一误接也不覆盖主线程物理（唯一状态由 predPhys 自持）
+    if (this.authorityMode === 'main') return;
     this.calibrator.applyCollisionCorrection(kind, pos, yawDeg, pitchDeg, vel);
   }
 

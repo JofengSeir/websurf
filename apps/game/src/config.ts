@@ -319,3 +319,30 @@ export function buildPhysicsParams(config: RuntimeConfig): Record<string, unknow
     push_out_only_when_solid: p.pushOutOnlyWhenSolid,
   };
 }
+
+/**
+ * 地图 `servercommand` 的物理参数名（物理面板名）→ config 字段名。
+ *
+ * 只有 `airAccelerate` 与 config 不同名（config 沿用历史短名 `airAccel`），其余同形；
+ * 认不出的参数名直接忽略。双线模式由 Worker 侧在自己的 config 副本上应用同名表；
+ * 单权威主线程模式（`?authority=main`，默认）由 `InputBridge.sendSetMapPhysicsParam`
+ * 在本端应用，再经 `buildPhysicsParams` 落到唯一 `PhysWorld`。
+ */
+export const MAP_PARAM_TO_CONFIG: Readonly<Record<string, keyof PhysicsConfig>> = {
+  maxSpeed: 'maxSpeed',
+  accelerate: 'accelerate',
+  airAccelerate: 'airAccel',
+  friction: 'friction',
+  stopSpeed: 'stopSpeed',
+  gravity: 'gravity',
+  bhopSpeedClamp: 'bhopSpeedClamp',
+};
+
+/** 把一条地图 `servercommand` 物理参数写进 `config.physics`；返回是否认得该参数名。
+ *  双线模式的 Worker 与单权威主线程模式的主线程都经本函数应用（同一张映射表）。 */
+export function applyMapPhysicsParam(config: RuntimeConfig, name: string, value: number | boolean): boolean {
+  const field = MAP_PARAM_TO_CONFIG[name];
+  if (!field) return false;
+  (config.physics as unknown as Record<string, unknown>)[field] = value;
+  return true;
+}

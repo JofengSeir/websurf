@@ -10,15 +10,18 @@
  *   参数时都把 `set_noclip(false)` 写下去；
  * - 除 `player` / `optimize` 段外，下发的 `patch` 都是 `buildPhysicsParams(this.config)` 的**全量物理参数**
  *   （`section` 名原样保留），调用方传入的 patch 只用于更新本端副本，其效果经该全量参数带出。
+ * - 单权威主线程模式（T-D132，`authorityMode='main'`）下 `worker === null`：所有 `postMessage`
+ *   空值短路；只有地图 convar 例外——它必须落进唯一物理实例，见 `sendSetMapPhysicsParam`。
  */
 
 import type { RuntimeConfig } from '../config.js';
-import { applyConfigPatch, buildPhysicsParams } from '../config.js';
+import { applyConfigPatch, applyMapPhysicsParam, buildPhysicsParams } from '../config.js';
 import type { RendererMain } from '../renderer/renderer-main.js';
 
 export class InputBridge {
   constructor(
-    private readonly worker: Worker,
+    /** 权威 Worker；单权威主线程模式（`authorityMode='main'`）为 null，所有下发自动短路。 */
+    private readonly worker: Worker | null,
     private readonly renderer: RendererMain,
     private readonly config: RuntimeConfig,
   ) {}
@@ -43,14 +46,14 @@ export class InputBridge {
 
     // mode（noclip 切换）：单独立即同步 Worker（低频操作）
     if (patch.mode !== undefined) {
-      this.worker.postMessage({ type: 'config', section: 'physics', patch: { mode: patch.mode } });
+      this.worker?.postMessage({ type: 'config', section: 'physics', patch: { mode: patch.mode } });
     }
 
     if (section === 'player') {
       const p = this.config.player;
       const hull = { halfWidth: p.halfWidth, standHeight: p.standHeight, duckHeight: p.duckHeight };
       this.renderer.setPredictionHull(hull.halfWidth, hull.standHeight, hull.duckHeight);
-      this.worker.postMessage({ type: 'config', section: 'player', patch: hull });
+      this.worker?.postMessage({ type: 'config', section: 'player', patch: hull });
       return;
     }
 
@@ -58,7 +61,7 @@ export class InputBridge {
     // 不能落到下面的全量物理参数路径——否则 snake_case 物理键会写进 config.optimize，
     // 且每次勾选都会多余地重设一遍物理参数。
     if (section === 'optimize') {
-      this.worker.postMessage({ type: 'config', section: 'optimize', patch: { ...this.config.optimize } });
+      this.worker?.postMessage({ type: 'config', section: 'optimize', patch: { ...this.config.optimize } });
       return;
     }
 
@@ -70,19 +73,19 @@ export class InputBridge {
       params.tickRate = this.config.physics.tickRate;
     }
     this.renderer.setPredictionParams(params);
-    this.worker.postMessage({ type: 'config', section, patch: params });
+    this.worker?.postMessage({ type: 'config', section, patch: params });
   }
 
   /** 重生：渲染端与权威端都回出生点。 */
   sendRespawn(): void {
     this.renderer.respawn();
-    this.worker.postMessage({ type: 'respawn' });
+    this.worker?.postMessage({ type: 'respawn' });
   }
 
   /** 传送到权威出生点列表的第 `target` 项（渲染端与权威端同一索引）。 */
   sendTeleport(target: number): void {
     this.renderer.teleportToSpawn(target);
-    this.worker.postMessage({ type: 'teleport', target });
+    this.worker?.postMessage({ type: 'teleport', target });
   }
 
   /** 设置死亡 Y 阈值：渲染端 `setDeathY` + 权威端 `set-death-threshold` 消息双端同值。
@@ -91,48 +94,57 @@ export class InputBridge {
   sendSetDeathThreshold(value: number): void {
     this.renderer.setDeathY(value);
     // 权威侧同值下发：共享 dispatch 的 set-death-threshold 分支 → Rust set_death_y
-    this.worker.postMessage({ type: 'set-death-threshold', value });
+    this.worker?.postMessage({ type: 'set-death-threshold', value });
   }
 
   // ── 实体副作用 → 权威 Worker（共享宿主回调转发；世界重建后由共享 dispatch 重放）──
 
   /** 玩家 targetname（传送 filter 门控）：渲染物理已由宿主写，权威侧同值下发。 */
   sendSetPlayerName(name: string, filterEnabled?: boolean): void {
-    this.worker.postMessage({ type: 'set-player-name', name, filterEnabled });
+    this.worker?.postMessage({ type: 'set-player-name', name, filterEnabled });
   }
 
   /** 一次性速度冲量（`trigger_push` ONCE / 实体 `addVelocity`）。 */
   sendAddVelocity(vel: [number, number, number]): void {
-    this.worker.postMessage({ type: 'add-velocity', vel });
+    this.worker?.postMessage({ type: 'add-velocity', vel });
   }
 
   /** 覆盖玩家速度（`trigger_push` 非 ONCE 加速板）。 */
   sendSetPushVelocity(vel: [number, number, number]): void {
-    this.worker.postMessage({ type: 'set-push-velocity', vel });
+    this.worker?.postMessage({ type: 'set-push-velocity', vel });
   }
 
   /** 水平速度上限（地图 `sv_maxvelocity`）。 */
   sendSetSpeedCap(cap: number): void {
-    this.worker.postMessage({ type: 'set-speed-cap', cap });
+    this.worker?.postMessage({ type: 'set-speed-cap', cap });
   }
 
   /** 起跳高度（「跳跃增幅区」内/外切换）。 */
   sendSetJumpHeight(height: number): void {
-    this.worker.postMessage({ type: 'set-jump-height', height });
+    this.worker?.postMessage({ type: 'set-jump-height', height });
   }
 
-  /** 地图 `servercommand` 映射出的物理参数（`name` 是物理面板参数名）。 */
+  /** 地图 `servercommand` 映射出的物理参数（`name` 是物理面板参数名）。
+   *  双线模式：只发权威 Worker（主线程预测线不吃地图 convar，保持既有语义）；
+   *  单权威主线程模式（`worker === null`）：直接写本端 config + 唯一 `PhysWorld`，
+   *  否则 `sv_airaccelerate` 等地图参数在唯一物理实例上不生效。 */
   sendSetMapPhysicsParam(name: string, value: number | boolean): void {
-    this.worker.postMessage({ type: 'set-map-physics-param', name, value });
+    if (this.worker) {
+      this.worker.postMessage({ type: 'set-map-physics-param', name, value });
+      return;
+    }
+    if (applyMapPhysicsParam(this.config, name, value)) {
+      this.renderer.setPredictionParams(buildPhysicsParams(this.config));
+    }
   }
 
   /** 实体 brush 运行期实心状态（门开合放行 / wall_toggle 开关）；权威物理与预测同语义。 */
   sendBrushSolid(entity: number, solid: boolean): void {
-    this.worker.postMessage({ type: 'set-brush-solid', entity, solid });
+    this.worker?.postMessage({ type: 'set-brush-solid', entity, solid });
   }
 
   /** 实体 brush 绝对位移（HU，Y-up；相对 BSP 出生位置）；电梯/移动平台的权威同步。 */
   sendBrushOffset(entity: number, offset: readonly [number, number, number]): void {
-    this.worker.postMessage({ type: 'set-brush-offset', entity, x: offset[0], y: offset[1], z: offset[2] });
+    this.worker?.postMessage({ type: 'set-brush-offset', entity, x: offset[0], y: offset[1], z: offset[2] });
   }
 }

@@ -33,6 +33,7 @@ import {
 	SHARED_BUFFER_SIZE,
 	type SharedState,
 } from '../auth/shared-state.js';
+import { createSingleThreadSharedState } from './single-thread-shared.js';
 import {
 	handleWorkerReady,
 	workerStaleMessage,
@@ -126,6 +127,13 @@ export interface AppBridgeLike {
 	sendSetMapPhysicsParam?(name: string, value: number | boolean): void;
 }
 
+/**
+ * 权威物理归属模式：
+ * - `'worker'`：旧双线（Worker 权威 + 主线程预测），必需 SAB/MsgState 通道；
+ * - `'main'`：单权威主线程（T-D132），runtime 不建 Worker、不分配 SAB。
+ */
+export type AppAuthorityMode = 'main' | 'worker';
+
 /** bootstrap 输入：端标识、画布、配置与通道/注入参数。 */
 export interface AppRuntimeProfile<C> {
 	/** 端标识：'debug' | 'game' | 'viewer'（日志/诊断用）。 */
@@ -136,12 +144,29 @@ export interface AppRuntimeProfile<C> {
 	readonly sharedMemory: boolean;
 	readonly worker: AppWorkerSpec;
 	readonly wasm: AppWasmSpec;
+	/**
+	 * 权威物理归属（可选，缺省 `'worker'` = 旧双线行为）。
+	 *
+	 * - `'main'`：唯一 `PhysWorld` 在主线程——runtime **不**分配 SharedArrayBuffer、
+	 *   **不**创建 Worker（`worker` 为 null），`shared` 换成无通道占位
+	 *   （`createSingleThreadSharedState`），全部 Worker 消息路径空值短路；
+	 * - `'worker'`：保持「Worker 权威 + 主线程预测」双线（apps/debug/viewer 不传即此）。
+	 *
+	 * 端入口应显式传入；缺省值只为兼容未迁移的调用点（apps/debug 本次零改动）。
+	 */
+	readonly authorityMode?: AppAuthorityMode;
 }
 
 /** 钩子/工厂拿到的装配上下文（renderer/bridge 在阶段推进中填充）。 */
-export interface AppBootstrapContext<C, R extends AppRendererLike, B extends AppBridgeLike> {
+export interface AppBootstrapContext<
+	C,
+	R extends AppRendererLike,
+	B extends AppBridgeLike,
+	W extends Worker | null = Worker,
+> {
 	readonly profile: AppRuntimeProfile<C>;
-	readonly worker: Worker;
+	/** `authorityMode='main'` 时为 null（单权威主线程不创建 Worker）。 */
+	readonly worker: W;
 	readonly canvas: HTMLCanvasElement;
 	readonly config: C;
 	readonly sharedBuffer: SharedArrayBuffer | null;
@@ -156,9 +181,14 @@ export interface AppBootstrapContext<C, R extends AppRendererLike, B extends App
 }
 
 /** 端特有语义与回调：通用骨架由 runtime 装配，端只补差异。 */
-export interface AppHooks<C, R extends AppRendererLike, B extends AppBridgeLike> {
+export interface AppHooks<
+	C,
+	R extends AppRendererLike,
+	B extends AppBridgeLike,
+	W extends Worker | null = Worker,
+> {
 	/** 必选：主线程 wasm 预热（debug=`ensureMainWasm()`；game=`renderer.initPrediction()`）。 */
-	ensureMainWasm(ctx: AppBootstrapContext<C, R, B>): Promise<void>;
+	ensureMainWasm(ctx: AppBootstrapContext<C, R, B, W>): Promise<void>;
 	/** 必选：死亡阈值下发时机（debug='immediate'；game='after-scene'）。 */
 	readonly deathThresholdPolicy: 'immediate' | 'after-scene';
 	/** 必选：InputBridge 相对 renderer.init 的装配阶段（debug 先建；game init/start 后建）。 */
@@ -167,18 +197,18 @@ export interface AppHooks<C, R extends AppRendererLike, B extends AppBridgeLike>
 	onSceneBundle(bundle: unknown, message: unknown): void;
 
 	createRenderer(shared: SharedState): R;
-	createInputBridge(ctx: AppBootstrapContext<C, R, B>): B;
+	createInputBridge(ctx: AppBootstrapContext<C, R, B, W>): B;
 	/** 桥接创建后立即初始化（debug=`sendInit(sharedBuffer,w,h,dpr)`；game 无）。 */
-	initBridge?(bridge: B, ctx: AppBootstrapContext<C, R, B>): void;
+	initBridge?(bridge: B, ctx: AppBootstrapContext<C, R, B, W>): void;
 	/**
 	 * 可选：wasm-init 之前先发端侧初始化消息（game=`{type:'init',shared}`；debug 无，
 	 * 其 init 由 InputBridge.sendInit 在桥接阶段发出）。必须在 ③ 消息路由挂好之后调用。
 	 */
-	initWorker?(ctx: AppBootstrapContext<C, R, B>): void;
+	initWorker?(ctx: AppBootstrapContext<C, R, B, W>): void;
 	/** renderer.init 之前（debug=`applyRenderDebugSwitches(readRenderPrefs().debug)`）。 */
-	beforeRendererInit?(ctx: AppBootstrapContext<C, R, B>): void;
+	beforeRendererInit?(ctx: AppBootstrapContext<C, R, B, W>): void;
 	/** renderer.start() 之后（game 的 installFrameProbe 等可挂这里）。 */
-	afterRendererStart?(ctx: AppBootstrapContext<C, R, B>): void;
+	afterRendererStart?(ctx: AppBootstrapContext<C, R, B, W>): void;
 
 	/** 状态栏 / 错误栏 / 权威健康日志 sink（对接各端现有函数）。 */
 	status?(message: string, kind: 'success' | 'error' | ''): void;
@@ -186,7 +216,7 @@ export interface AppHooks<C, R extends AppRendererLike, B extends AppBridgeLike>
 	health?(message: string): void;
 
 	/** 端特有 Worker 消息：返回 true = 已消费，不再走通用分支。 */
-	onWorkerMessage?(message: Record<string, unknown>, ctx: AppBootstrapContext<C, R, B>): boolean;
+	onWorkerMessage?(message: Record<string, unknown>, ctx: AppBootstrapContext<C, R, B, W>): boolean;
 
 	/** 通用回调的端侧补充（记录/额外副作用）。 */
 	onCullStats?(stats: unknown): void;
@@ -196,9 +226,17 @@ export interface AppHooks<C, R extends AppRendererLike, B extends AppBridgeLike>
 }
 
 /** createAppRuntime() 的返回：装配好的线程通道 + 通用回调骨架。 */
-export interface AppRuntime<C, R extends AppRendererLike, B extends AppBridgeLike> {
+export interface AppRuntime<
+	C,
+	R extends AppRendererLike,
+	B extends AppBridgeLike,
+	W extends Worker | null = Worker,
+> {
 	readonly profile: AppRuntimeProfile<C>;
-	readonly worker: Worker;
+	/** `authorityMode='main'` 时为 null（单权威主线程不创建 Worker）。 */
+	readonly worker: W;
+	/** 本次装配实际采用的权威归属（profile 缺省解析结果）。 */
+	readonly authorityMode: AppAuthorityMode;
 	readonly canvas: HTMLCanvasElement;
 	readonly config: C;
 	readonly sharedBuffer: SharedArrayBuffer | null;
@@ -237,34 +275,50 @@ interface RendererCallbackSink {
  * 创建三端共用的 app bootstrap：外部只给 profile + hooks，runtime 按固定 9 步装配，
  * 端特有行为全部落在 hooks（见文件头）。
  */
-export function createAppRuntime<C, R extends AppRendererLike, B extends AppBridgeLike>(
+export function createAppRuntime<
+	C,
+	R extends AppRendererLike,
+	B extends AppBridgeLike,
+	W extends Worker | null = Worker,
+>(
 	profile: AppRuntimeProfile<C>,
-	hooks: AppHooks<C, R, B>,
-): AppRuntime<C, R, B> {
+	hooks: AppHooks<C, R, B, W>,
+): AppRuntime<C, R, B, W> {
 	const { canvas, config } = profile;
 	const width = canvas.clientWidth;
 	const height = canvas.clientHeight;
 	const dpr = globalThis.devicePixelRatio || 1;
+	// 权威归属：'main' = 单权威主线程（T-D132，不建 Worker/通道）；缺省 = 旧双线
+	const authorityMode: AppAuthorityMode = profile.authorityMode === 'main' ? 'main' : 'worker';
+	const singleThread = authorityMode === 'main';
 
-	// ①（端侧已判定 sharedMemory；此处只建缓冲）
-	const sharedBuffer = profile.sharedMemory ? new SharedArrayBuffer(SHARED_BUFFER_SIZE) : null;
+	// ①（端侧已判定 sharedMemory；此处只建缓冲）。单权威主线程没有跨线程通道，不分配 SAB。
+	const sharedBuffer = !singleThread && profile.sharedMemory
+		? new SharedArrayBuffer(SHARED_BUFFER_SIZE)
+		: null;
 
-	// ② Worker 创建
-	let workerRef: Worker;
-	if (profile.worker.inlineJs) {
-		const blob = new Blob([profile.worker.inlineJs], { type: 'text/javascript' });
-		workerRef = new Worker(URL.createObjectURL(blob));
-	} else {
-		workerRef = new Worker(profile.worker.url, { type: 'module' });
+	// ② Worker 创建（单权威主线程不建 Worker）
+	let workerRef: Worker | null = null;
+	if (!singleThread) {
+		if (profile.worker.inlineJs) {
+			const blob = new Blob([profile.worker.inlineJs], { type: 'text/javascript' });
+			workerRef = new Worker(URL.createObjectURL(blob));
+		} else {
+			workerRef = new Worker(profile.worker.url, { type: 'module' });
+		}
 	}
 
-	// ⑤ 共享状态先建（纯构造无副作用；消息路由与回调都要用）
-	const shared = createMainSharedState(sharedBuffer, workerRef);
+	// ⑤ 共享状态先建（纯构造无副作用；消息路由与回调都要用）。
+	// 单权威主线程没有第二消费者：用无通道占位，保证渲染端既有调用点仍合法。
+	const shared = workerRef
+		? createMainSharedState(sharedBuffer, workerRef)
+		: createSingleThreadSharedState();
 
 	let deathThresholdY = 0;
-	const ctx: AppBootstrapContext<C, R, B> = {
+	const ctx: AppBootstrapContext<C, R, B, W> = {
 		profile,
-		worker: workerRef,
+		// 单权威主线程时为 null；泛型 W 由端侧声明（game: Worker | null，debug: 默认 Worker）
+		worker: workerRef as W,
 		canvas,
 		config,
 		sharedBuffer,
@@ -285,8 +339,8 @@ export function createAppRuntime<C, R extends AppRendererLike, B extends AppBrid
 		hooks.onSceneBundle(bundle, message);
 	};
 
-	// ③ 消息路由（尽早挂上，避免 wasm 初始化早回的 ready 丢失）
-	workerRef.onmessage = (e: MessageEvent<unknown>): void => {
+	// ③ 消息路由（尽早挂上，避免 wasm 初始化早回的 ready 丢失）；单权威主线程无 Worker 可挂。
+	const handleWorkerMessage = (e: MessageEvent<unknown>): void => {
 		const message = e.data as Record<string, unknown> | null;
 		if (!message || typeof message !== 'object') return;
 		if (hooks.onWorkerMessage?.(message, ctx)) return;
@@ -331,24 +385,31 @@ export function createAppRuntime<C, R extends AppRendererLike, B extends AppBrid
 				break;
 		}
 	};
-	workerRef.onerror = (e: ErrorEvent): void => {
+	const handleWorkerError = (e: ErrorEvent): void => {
 		// ErrorEvent 本身不是 Error：优先取 message 字符串，再补 file:line（有才补）。
 		const where = e.filename ? ` (${e.filename}:${e.lineno})` : '';
 		hooks.error?.(`Worker error: ${errorText(e)}${where}`);
 	};
+	if (workerRef) {
+		workerRef.onmessage = handleWorkerMessage;
+		workerRef.onerror = handleWorkerError;
+	}
 
 	// ④ 前置：端侧通道初始化（可选）。game 的 `{type:'init'}` 必须先于 wasm-init——
 	// Worker 端 init 建立共享通道（决定 SAB / MsgState），迟于 wasm-init 会让 authLoop
 	// 在 shared=null 时启动。debug 无此钩子（其 init 由 InputBridge.sendInit 在桥接阶段发，
 	// 与旧 main 的换序行为一致）。
-	hooks.initWorker?.(ctx);
+	// 单权威主线程没有 Worker：initWorker / wasm 注入整体跳过（端 hook 内仍应做 ?. 守卫）。
+	if (workerRef) {
+		hooks.initWorker?.(ctx);
 
-	// ④ wasm 注入：内嵌构建走 postMessage（Blob Worker 读不到主线程 global）；
-	// dev/multi 发 wasmUrl 由 worker 自行 fetch；mtzB64 两模式都带。
-	if (profile.wasm.inlineB64) {
-		workerRef.postMessage({ type: 'wasm-init', wasmB64: profile.wasm.inlineB64, mtzB64: profile.wasm.mtzB64 });
-	} else {
-		workerRef.postMessage({ type: 'wasm-init', wasmUrl: profile.wasm.url, mtzB64: profile.wasm.mtzB64 });
+		// ④ wasm 注入：内嵌构建走 postMessage（Blob Worker 读不到主线程 global）；
+		// dev/multi 发 wasmUrl 由 worker 自行 fetch；mtzB64 两模式都带。
+		if (profile.wasm.inlineB64) {
+			workerRef.postMessage({ type: 'wasm-init', wasmB64: profile.wasm.inlineB64, mtzB64: profile.wasm.mtzB64 });
+		} else {
+			workerRef.postMessage({ type: 'wasm-init', wasmUrl: profile.wasm.url, mtzB64: profile.wasm.mtzB64 });
+		}
 	}
 
 	// ⑥ 桥接（按 bridgePhase：debug 在 renderer 之前；game 在 init/start 之后）
@@ -390,7 +451,8 @@ export function createAppRuntime<C, R extends AppRendererLike, B extends AppBrid
 		ctx.bridge?.sendSetMapPhysicsParam?.(name, value);
 	};
 	sink.onSyncRenderState = (state, teleport): void => {
-		workerRef.postMessage({ type: 'sync-render-state', state, teleport });
+		// 单权威主线程无 Worker：主线程物理即唯一状态，无需反向同步
+		workerRef?.postMessage({ type: 'sync-render-state', state, teleport });
 	};
 	sink.onPhysEvent = (event: unknown): void => {
 		hooks.onPhysEvent?.(event);
@@ -410,7 +472,8 @@ export function createAppRuntime<C, R extends AppRendererLike, B extends AppBrid
 
 	return {
 		profile,
-		worker: workerRef,
+		worker: workerRef as W,
+		authorityMode,
 		canvas,
 		config,
 		sharedBuffer,
@@ -431,6 +494,7 @@ export function createAppRuntime<C, R extends AppRendererLike, B extends AppBrid
 		sendDeathThreshold,
 		notifySceneBundle,
 		dispose(): void {
+			if (!workerRef) return;
 			workerRef.onmessage = null;
 			workerRef.onerror = null;
 			workerRef.terminate();

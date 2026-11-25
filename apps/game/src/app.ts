@@ -47,7 +47,12 @@ import { readRenderPrefs, writeRenderPrefs, applyRenderPrefs, defaultRenderPrefs
 import { buildRenderPanel, type RenderPanelApi, type RenderPanelValue } from '../../../src/renderer-shared/config/render-panel-ui.js';
 import { setOptimizeFlags } from '../../../src/renderer-shared/config/optimize-flags.js';
 import type { RenderPanelItem } from '../../../src/renderer-shared/config/render-panel-spec.js';
-import { createAppRuntime, type AppHooks, type AppRuntime } from '../../../src/ts-shared/app/app-runtime.js';
+import {
+  createAppRuntime,
+  type AppAuthorityMode,
+  type AppHooks,
+  type AppRuntime,
+} from '../../../src/ts-shared/app/app-runtime.js';
 import { createConfigSync, type ConfigSync } from '../../../src/ts-shared/app/config-sync.js';
 
 const config: RuntimeConfig = createConfig();
@@ -90,7 +95,7 @@ let renderer: RendererMain | null = null;
 /** 地图聊天框：渲 `point_servercommand` / `point_clientcommand` 的 `say` 提示。 */
 let chatOverlay: ChatOverlay | null = null;
 /** 共享 bootstrap 实例（Step2）：死亡阈值等「端侧决定时机」的下发必须经它。 */
-let appRuntime: AppRuntime<RuntimeConfig, RendererMain, InputBridge> | null = null;
+let appRuntime: AppRuntime<RuntimeConfig, RendererMain, InputBridge, Worker | null> | null = null;
 let panel: PanelController | null = null;
 let sharedState: SharedState | null = null;
 let sceneReady = false;
@@ -123,23 +128,34 @@ async function main(): Promise<void> {
     return;
   }
 
-  // 0. 共享内存通道判定（判定/提示属于端体验，runtime 只接收结果）
-  const sharedMemory = resolveSharedMemory();
+  // 0. 权威物理归属（T-D132）：默认单权威主线程；`?authority=worker` 回切旧双线做 A/B。
+  //    归属由端入口显式解析并传入，runtime 只在缺省时按 legacy 'worker' 处理（apps/debug 不改）。
+  const authorityMode = resolveAuthorityMode();
+  console.info(
+    authorityMode === 'main'
+      ? '[authority] 单权威主线程模式：唯一 PhysWorld 在主线程（?authority=worker 可回切双线 A/B）'
+      : '[authority] 双线模式（legacy）：Worker 权威 + 主线程预测',
+  );
+
+  // 0.1 共享内存通道判定（仅双线模式需要；单权威主线程没有跨线程通道，
+  //     也不应弹「无 SharedArrayBuffer 兼容模式」降级提示）
+  const sharedMemory = authorityMode === 'worker' ? resolveSharedMemory() : false;
 
   // 1-2. 通道骨架 + 主线程 wasm 预热 → 共享 bootstrap
-  const runtime = createAppRuntime<RuntimeConfig, RendererMain, InputBridge>(
+  const runtime = createAppRuntime<RuntimeConfig, RendererMain, InputBridge, Worker | null>(
     {
       id: 'game',
       canvas: dom.canvas,
       config,
       sharedMemory,
+      authorityMode,
       worker: { inlineJs: readEmbedded('__VBSP_WORKER_JS__'), url: './worker.js' },
       wasm: {
         inlineB64: readEmbedded('__VBSP_WASM_B64__'),
         url: './websurf_wasm_bg.wasm',
       },
     },
-    createGameHooks(),
+    createGameHooks(authorityMode),
   );
   appRuntime = runtime;
 
@@ -193,7 +209,14 @@ async function main(): Promise<void> {
   startInputLoop();
 }
 
-/** 共享内存可用性判定 + 端侧提示（回退语义/日志措辞由端保留，runtime 只接收结果）。 */
+/** 权威物理归属解析：`?authority=worker` → 旧双线；缺省/其他值 → 单权威主线程（T-D132）。 */
+function resolveAuthorityMode(): AppAuthorityMode {
+  const search = typeof location !== 'undefined' ? location.search : '';
+  return new URLSearchParams(search).get('authority') === 'worker' ? 'worker' : 'main';
+}
+
+/** 共享内存可用性判定 + 端侧提示（回退语义/日志措辞由端保留，runtime 只接收结果）。
+ *  仅双线模式调用；单权威主线程不判定也不提示（没有跨线程通道可用可降）。 */
 function resolveSharedMemory(): boolean {
   const isolated = (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true;
   if (isolated) {
@@ -220,7 +243,7 @@ function readEmbedded(name: string): string | undefined {
  * - bridgePhase='after-init'：game 的 InputBridge 构造参数含 renderer，旧序在 init/start 后才建。
  * - initWorker：game 无 InputBridge.sendInit，`{type:'init'}` 必须在 wasm-init 之前直接发。
  */
-function createGameHooks(): AppHooks<RuntimeConfig, RendererMain, InputBridge> {
+function createGameHooks(authorityMode: AppAuthorityMode): AppHooks<RuntimeConfig, RendererMain, InputBridge, Worker | null> {
   return {
     // 主线程 wasm 懒初始化（BspProcessor + PhysWorld 同模块；dist 内嵌 base64）
     ensureMainWasm: (ctx) =>
@@ -229,11 +252,13 @@ function createGameHooks(): AppHooks<RuntimeConfig, RendererMain, InputBridge> {
     bridgePhase: 'after-init',
     // Step2 只迁装配骨架；BSP→SceneData 流程仍在 handleLoadBsp，Step3（scene-loader）再收。
     onSceneBundle: (_bundle, _message) => {},
-    createRenderer: (shared) => new RendererMain(shared),
+    // 权威归属显式传给渲染器：main 模式跳过权威帧校准链（公共呈现序列不改）
+    createRenderer: (shared) => new RendererMain(shared, authorityMode),
     createInputBridge: (ctx) => new InputBridge(ctx.worker, ctx.renderer!, ctx.config),
     initWorker: (ctx) => {
       // 权威 Worker 的共享通道初始化：必须先于 wasm-init（否则 authLoop 以 shared=null 起步）
-      ctx.worker.postMessage({ type: 'init', shared: ctx.sharedBuffer });
+      // 单权威主线程没有 Worker（ctx.worker=null）：本次装配不存在该通道。
+      ctx.worker?.postMessage({ type: 'init', shared: ctx.sharedBuffer });
     },
     afterRendererStart: (ctx) => {
       // 出帧探针（自动化验证仪器；只往 globalThis 挂对象，不改变渲染/物理行为）
@@ -734,36 +759,43 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
       appRuntime?.sendDeathThreshold(pendingDeathY);
       pendingDeathY = null;
     }
-    // Worker 权威物理世界（地图碰撞；独立固定步长权威帧计算）
+    // Worker 权威物理世界（地图碰撞；独立固定步长权威帧计算）。
+    // 单权威主线程模式（authorityMode='main'）没有 Worker：整段不发，主线程 predPhys 即唯一世界
+    // （因此也不做三个大 JSON 的结构化克隆与 `set-spawn-points` 的重复序列化）。
     //
     // ⚠️ **顺序已回退为"主线程世界建完再发"**（2026-09-20 实测）：
     // 曾尝试把本消息提前到 `buildPredictionWorld` 之前，让两端构建并行 —— 实测**更差**：
     // Worker 内构建 3147ms → 3454ms、首个权威帧 22.19s → 22.57s（主线程与 Worker
     // 抢 CPU/内存带宽）。瓶颈是 Worker 侧"JSON 解析 + build_world"本身（39k 面 ≈ 3s），
     // 只能靠优化构建/换二进制载荷解决，**不是靠调整发送顺序**。
-    console.info(`[authority] world-json 已发送 @${performance.now().toFixed(0)}ms`);
-    // 诊断：载荷体积（决定 Worker 内耗时是"解析"还是"建结构"主导）
-    console.info(
-      `[authority] world-json 载荷：brush=${(bundle.brushJson.length / 1048576).toFixed(2)}MB ` +
-        `tri=${(bundle.triJson.length / 1048576).toFixed(2)}MB ` +
-        `teleport=${(bundle.teleportJson.length / 1024).toFixed(1)}KB（合计 ` +
-        `${((bundle.brushJson.length + bundle.triJson.length + bundle.teleportJson.length) / 1048576).toFixed(2)}MB）`,
-    );
-    const postT0 = performance.now();
-    fixWorker?.postMessage({
-      type: 'world-json',
-      brushJson: bundle.brushJson,
-      triJson: bundle.triJson,
-      teleportJson: bundle.teleportJson,
-      spawn: bundle.spawn,
-    });
-    // 诊断：postMessage 内联做结构化克隆（三个大 JSON 字符串），耗时含在主线程阻塞里
-    console.info(`[authority] postMessage(world-json) 结构化克隆耗时 = ${(performance.now() - postT0).toFixed(1)}ms`);
+    if (fixWorker) {
+      console.info(`[authority] world-json 已发送 @${performance.now().toFixed(0)}ms`);
+      // 诊断：载荷体积（决定 Worker 内耗时是"解析"还是"建结构"主导）
+      console.info(
+        `[authority] world-json 载荷：brush=${(bundle.brushJson.length / 1048576).toFixed(2)}MB ` +
+          `tri=${(bundle.triJson.length / 1048576).toFixed(2)}MB ` +
+          `teleport=${(bundle.teleportJson.length / 1024).toFixed(1)}KB（合计 ` +
+          `${((bundle.brushJson.length + bundle.triJson.length + bundle.teleportJson.length) / 1048576).toFixed(2)}MB）`,
+      );
+      const postT0 = performance.now();
+      fixWorker.postMessage({
+        type: 'world-json',
+        brushJson: bundle.brushJson,
+        triJson: bundle.triJson,
+        teleportJson: bundle.teleportJson,
+        spawn: bundle.spawn,
+      });
+      // 诊断：postMessage 内联做结构化克隆（三个大 JSON 字符串），耗时含在主线程阻塞里
+      console.info(`[authority] postMessage(world-json) 结构化克隆耗时 = ${(performance.now() - postT0).toFixed(1)}ms`);
+    } else {
+      console.info('[authority] 单权威主线程：跳过 world-json 克隆与下发（无 Worker 权威线）');
+    }
     // 出生点列表（spawn 下拉切换用）：主线程渲染物理 + Worker 权威物理**双端**
     // 都要设置——否则权威侧 teleport_to_spawn 索引为空静默忽略，权威帧
-    // >200 兜底会把传送点拉回（"一瞬间传送过去又被拉回"根因）
+    // >200 兜底会把传送点拉回（"一瞬间传送过去又被拉回"根因）。
+    // 单权威主线程只需主线程一份；`JSON.stringify` 也只在真有 Worker 时做。
     renderer.setSpawnPoints(bundle.spawnList);
-    fixWorker?.postMessage({ type: 'set-spawn-points', json: JSON.stringify(bundle.spawnList) });
+    if (fixWorker) fixWorker.postMessage({ type: 'set-spawn-points', json: JSON.stringify(bundle.spawnList) });
     // 双端参数同步（Worker 权威 + 主线程渲染物理；含灵敏度，防操作分叉）
     syncFullConfig();
 
