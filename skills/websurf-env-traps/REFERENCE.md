@@ -63,10 +63,10 @@ apps/*/scripts/_*.mjs  .amh/  .dsh/
 
 ## 4. git 与提交（本仓有并发 agent）
 
-1. **提交前必跑 `git status --short`**：同一工作区常有另一个 agent 的在途改动。只 `git add` 自己改的文件；`OWNER.md` / `TODO.md` 常被双方同时改，**对方新增的行要原样保留**，不要回退，也不要写进自己的改动说明。
+1. **提交前必跑 `git status --short -uall`**：同一工作区常有其他 agent 的在途改动。只 `git add -- <files>` 自己改的文件；`OWNER.md` / `TODO.md` 若有他方新增行要原样保留。D-124 的 `.githooks/pre-commit`（`src/scripts/precheck-staged.mjs`）会自动拦截：`main` 分支直接提交、`pkg/`/`dist/`/`web/*.wasm`/`web/app.js`/`web/worker.js`/`.wasm-pack-cache/`/`.tmp/`/`.dsh/`/`.amh/` 生成物、源码/JSON/MD 的 UTF-8 BOM，以及工作树 `.cmd/.bat/.ps1` 的 LF/非 ASCII。
 2. **绝不 `git checkout -- <文件>` 去「清干净」**：会直接抹掉未提交成果。
 3. 行尾：`core.autocrlf=true` ⇒ 索引是 LF、工作树是 CRLF。不要顺手统一行尾。
-4. **验证与提交串成一步、红灯即终止**（`&&` 式；`;` 式会让红灯也提交）。本仓已因此出过红灯提交。
+4. **验证红灯即终止**：优先跑仓根跨 Shell 脚本 `npm run verify:fast|rust|ts|full`；PowerShell 5.1 无 `&&` 且 `;` 会掩盖前一条失败（本仓已出过红灯提交），手写串联必须检查 `$LASTEXITCODE`。
 5. 提交信息说清「改了什么 / 为什么 / 怎么验证」；纯格式/注释类改动写「无行为变化」。
 
 ## 5. 判断「已完成 / 前提是否还在」
@@ -79,7 +79,7 @@ apps/*/scripts/_*.mjs  .amh/  .dsh/
 ## 6. 本机工具与资源边界
 
 1. **没有 Chrome**：`archify` 的 browser-check 会 skipped。先设 `ARCHIFY_CHROME` 指向 `msedge.exe`（Edge 是 Chromium）。
-2. **host 不自动发现仓库内 `skills/**`**：DSH 只扫 `<仓库>/.agents/skills`、`<仓库>/.dsh/skills`、`~/.agents/skills`、`<dshHome>/skills`。本机 `skills/websurf-env-traps` 已 junction 进 `~/.agents/skills/`；新机器要补这一条。⇒ **任何 agent 都必须读的东西，写进 `AGENTS.md` 指向的仓库文件**（不依赖某个工具的 skill 发现）。
+2. **host 不自动发现仓库内 `skills/**`**：DSH 只扫 `<仓库>/.agents/skills`、`<仓库>/.dsh/skills`、`~/.agents/skills`、`<dshHome>/skills`。本机需将 `skills/websurf-env-traps` 与 `skills/websurf-handoff` 链接到工具发现目录；新机器要补这一条。⇒ **任何 agent 都必须读的底线规则，写进 `AGENTS.md`**（不依赖某个工具的 skill 发现）。
 3. 过程产物进 `.tmp/`（已 gitignore）；图表产物放 `.archify/`（已 gitignore）；AMH 项目侧接入放 `.amh/` / `.dsh/`（已 gitignore）。
 
 ## 7. 省 token 的作业方式
@@ -96,7 +96,7 @@ apps/*/scripts/_*.mjs  .amh/  .dsh/
 4. **不要用 `node -e` 做多行源码替换**：`indexOf` 返回 -1 时 `slice(0,-1)` 会把文件拼成两份（实测把 `model_integrator/mod.rs` 拼到 2854 行、丢了 `map_coords` 等）。改 Rust/TS 一律用**可校验的编辑工具**（按行定位，改后跑 `node --check` / `cargo check`）。
 5. **注入必须先断言「确实改了字节」**：探针的替换串没匹配上真行时，文件没变、门当然不响——会把「空转」误读成「机制不工作」。写完探针先比较改前改后字符串，不等就抛错。
 6. **验证必须同时覆盖「该拦的」和「该放的」**：只测该拦的，会漏掉「权限/门禁过紧把正常工作锁死」这类错。
-7. **截图测量前必须验证构建产物确实来自 HEAD**：`app.js` / `worker.js` 是 gitignore 的本地构建物，磁盘副本可能落后源码多笔——直接截图会量到**旧管线**并得出错误因果结论（2026-10-24 实测：水体「折射 RT 全空/全场走兜底」结论即陈旧 `app.js` 所致，被 W0 字节级探针推翻，见 `docs/T-650-boreas-water-causal-chain.md` §11 勘误）。做法：测量前从 HEAD 重建；或在页面里断言编译产物含本次标记串（如 `__vbspWaterFrag.includes(...)`）；与 §8.2 的 wasm 产物验证同一条铁律的 TS 版。
+7. **截图测量前必须验证构建产物确实来自 HEAD**：`app.js` / `worker.js` / `*.wasm` 是 gitignore 的本地构建物，磁盘副本可能落后源码多笔——直接截图会量到**旧管线**并得出错误因果结论（2026-10-24 实测：水体「折射 RT 全空/全场走兜底」结论即陈旧 `app.js` 所致）。做法：测量前先跑 `npm run dev:check` 看有无 `STALE` 过期提示，并从 HEAD 用 `npm run build:ts` / `verify:ts` 重建，或在页面断言构建标记串。
 
 ## 9. 其它实测教训
 

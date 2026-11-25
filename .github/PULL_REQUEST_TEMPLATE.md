@@ -22,11 +22,9 @@ Fixes #(issue number)
 
 ## 测试
 
-- [ ] 在对应工程目录（`apps/debug` / `apps/game` / `apps/viewer`）`npm run build` 构建通过
-- [ ] 涉及共享层改动：**三端** `apps/debug/scripts/check-wasm-api.mjs`、
-      `apps/game/scripts/check-wasm-api.mjs`、`apps/viewer/scripts/check-wasm-api.mjs` 均通过
-      （CI 对三端全跑：`.github/workflows/ci-gates.yml`（三端 `check-wasm-api` + 三端 wasm 构建）；viewer 另有 `--source-only` 的 source-contract job）
-- [ ] 涉及物理/时序改动：`cargo test -p websurf-phys` 通过（三端回归自检脚本已于 T-653 移除）
-- [ ] 本地验证通过
+- [ ] 改 TS / 配置 / 脚本：`npm run verify:fast` 或 `npm run verify:ts` 通过
+- [ ] 改 Rust / 物理 / WASM：`npm run verify:rust` 与 `npm run verify:full`（含三端 `build:wasm`、`check:api`、锁/导出基线与 GLB 一致性）通过
+- [ ] 本地启动开发服冒烟无异常（`npm run dev:check` 确认无缺失/过期产物）
+- [ ] 分支为 `dev`（非直接提交 `main`），`.githooks/pre-commit` 机械检查通过
 
 ## 截图（可选）

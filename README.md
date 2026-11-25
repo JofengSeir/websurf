@@ -8,20 +8,29 @@
 
 ### 1.1 命令行（以 `apps/debug` 为例）
 
-每个应用是**独立的 npm 工程**；仓库根另有一个 `package.json`：承载跨工程共享的 npm 依赖（渲染共享层的 `three` 单实例）与仓库级脚本（`dev:check`、`hooks:install`、`check:render-parity`、`agent:*`）。
+每个应用是**独立的 npm 工程**；仓库根 `package.json` 承载跨工程共享依赖（`three` 精确锁定 `0.165.0`）、共享 TS 基座 [tsconfig.base.json](tsconfig.base.json)，以及仓库级一键验证与开发脚本：
 
 ```bash
-npm ci               # ① 仓库根先装一次（renderer-shared 的 three 单实例；每次克隆后一次即可）
+npm ci                 # ① 仓库根装一次（renderer-shared 的 three 单实例）
+npm run hooks:install  # ② 首次克隆安装 D-124 pre-commit 机械防线
 cd apps/debug
-npm ci               # ② 各工程自装依赖
-npm run build:wasm   # ③ wasm-pack 构建 → pkg/，并把 wasm 复制到 web/
-npm run build:ts     # ④ typecheck + esbuild 打包 worker 与 app
-npm run dev          # ⑤ 起本地服务：node ../../src/scripts/serve.mjs 8080 .（predev 先跑 dev-preflight + 同步 web 资产）
+npm ci                 # ③ 各工程自装依赖
+npm run build:wasm     # ④ wasm-pack 构建 → pkg/，并复制到 web/
+npm run build:ts       # ⑤ typecheck + esbuild 打包 worker.js 与 app.js
+npm run dev            # ⑥ 起本地服务：node ../../src/scripts/serve.mjs 8080 .
 ```
 
-静态服务只依赖 Node（`src/scripts/serve.mjs`，不再需要系统 Python）；仓库根可跑 `npm run dev:check` 做三端开发链自检（工具链 / 端口 / 产物）。
+仓库根目录常用一键脚本（跨 Shell，红灯即停）：
 
-`apps/game`、`apps/viewer` 同构（端口 8090 / 8100）；三个工程各自 `npm ci` / `npm run build` / `npm run dev`。
+```bash
+npm run verify:fast    # ~10s：三端 typecheck + test:ts + 渲染/着色器/配置契约门禁
+npm run verify:rust    # ~5s：websurf-phys + websurf-wasm-core 宿主机单测
+npm run verify:ts      # ~20s：三端 build:ts + verify:fast + 共享产物指纹
+npm run verify:full    # 全量：rust + 三端 build:wasm + check:api + ts + 锁/导出/GLB 门禁
+npm run dev:check      # 三端产物完整性 / mtime 过期 STALE 提醒 / 端口占用自检
+```
+
+静态服务只依赖 Node（`src/scripts/serve.mjs`，不再需要系统 Python）。`apps/game`、`apps/viewer` 同构（端口 8090 / 8100）；三个工程各自 `npm ci` / `npm run build` / `npm run dev`。
 
 ### 1.2 Windows 双击入口（三工程同名四件）
 
@@ -34,7 +43,7 @@ npm run dev          # ⑤ 起本地服务：node ../../src/scripts/serve.mjs 80
 
 ### 1.3 静态服务
 
-三端 dev/start 链统一用 `src/scripts/serve.mjs`（Node，无系统 Python 依赖）：按正确 MIME 提供本地文件，并为所有响应注入跨源/隔离/禁缓存头。`src/scripts/serve.py` 保留给旧脚本与外部工具调用，语义等价。
+三端 dev/start 链统一用 `src/scripts/serve.mjs`（Node，无系统 Python 依赖）；`build:dist` 生成的本地包 `dist/serve.mjs`（`dist/play.cmd`）同样按正确 MIME 提供文件并注入 COOP/COEP 响应头，使本地预览首屏即启用 `SharedArrayBuffer`。`src/scripts/serve.py` 保留给旧脚本与外部工具调用，语义等价。
 
 | 要素 | 位置 / 规则 |
 |---|---|
@@ -50,8 +59,9 @@ npm run dev          # ⑤ 起本地服务：node ../../src/scripts/serve.mjs 80
 | 想做什么 | 看哪里 |
 |---|---|
 | 报告问题 / 改动流程与提交规范 | [CONTRIBUTING.md](CONTRIBUTING.md) |
-| Agent 作业规范（规则 / 记忆 / 提交流程） | [AGENTS.md](AGENTS.md) |
+| Agent 作业规范（规则 / 提交流程 / 记忆） | [AGENTS.md](AGENTS.md) |
 | 环境陷阱（Windows 作业：长输出、生成物、沙箱、行尾） | [skills/websurf-env-traps/SKILL.md](skills/websurf-env-traps/SKILL.md) |
+| 多卡委派与跨模型接力规范（按需读） | [skills/websurf-handoff/SKILL.md](skills/websurf-handoff/SKILL.md) |
 | 漏洞报告与安全事实 | [SECURITY.md](SECURITY.md) |
 
 > 过程文档与项目状态（`docs/`、TODO.md、OWNER.md）只在本机保留，不入库。
