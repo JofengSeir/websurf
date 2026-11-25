@@ -478,9 +478,14 @@ export class PvsManager {
   }
 
   /**
-   * 是否持有可用 PVS。
+   * 是否持有可用 PVS**数据**（`clusterCount > 0` 且位图非空）。
+   *
+   * 这也是「这张地图有没有编译 vvis」的唯一判据：`false` = `visibility` lump 为空
+   * （没跑 vvis / 第三方编译器直接丢弃），此时 `getClusterAt` 恒 -1、`isVisible` 恒 true。
    * 消费点：`apps/game/src/renderer/renderer-main.ts` 的剔除前置条件（与
-   * `currentClusterId >= 0` 一起用）。
+   * `currentClusterId >= 0` 一起用）；`renderer-shared/scene/visibility-controller.ts`
+   * 的 `assignClusters` 用它区分「地图本来没有 PVS」（静默退回距离档）与「有数据但整图
+   * mapped = 0」（真接线故障，保留熔断告警）。
    */
   get enabled(): boolean {
     return this.hasPvs;

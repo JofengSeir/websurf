@@ -74,6 +74,15 @@ export interface PvsQuery extends PvsSampler {
 /** 采样面（只依赖「点 → cluster」）：装载期归属判定与相机定位都走它。 */
 export interface PvsSampler {
   getClusterAt(p: { x: number; y: number; z: number }): number;
+  /**
+   * 采样器是否**持有可用 PVS 数据**（`PvsManager.enabled`：`clusterCount > 0` 且位图非空）。
+   *
+   * `false` = 这张地图没编译 vvis（`visibility` lump 为空），`getClusterAt` 恒 -1。
+   * 采样方据此在**采样之前**区分「地图本来就没有 PVS」（正常 ⇒ 静默退回距离档）与
+   * 「有 visdata 但整图一块都定位不到」（真接线/数据故障 ⇒ 保留熔断告警）。
+   * 省略该字段的采样器按「有数据」处理（旧调用方仍然成立）。
+   */
+  readonly enabled?: boolean;
 }
 
 export interface VisibilityItem {
@@ -189,10 +198,25 @@ export class VisibilityController {
   private clustersReady = false;
   /** 采样用的临时点（避免每顶点分配）。 */
   private readonly tmpPoint = new THREE.Vector3();
+  /** 这张地图没有 PVS 数据（未编译 vvis）：不再采样，静默走距离档（见 `assignClusters`）。 */
+  private pvsDataMissing = false;
+  /**
+   * 数据级熔断闩锁：有 visdata 但整图 `mapped === 0`（见 `assignClusters` 末尾）。
+   *
+   * 必须自己记：`RenderSession.updateVisibility` 每帧会用渲染偏好重写 `enablePvs`，
+   * 只置 `enablePvs = false` 下一帧就被覆盖 ⇒ 熔断形同虚设（整图块级 `clusterIds` 为空，
+   * 继续按 PVS 判就整屏黑）。换图/重建（`collect`）时复位。
+   */
+  private pvsDataBroken = false;
+  /** `[pvs] 无 visdata` 的 info 每张图只打一次。 */
+  private pvsNoDataLogged = false;
 
   clear(): void {
     this.items.length = 0;
     this.clustersReady = false;
+    this.pvsDataMissing = false;
+    this.pvsDataBroken = false;
+    this.pvsNoDataLogged = false;
   }
 
   /**
@@ -215,6 +239,10 @@ export class VisibilityController {
    */
   collect(root: THREE.Object3D, pvs: PvsSampler | null): number {
     this.items.length = 0;
+    // 换图/重建：上一张图的数据级判定（无 visdata / 熔断）不继承。
+    this.pvsDataMissing = false;
+    this.pvsDataBroken = false;
+    this.pvsNoDataLogged = false;
     root.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
       if (!mesh.isMesh) return;
@@ -243,6 +271,8 @@ export class VisibilityController {
    */
   ensureClusters(pvs: PvsSampler): void {
     if (this.clustersReady) return;
+    // 无 visdata 或已熔断：采样没有意义（每次重试都是整图白扫），保持「没有归属」。
+    if (this.pvsDataMissing || this.pvsDataBroken) return;
     this.assignClusters(pvs);
     this.clustersReady = true;
   }
@@ -258,6 +288,19 @@ export class VisibilityController {
    * @returns 采到至少一个 cluster 的块数。
    */
   assignClusters(pvs: PvsSampler, only?: VisibilityItem, quiet = false): number {
+    // 地图**没有 visdata**（没跑 vvis / `visibility` lump 为空）：`getClusterAt` 恒 -1。
+    // 逐顶点采样只会白扫一遍全图（1.5M 顶点量级 ≈ 170ms），最后必然命中下面那条数据级
+    // 熔断并打出「数据/接线问题」告警——把一张正常地图误报成故障（surf_voyager 就是这样）。
+    // 这里在采样前就把两种情况分开：无数据 ⇒ 不采样、不置熔断，只记一次 info，由上层
+    // 按 `pvs.enabled === false` 退回距离档（与用户手动关 PVS 走同一条路径）。
+    if (pvs.enabled === false) {
+      this.pvsDataMissing = true;
+      if (!quiet && typeof console !== 'undefined' && !this.pvsNoDataLogged) {
+        this.pvsNoDataLogged = true;
+        console.info('[pvs] 本地图未编译 PVS（visdata 为空，clusterCount = 0）⇒ 不做 PVS 剔除，按距离档渲染（正常，不是接线故障）');
+      }
+      return 0;
+    }
     const t0 = (typeof performance !== 'undefined' ? performance.now() : 0);
     let mapped = 0;
     for (const item of this.items) {
@@ -423,8 +466,10 @@ export class VisibilityController {
     // 数据级保险（不是运行期兜底）：整张图一块 cluster 都采不到 ⇒ PVS 数据/接线不可用，
     // 此时若继续按「不在房间里 ⇒ 不画」执行会整屏黑。这种情况直接关掉 PVS 剔除并告警，
     // 由用户/日志发现数据问题；不会退回任何按距离的可见性判断。
-    if (mapped === 0 && this.items.length > 0 && this.enablePvs) {
+    // 只在**整图**这一趟（不带 `only` 的单块补采样）判：单块重试采不到不代表整图数据坏了。
+    if (mapped === 0 && this.items.length > 0 && this.enablePvs && !only) {
       this.enablePvs = false;
+      this.pvsDataBroken = true;
       console.warn('[pvs] 整张图没有任何块能定位到 cluster ⇒ 关闭 PVS 剔除（数据/接线问题，需修数据）');
     }
     return mapped;
@@ -437,8 +482,9 @@ export class VisibilityController {
     let culledByDistance = 0;
     let culledByPvs = 0;
     let changed = false;
-    const pvsActive = this.enablePvs && pvs !== null && pvs.enabled;
-    if (this.enablePvs && pvs) {
+    // `pvsActive` 还要求「数据没被判坏」：熔断闩锁置位后本帧起彻底不碰 PVS（见 `pvsDataBroken`）。
+    const pvsActive = this.enablePvs && pvs !== null && pvs.enabled && !this.pvsDataBroken;
+    if (pvsActive && pvs) {
       // 首次开启才做顶点采样（1.5M 顶点 ≈170ms），之后只有 cluster 变化才有意义；
       // `pvs.update` 内部自己判「cluster 没变就不重解位图」。
       if (!this.clustersReady) {
