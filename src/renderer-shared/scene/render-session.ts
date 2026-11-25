@@ -23,7 +23,7 @@ import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createRenderer, precompileScene } from '../render/create-renderer.js';
 import { installRenderProbe } from '../render/render-probe.js';
 import { assembleScene } from './assemble-scene.js';
-import { lookupMergeSource, mergeIntoNewRoot, mergeOpaqueByMaterial, mergeStatsOf, type MergeStats } from './scene-optimizer.js';
+import { mergeStatsOf, type MergeStats } from './scene-optimizer.js';
 import { disposeObject } from './dispose.js';
 import { resetWaterShaders, renderWaterFramePasses } from '../shader/water.js';
 import {
@@ -57,53 +57,23 @@ import { applyRenderPrefs, readRenderPrefs } from '../config/render-prefs.js';
  */
 export const RENDER_REV = '2026-11-21.1-budget-recovery-window';
 
-/** 泄漏采样时沿面法线外推的距离（HU）：面本身是边界，重心必然贴着 brush。 */
-const CLUSTER_LEAK_PROBE_PUSH = [4, 16, 64, 192] as const;
-
-/**
- * 每帧送给 lightmap 注入的 spot / dlight 上限，与 `lightmap-shader.ts` 的
- * `SPOT_MAX` / `DLIGHT_MAX` 对齐（那边是模块私有常量，改动必须同步这两处）。
- */
-const SPOT_TOP_N = 8;
-const DLIGHT_TOP_N = 2;
-
-/**
- * 半透明逐面排序的比较：距离大在前；距离相等时**下标小的在前**。
- *
- * 等价于旧实现 `order.sort((a, b) => dists[b] - dists[a])` 的稳定排序结果
- * （V8 的 Array#sort 稳定，等距元素保持插入顺序 = 三角形下标升序），
- * 但可以在复用的 Int32Array 上做归并，完全不分配。
- */
-function isFaceBefore(dists: Float64Array, a: number, b: number): boolean {
-  const da = dists[a];
-  const db = dists[b];
-  if (da > db) return true;
-  if (da < db) return false;
-  return a < b;
-}
 import {
 	getLightingMode,
 	setLightingMode as setLightingModeInShader,
-	smoothVertexLighting,
 	setVhvLinear as setVhvLinearInShader,
 	getVhvLinear,
-	setSpotLights,
-	setDLights,
-	type DLightInput,
-	type SpotLightInput,
 	type LightingMode,
 } from '../shader/lightmap-shader.js';
 import { PvsManager } from '../../ts-shared/world/pvs-manager.js';
-import { subdivideVertexLit } from './vlight-subdivide.js';
 import { collectTextureScrolls, updateTextureScrolls, type TextureScrollEntry } from '../shader/texture-scroll.js';
 import { setupRotButtons, updateRotButtons, type RotButtonPivot } from './rot-buttons.js';
-import {
-  collectDynamicEntityGroups,
-  isDynamicEntityNode,
-  markDynamicEntities,
-  parseDynamicEntityIndices,
-} from './dynamic-entities.js';
+import { parseDynamicEntityIndices } from './dynamic-entities.js';
 import { createRenderFrameContext, mirrorFrameContext, type RenderFrameContext } from './render-context.js';
+import { TransparentSorter } from './transparent-sorter.js';
+import { SpotLightSelector } from './spot-light-selector.js';
+import { mergeMainRoots } from './merge-main.js';
+import { FrameBudgetController } from './frame-budget.js';
+import { runPrewarmPasses } from './prewarm.js';
 import { resetWorldTransitionTextures } from '../shader/world-transition.js';
 import { resetBumpTextures } from '../shader/bumpmap.js';
 import { collectLaserBeams, LaserBeams } from './lasers.js';
@@ -114,27 +84,21 @@ import {
   type EntityExtrasStats,
 } from './entity-extras/index.js';
 import type { PoseScope } from '../camera/pose-entry.js';
+import {
+  auditChunks,
+  auditFrustum,
+  chunkClusterSample,
+  drawnChunkStats,
+  leakChunks,
+  pickChunkAt,
+  probeChunkByName,
+  pvsSnapshot,
+  rayCheckChunk,
+  type ChunkDiagnosticsHost,
+} from './chunk-diagnostics.js';
 
 /** 三端标识（同时用于探针 `scope` 与日志前缀）。 */
 export type RenderSessionApp = 'viewer' | 'debug' | 'game';
-
-// ── 帧预算控制器常量（`updateFrameBudget()` 用）──────────────────────────────
-//
-// 双槽阈值沿用 320Hz 档的 3.125ms/帧口径：dt>4.8ms（≈1.5 槽）算「漏了一槽」，
-// dt<3.6ms 算「单槽可达」。升档判据（30/60 帧双槽数与占比）保持不变。
-//
-// 恢复判据（2026-11-21 改，审查 P1-4）：旧实现要求「连续 1600/3200 帧无双槽」，
-// 慢机每秒仍会偶发双槽、切后台回来的首帧更是必然超长 ⇒ 实际永远达不到，降档后永久粘住。
-// 改为「最近 120 帧双槽 ≤1（≈0.8%，低于正常偶发抖动）+ 持续约 1s」：
-// 120 帧在 320Hz 下约 0.38s，单看窗口太短，加 1s 累计把「偶发 1 次抖动」和「持续健康」区分开；
-// 仍比旧的 5~10s 快一个数量级，且不再要求「一帧都不能掉」。
-const BUDGET_DOUBLE_SLOT_MS = 4.8;
-const BUDGET_SINGLE_SLOT_MS = 3.6;
-const BUDGET_RECOVER_WINDOW = 120;
-const BUDGET_RECOVER_MAX_DOUBLES = 1;
-const BUDGET_RECOVER_HOLD_MS = 1000;
-const BUDGET_EVALUATE_FIRST_FRAMES = 30;
-const BUDGET_EVALUATE_INTERVAL = 10;
 
 /** 会话构造参数：只保留「创建一次」的东西；每张图的数据走 `loadScene`。 */
 export interface RenderSessionOptions {
@@ -273,56 +237,15 @@ export class RenderSession {
   private dynGroups: Map<number, THREE.Group> = new Map();
   /** 本图待脱静态合并的实体下标；`loadScene` 按开关决定，关闭时为 null（零执行路径）。 */
   private pendingDynamicEntityIndices: ReadonlySet<number> | null = null;
-  /** 主根里的半透明块（每帧按相机距离重排 `renderOrder`，见 `sortTransparentChunks`）。 */
-  private transparentChunks: THREE.Mesh[] = [];
-  private readonly transparentSortBox = new THREE.Box3();
-  private readonly transparentSortPoint = new THREE.Vector3();
-  /** 上次半透明排序时的相机位置与可见集指纹；用于「没动就别排」。 */
-  private readonly transparentSortLastPos = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);
-  private transparentSortLastHash = 0;
-  private transparentSortLastVisible = -1;
+  /** 主根里的半透明块（每帧按相机距离重排 `renderOrder`，见 `TransparentSorter`）。 */
+  private readonly sorter = new TransparentSorter();
   /** 天空层：第二相机 + 只挂 `SKY_LAYER` 的图元组。 */
   private skyCamera: THREE.PerspectiveCamera | null = null;
   private skyGroup: THREE.Group | null = null;
   /** spot 光源的可见光柱（`point_spotlight`）；null = 本图没有 spot。 */
   private spotBeams: THREE.Group | null = null;
-  /**
-   * `updateSpotLights()` 的零分配 scratch。旧实现每帧
-   * `map → sort → slice → map`（spot 57 盏 + dlight）会分配约 130 个临时对象、
-   * 6 个临时数组并重算 16 次 `Math.cos`；120–240fps 下就是持续的 GC 压力。
-   * 现在只做单趟 O(N) 选前 8 / 前 2，结果写进固定槽位对象。
-   *
-   * 安全性：`setSpotLights` / `setDLights`（shader/lightmap-shader.ts）内部立刻把数值拷进
-   * uniform，不持有入参数组或元素引用，所以复用这些对象是安全的。
-   */
-  private readonly spotTopIdx = new Int32Array(SPOT_TOP_N);
-  private readonly spotTopDist = new Float64Array(SPOT_TOP_N);
-  private readonly spotOutSlots: SpotLightInput[] = Array.from({ length: SPOT_TOP_N }, () => ({
-    position: [0, 0, 0],
-    direction: [0, 0, 0],
-    color: [0, 0, 0],
-    intensity: 0,
-    range: 0,
-    cosOuter: 0,
-    cosInner: 0,
-  }));
-  private readonly spotOutList: SpotLightInput[] = [];
-  /**
-   * spot 圆锥角的 `Math.cos` 缓存：`spots` 数组只在载图时由 `spot-beams.ts` 重建，
-   * 锥角不逐帧变化，所以按「数组身份 + 长度」失效即可（旧实现每帧算 16 次）。
-   */
-  private spotCosRef: unknown = null;
-  private spotCosCount = -1;
-  private spotCosOuter = new Float64Array(0);
-  private spotCosInner = new Float64Array(0);
-  private readonly dlightTopIdx = new Int32Array(DLIGHT_TOP_N);
-  private readonly dlightTopDist = new Float64Array(DLIGHT_TOP_N);
-  private readonly dlightOutSlots: DLightInput[] = Array.from({ length: DLIGHT_TOP_N }, () => ({
-    position: [0, 0, 0],
-    color: [0, 0, 0],
-    range: 0,
-  }));
-  private readonly dlightOutList: DLightInput[] = [];
+  /** 每帧 Top-8 spot / Top-2 dlight 筛选（见 `SpotLightSelector`，零分配）。 */
+  private readonly spots = new SpotLightSelector();
   /**
    * 场景扩展图元：`env_laser` 光束、PCF 粒子系统，以及「有数据、零消费者」的地图资产实体
    * （`env_sprite` / `env_sprite_clientside`、`point_worldtext`、`move_rope`+`keyframe_rope`、
@@ -356,48 +279,25 @@ export class RenderSession {
    */
   private glowDepthProxy: THREE.Mesh | null = null;
   /**
-   * 帧预算控制器的状态（task-33 C1）：0=不降级，1=bloom 光晕降频，2=再叠加水面镜面降频。
-   * 由 `updateFrameBudget()` 每帧推进；等级经 `frameCtx` 显式下传（T-P2-1），
-   * 末梢镜像到 `globalThis.__vbspBudgetLevel` / `__vbspDebug` 供外部诊断读取（只写）。
+   * 帧预算控制器（task-33 C1）：0=不降级，1=bloom 光晕降频，2=再叠加镜面降频。
+   * 采样窗口 / 恢复判据 / 档位决策全在 `frame-budget.ts`（T-P2-2c 搬出，逻辑零改动）；
+   * 等级经 `frameCtx` 显式下传（T-P2-1），末梢镜像到 `globalThis.__vbspBudgetLevel` /
+   * `__vbspDebug` 供外部诊断读取（只写）。
    */
-  private budgetLevel = 0;
+  private readonly budget = new FrameBudgetController();
   /**
    * 帧运行期上下文（T-P2-1）：预算等级 / 上一帧 dt / 水面强制 pass 的显式载体。
    * 构造后传给 `renderWaterFramePasses(..., this.frameCtx)` 与 `BloomPostFx.setFrameContext`；
    * 每帧末 `mirrorFrameContext` 只写镜像，生产逻辑不再从 globalThis 读回。
    */
   private readonly frameCtx: RenderFrameContext = createRenderFrameContext();
-  private budgetUp = 0;
-  private budgetDown = 0;
-  private budgetLastMs = 0;
-  /** 上一帧 `frame()` 的进入时刻，用于算 rAF 帧间隔（控制器主信号）。 */
-  private budgetLastStart = 0;
-  /** 最近 60 帧的帧间隔环形缓冲 + 游标 + 已填样本数。 */
-  private readonly budgetDt = new Float32Array(60);
-  private budgetDtAt = 0;
-  private budgetDtCount = 0;
-  /** 距下一次评估还有多少帧。 */
-  private budgetEvaluateIn = BUDGET_EVALUATE_FIRST_FRAMES;
-  /** 升档后的最短保持帧数（期间不降档，避免「降级→恢复→再掉」的振荡）。 */
-  private budgetHold = 0;
-  /** 连续「非双槽帧」的帧数：仅诊断（`__vbspBudget.stable`）；恢复判据已改为比例窗口。 */
-  private budgetStableFrames = 0;
-  /** 最近 `BUDGET_RECOVER_WINDOW` 帧「是否双槽」的位环（FIFO 计数，恢复判据用）。 */
-  private readonly budgetRecoverRing = new Uint8Array(BUDGET_RECOVER_WINDOW);
-  private budgetRecoverAt = 0;
-  private budgetRecoverFilled = 0;
-  private budgetRecoverDoubles = 0;
-  /** 满足恢复窗口条件的累计时长（ms）：窗口条件破即清零，满 `BUDGET_RECOVER_HOLD_MS` 才允许降档。 */
-  private budgetRecoverMs = 0;
-  /** 页面隐藏/切回后的首帧 dt 跨了整个不可见期，丢弃一次采样。 */
-  private budgetSkipSampleOnce = false;
   /**
    * 后台/前台切换的软重置（审查 P1-4）：只清采样窗口/稳定计数，**保留档位与粘滞**。
-   * 隐藏期间不采样由 `updateFrameBudget()` 的 `document.hidden` 守卫兜底；切回后的第一帧
-   * 间隔跨越整个隐藏期（可达秒级），必须丢弃，否则一次切页就能把控制器推到 L1/L2。
+   * 隐藏期间不采样由 `FrameBudgetController.update()` 的 `document.hidden` 守卫兜底；
+   * 切回后的第一帧间隔跨越整个隐藏期（可达秒级），必须丢弃，否则一次切页就能把控制器推到 L1/L2。
    */
   private readonly onVisibilityChange = (): void => {
-    this.softResetBudgetWindow();
+    this.budget.softResetWindow();
   };
 
   private bbox = new THREE.Box3();
@@ -526,7 +426,7 @@ export class RenderSession {
   async loadScene(input: RenderSceneInput): Promise<RenderSceneResult> {
     // 换图先把控制器打回干净状态（审查 P1-3）：旧图的 60 帧窗口/稳定计数只会误导新图，
     // 而载图前后的长帧也不该算进新图的预算；档位清零让新图从默认画质起评。
-    this.resetFrameBudget();
+    this.budget.reset();
     this.disposeScene();
     // T-P1-5b：动态 brush 实体脱静态合并默认开启（`__vbspDynamicEntityGroups === false` 可关闭做 A/B）。
     // 关闭时 pending 为 null：mark / exclude / collect / 矩阵冻结豁免全都不执行，行为与旧版一致。
@@ -704,7 +604,7 @@ export class RenderSession {
     // 「空集合补算」都救不回来 —— 2026-11-13 owner 报的「冰坡透明材质消失 / 666 窗外又露出
     // 别区结构」就是这一条（同一个错映射既可能误剔、也可能误留）。必须先刷矩阵再收集。
     this.root.updateMatrixWorld(true);
-    this.collectTransparentChunks();
+    this.sorter.collect(this.root);
 
     this.skyGroup = asm.skyGroup;
     this.skyParams = asm.skyGroup && input.skyCamera ? input.skyCamera : null;
@@ -833,218 +733,25 @@ export class RenderSession {
     });
     (globalThis as { __vbspStaticFrozen?: number }).__vbspStaticFrozen = frozen;
     return frozen;
-  }
-
-  /**
-   * 载图期「整帧预热」：临时放开可见性/视锥剔除/PVS/视距，让整张图在真实 pass 下画一遍，
-   * 把 主遍 / 水面折射 / 水面镜像 / 天空 / 泛光 各形态的 program 都编译并链接好。
-   *
-   * 为什么需要：冷启动实测（.tmp/flight-195645.json）首飞途中才编译 31~35 个 program
-   * （806×458 RGBA8 + NoColorSpace 的折射 RT 24 个、screen 11 个），最长一帧 159~200ms，
-   * 玩家看到的就是一次明显卡死；同页热跑 max 只有 18~22ms。
-   *
-   * 为什么不是 renderer.compile()：three r165 的 cacheKey 里 RT 的 format/type **不进 key**，
-   * 只带 outputColorSpace(sRGB/LinearSRGB)、fog、灯数、对象 flags、注入 key；而 compile()
-   * 会把 render target 置 null 再编，所以「按假 RT compile」既编不出 LinearRT 变体，也编不到
-   * 水面/泛光自己的材质（实测冷跑仍 +31、max 171.88ms）。只有真跑一帧、真进各 pass 的 RT
-   * 状态才拿得到正确变体。
-   *
-   * 为什么还要强制 PVS/视距：光放开 visible 不够 —— chunk 几何被 applyClusterIndex 按相机
-   * 所在房间裁成 drawRange，场外/别处的块 drawRange=0，一帧只覆盖出生点附近的材质（实测
-   * 393 个材质只画了 148 个）。这里改走「PVS 关 + 视距 ∞ + 全量 index」，一帧覆盖整张图。
-   *
-   * 代价：一次性约 300~800ms 载图时间（取决于对象数/待编译数），运行期零新增编译。
-   * 开关：__vbspPrewarmPassesEnabled = false；诊断：__vbspPrewarmPasses。
-   *
-   * 幂等：第二次起 program 全命中缓存（实测 10 连调 `[+14, 0×9]`），只是再画一遍整帧。
-   * 粒子/激光（`setupSceneExtras`）自 a77eee9 起在 loadScene 内、早于本方法装配；但它们的
-   * `visible` 会在 `frame()` 的 extras update 里被按相机重新裁剪，所以预热期间临时旁路剔除
-   * （`__vbspParticleCullOff`）；否则折射/镜面 RT 画不到它们，
-   * LinearSRGB 变体留到首飞现编。
-   */
+  }  /** 载图期整帧预热：实现见 `prewarm.ts`（T-P2-2c 搬出，逻辑零改动）。 */
   prewarmPasses(): void {
-    const g = globalThis as {
-      __vbspPrewarmPasses?: unknown;
-      __vbspPrewarmPassesEnabled?: boolean;
-    };
-    if (g.__vbspPrewarmPassesEnabled === false) return;
-    // 预热是「载图后的假帧」：再清一次采样窗口（async 载图期间旧图末尾的帧可能已经采过），
-    // 防止预热帧与载图长帧污染新图的预算评估（审查 P1-3）。
-    this.resetFrameBudget();
-    // 临时放开「不可见 / 视锥剔除」，让整帧 pass 覆盖到全部对象；结束后按逆序还原。
-    // ⚠️ 不能放开**灯**：`LightManager` 的 8 槽点光源池在生产态恒为 `visible=false`
-    // （`updatePointLights` 无调用点），three r165 的 program cacheKey 里带 `numPointLights`，
-    // 把灯临时点亮预热会编出 pt=8 的变体（实测载图后 progs 68→102，但首飞仍 +34 个 pt=0 变体）。
-    const restore: Array<() => void> = [];
-    this.scene.traverse((obj) => {
-      if ((obj as THREE.Object3D & { isLight?: boolean }).isLight === true) return;
-      if (obj.visible === false) {
-        restore.push(() => {
-          obj.visible = false;
-        });
-        obj.visible = true;
-      }
-      const mesh = obj as THREE.Mesh;
-      if (mesh.isMesh && mesh.frustumCulled !== false) {
-        restore.push(() => {
-          mesh.frustumCulled = true;
-        });
-        mesh.frustumCulled = false;
-      }
+    runPrewarmPasses({
+      app: this.app,
+      renderer: this.renderer,
+      scene: this.scene,
+      camera: this.camera,
+      nearPlane: this.nearPlane,
+      visibility: this.visibility,
+      frameCtx: this.frameCtx,
+      budget: this.budget,
+      getRoot: () => this.root,
+      getPvsOverride: () => this.pvsOverride,
+      setPvsOverride: (v) => { this.pvsOverride = v; },
+      getPvsAutoCull: () => this.pvsAutoCull,
+      setPvsAutoCull: (v) => { this.pvsAutoCull = v; },
+      updateVisibility: () => this.updateVisibility(),
+      frame: (o) => this.frame(o),
     });
-    const prevTarget = this.renderer.getRenderTarget();
-    // 近平面探测的块级三角形网格也是懒建的（整图建一遍实测 ~58ms）。首飞第一帧正好是第一次
-    // 探测（`tick` 每 2 帧一次、物理就绪后才开），这笔开销会整段落在那一帧上（实测 near 段
-    // 57.66ms / 整帧 64.91ms，且 program 数没变 ⇒ 与着色器无关）。载图期先建好；幂等。
-    const nearGrids = this.nearPlane.prewarmGrids(this.root);
-    // 临时关 PVS、剔除距离放到无穷、关水面「视锥高度门控」：预热帧要把整张图都画一遍。
-    // 还原时刻意写字段而不是调 setCullDistance()：后者会按当前 PVS 档重算 auto 距离，
-    // 覆盖掉存档里的面板视距；这里要的是**逐字段原样**。
-    const savedPvsOverride = this.pvsOverride;
-    const savedEnablePvs = this.visibility.enablePvs;
-    const savedAutoCull = this.visibility.autoCullDistance;
-    const savedCull = this.visibility.cullDistance;
-    const savedAutoFlag = this.pvsAutoCull;
-    const gw = globalThis as {
-      __vbspWaterFrustumGate?: boolean;
-      __vbspWaterRefrCadence?: number;
-      __vbspWaterMirrorCadence?: number;
-      __vbspBudgetOn?: boolean;
-    };
-    const savedWaterGate = gw.__vbspWaterFrustumGate;
-    // 水面折射默认隔帧（`water.ts` `refrCadence` 默认 2），镜面在预算升到 2 级时每 3 帧一次；
-    // 帧预算控制器还可能已经升过级。预热帧要把「每种 pass 形态」都真跑一遍，否则那个形态的
-    // program 要等首飞第一次轮到它才编：实测预热帧被 cadence 跳过镜面 ⇒ 冷跑首飞补编 7 个
-    // 1024² 镜面 RT 变体、单帧 28ms。这里临时强制全帧率 + 冻结预算档，finally 还原。
-    // ⚠️ 只强制 cadence 不够：`frame()` 内两计数同步 +1、平票时 water.ts 恒选折射，镜面 RT
-    // 仍不会渲 —— 由下面的 `frameCtx.waterForcePass = 'mirror'` 在 frame() 之后补一趟，见 try 内注释。
-    const savedRefrCadence = gw.__vbspWaterRefrCadence;
-    const savedMirrorCadence = gw.__vbspWaterMirrorCadence;
-    const savedBudgetOn = gw.__vbspBudgetOn;
-    // 预热帧内旁路粒子/光效的「距离 + 视锥」剔除（`particles.ts` `cullByCamera` 的
-    // `__vbspParticleCullOff` 分支）：`frame()` 先跑 extras update，会按出生点相机把视锥外/
-    // 超距的光效重新置 `visible=false`，覆盖上面 traverse 的放开 ⇒ 它们的材质进不了水面
-    // 折射/镜面 RT，LinearSRGB 变体只能等首飞现编。finally 原样还原。
-    const gc = globalThis as { __vbspParticleCullOff?: boolean };
-    const savedParticleCullOff = gc.__vbspParticleCullOff;
-    this.pvsOverride = false;
-    this.pvsAutoCull = false; // 与 enablePvs 一致 ⇒ updateVisibility() 的自动距离分支不覆盖 ∞
-    this.visibility.enablePvs = false;
-    this.visibility.autoCullDistance = Number.POSITIVE_INFINITY;
-    this.visibility.cullDistance = Number.POSITIVE_INFINITY;
-    gw.__vbspWaterFrustumGate = false;
-    gw.__vbspWaterRefrCadence = 1;
-    gw.__vbspWaterMirrorCadence = 1;
-    gw.__vbspBudgetOn = false;
-    gc.__vbspParticleCullOff = true;
-    const t0 = performance.now();
-    let ok = true;
-    // 预热序号：既用于诊断，也用于相机挪动幅度——两趟预热不能挪到同一个坐标，
-    // 否则第二趟会被 `cameraChangedSinceRt` 判成「没动」而整趟跳过水面折射/镜像
-    // （实测第二趟 draws 只有 645 = 仅主遍，programs 只 +7；折射变体一个都没编）。
-    const callNo = ((g as { __vbspPrewarmCalls?: number }).__vbspPrewarmCalls ?? 0) + 1;
-    (g as { __vbspPrewarmCalls?: number }).__vbspPrewarmCalls = callNo;
-    // 诊断：这一帧到底画了多少 draw、编了多少 program、场景里有几个子节点。
-    // autoReset=false + reset() 才能让 info.render.calls 累计整帧（含折射/镜像/泛光各 pass）。
-    const info = this.renderer.info;
-    const prevAutoReset = info.autoReset;
-    const progsBefore = info.programs?.length ?? 0;
-    // 水面 pass 计数（water.ts 的 `__vbspWaterRefrRenders` / `__vbspWaterMirrorRenders`）：
-    // 预热帧到底跑没跑折射/镜面直接看这两个增量，不用靠猜。
-    const waterCounters = globalThis as {
-      __vbspWaterRefrRenders?: number;
-      __vbspWaterMirrorRenders?: number;
-    };
-    const refrBefore = waterCounters.__vbspWaterRefrRenders ?? 0;
-    const mirrorBefore = waterCounters.__vbspWaterMirrorRenders ?? 0;
-    info.autoReset = false;
-    info.reset();
-    let draws = 0;
-    // 水面折射/镜像 pass 有「相机没动就跳过」的门控（`water.ts` `cameraChangedSinceRt`）。
-    // 预热常在相机静止时调用（载图后立刻预热、或挂完粒子再预热一次），不挪一下相机这趟 pass
-    // 根本不跑 ⇒ 折射 RT 的 LinearSRGB 变体编不出来（实测首飞补编 7 个、单帧 ~60ms）。
-    // 这里只把相机挪 1 HU 并在 finally 还原：预热帧的画面坐标无关紧要，不写回玩家相机。
-    const savedCamPos = this.camera.position.clone();
-    const savedCamWorld = this.camera.matrixWorld.clone();
-    this.camera.position.set(
-      savedCamPos.x + 1 + callNo,
-      savedCamPos.y,
-      savedCamPos.z,
-    );
-    this.camera.updateMatrixWorld(true);
-    try {
-      // 全量 index（restoreClusterIndex）+ 全部块可见，再跑一帧真实 pass。
-      this.updateVisibility();
-      this.frame({ updateVisibility: false, updateNearPlane: false });
-      // 补一趟镜面 RT（见 water.ts `__vbspWaterForcePass`）：单次 frame() 在折射/镜面都到期时
-      // 恒选折射，镜面 RT 会拖到首飞第一个移动帧才渲。此刻粒子/光效还处于上面的 cullOff
-      // 状态，随整场景 pass 一起进 program 缓存。失败只告警，不影响载图。
-      try {
-        // T-P2-1：走上下文而不是写 `__vbspWaterForcePass` 全局（逃生舱仍保留给外部脚本）。
-        this.frameCtx.waterForcePass = 'mirror';
-        renderWaterFramePasses(this.renderer, this.scene, this.camera, this.frameCtx);
-      } catch (err) {
-        console.warn(`[${this.app}][prewarm] 镜面 RT 预热失败（不影响运行，首飞会补编）:`, err);
-      } finally {
-        // 无论成败都必须清掉：否则后续每帧都会被强制只跑镜面 pass。
-        this.frameCtx.waterForcePass = undefined;
-      }
-    } catch (err) {
-      ok = false;
-      console.warn(`[${this.app}][prewarm] 预热帧失败（不影响运行，着色器将按需编译）:`, err);
-    } finally {
-      draws = info.render.calls;
-      info.autoReset = prevAutoReset;
-      info.reset();
-      this.renderer.setRenderTarget(prevTarget);
-      // 相机还原（含 matrixWorld，避免析构帧仍用挪过的位姿）：只影响下一帧画面，
-      // 下一帧的 `frame()` 会自己重算矩阵。
-      this.camera.position.copy(savedCamPos);
-      this.camera.matrixWorld.copy(savedCamWorld);
-      this.camera.matrixWorldInverse.copy(savedCamWorld).invert();
-      this.camera.updateMatrixWorld(true);
-      this.pvsOverride = savedPvsOverride;
-      this.visibility.enablePvs = savedEnablePvs;
-      this.visibility.autoCullDistance = savedAutoCull;
-      this.visibility.cullDistance = savedCull;
-      this.pvsAutoCull = savedAutoFlag;
-      gw.__vbspWaterFrustumGate = savedWaterGate;
-      gw.__vbspWaterRefrCadence = savedRefrCadence;
-      gw.__vbspWaterMirrorCadence = savedMirrorCadence;
-      gw.__vbspBudgetOn = savedBudgetOn;
-      gc.__vbspParticleCullOff = savedParticleCullOff;
-      // 预热期间 `__vbspBudgetOn=false` 不采样；把起点清零，让预热后的第一帧 dt 记为 0。
-      // 否则那帧间隔会跨整个载图/预热段（数百 ms），被预算当成一次双槽（审查 P1-3）。
-      this.budgetLastStart = 0;
-      for (let i = restore.length - 1; i >= 0; i--) restore[i]();
-      // 按真实状态重算一次：把 PVS 裁过的 index / 块可见性还原成出生点该有的样子。
-      try {
-        this.updateVisibility();
-      } catch (err) {
-        console.warn(`[${this.app}][prewarm] 预热后恢复可见性失败:`, err);
-      }
-    }
-    const total = +(performance.now() - t0).toFixed(1);
-    const programs = this.renderer.info.programs?.length ?? null;
-    const refrDelta = (waterCounters.__vbspWaterRefrRenders ?? 0) - refrBefore;
-    const mirrorDelta = (waterCounters.__vbspWaterMirrorRenders ?? 0) - mirrorBefore;
-    g.__vbspPrewarmPasses = {
-      call: callNo,
-      total,
-      ok,
-      draws,
-      programs,
-      progsBefore,
-      kids: this.scene.children.length,
-      nearGrids,
-      refr: refrDelta,
-      mirror: mirrorDelta,
-    };
-    console.info(
-      `[${this.app}][prewarm] #${callNo} 整帧预热 ${total}ms（放开 ${restore.length} 项，已还原）` +
-        ` draws=${draws} programs=${progsBefore}→${programs ?? '?'} nearGrids=${nearGrids}` +
-        ` refr=${refrDelta} mirror=${mirrorDelta} kids=${this.scene.children.length}`,
-    );
   }
 
   /** 换图/卸载：释放根、天空组、环境与渲染列表；renderer/scene/camera 本身复用。 */
@@ -1078,7 +785,7 @@ export class RenderSession {
     // 这两个注册表是模块级强引用，不在这里清就会把上一张图的整批贴图留在显存里。
     resetWorldTransitionTextures();
     resetBumpTextures();
-    this.transparentChunks = [];
+    this.sorter.clear();
     clearSceneEnvironment(this.scene, { disposeBackground: true });
     this.renderer.renderLists.dispose();
     this.pvs = null;
@@ -1274,144 +981,8 @@ export class RenderSession {
       this.visibility.chunkIndexActive = false;
       this.pvsIndexActive = false;
     }
-    this.updateSpotLights();
+    this.spots.update(this.spotBeams, this.camera);
     return this.lastVisibility;
-  }
-
-  /**
-   * 每帧挑选「离相机最近的 8 盏 spot」送进 lightmap 注入的 uniform。
-   *
-   * 为什么不是全部：世界材质共享同一套 uniform，`KHR_lights_punctual` 在本图有 57 盏 spot
-   * （其余 2000+ 是 point，不参与这里）；只按距离取前 8 盏，既够覆盖视野，又不会让
-   * uniform 数组无限膨胀。
-   */
-  private updateSpotLights(): void {
-    const spots = this.spotBeams?.userData.spots as
-      | {
-          position: [number, number, number];
-          direction: [number, number, number];
-          color: [number, number, number];
-          intensity: number;
-          range: number;
-          innerConeAngle: number;
-          outerConeAngle: number;
-        }[]
-      | undefined;
-    if (!spots || spots.length === 0) {
-      // 与旧实现一致：无 spot 时**提前返回**，dlight uniform 保持上一帧的值。
-      this.spotOutList.length = 0;
-      setSpotLights(this.spotOutList);
-      return;
-    }
-    const len = spots.length;
-    if (this.spotCosRef !== spots || this.spotCosCount !== len) {
-      if (this.spotCosOuter.length !== len) {
-        this.spotCosOuter = new Float64Array(len);
-        this.spotCosInner = new Float64Array(len);
-      }
-      for (let i = 0; i < len; i++) {
-        this.spotCosOuter[i] = Math.cos(spots[i].outerConeAngle);
-        this.spotCosInner[i] = Math.cos(spots[i].innerConeAngle);
-      }
-      this.spotCosRef = spots;
-      this.spotCosCount = len;
-    }
-    const cam = this.camera.position;
-    const topIdx = this.spotTopIdx;
-    const topDist = this.spotTopDist;
-    // 单趟 O(N) 选最近 SPOT_TOP_N 盏：插入位置在「所有距离相同者之后」，因此同距离时
-    // 下标小的仍在前 —— 与旧实现「稳定 sort 升序 + slice(0, 8)」逐位同序。
-    let count = 0;
-    for (let i = 0; i < len; i++) {
-      const s = spots[i];
-      const dx = s.position[0] - cam.x;
-      const dy = s.position[1] - cam.y;
-      const dz = s.position[2] - cam.z;
-      const d2 = dx * dx + dy * dy + dz * dz;
-      if (count < SPOT_TOP_N) {
-        let pos = count;
-        while (pos > 0 && topDist[pos - 1] > d2) pos--;
-        for (let j = count; j > pos; j--) {
-          topDist[j] = topDist[j - 1];
-          topIdx[j] = topIdx[j - 1];
-        }
-        topDist[pos] = d2;
-        topIdx[pos] = i;
-        count++;
-      } else if (d2 < topDist[SPOT_TOP_N - 1]) {
-        // 并列第 8 远时旧实现保留先出现的下标，这里同样不替换。
-        let pos = SPOT_TOP_N - 1;
-        while (pos > 0 && topDist[pos - 1] > d2) pos--;
-        for (let j = SPOT_TOP_N - 1; j > pos; j--) {
-          topDist[j] = topDist[j - 1];
-          topIdx[j] = topIdx[j - 1];
-        }
-        topDist[pos] = d2;
-        topIdx[pos] = i;
-      }
-    }
-    const out = this.spotOutList;
-    for (let j = 0; j < count; j++) {
-      const oi = topIdx[j];
-      const s = spots[oi];
-      const slot = this.spotOutSlots[j];
-      slot.position = s.position;
-      slot.direction = s.direction;
-      slot.color = s.color;
-      slot.intensity = s.intensity;
-      slot.range = s.range;
-      slot.cosOuter = this.spotCosOuter[oi];
-      slot.cosInner = this.spotCosInner[oi];
-      out[j] = slot;
-    }
-    out.length = count;
-    setSpotLights(out);
-    // 命中点的 dlight：宽而软的光斑，按距离取最近 2 个（同上的零分配选法）。
-    const dlights = this.spotBeams?.userData.dlights as
-      | { position: [number, number, number]; color: [number, number, number]; range: number }[]
-      | undefined;
-    const dTopIdx = this.dlightTopIdx;
-    const dTopDist = this.dlightTopDist;
-    const dLen = dlights ? dlights.length : 0;
-    let dCount = 0;
-    for (let i = 0; i < dLen; i++) {
-      const d = dlights![i];
-      const dx = d.position[0] - cam.x;
-      const dy = d.position[1] - cam.y;
-      const dz = d.position[2] - cam.z;
-      const d2 = dx * dx + dy * dy + dz * dz;
-      if (dCount < DLIGHT_TOP_N) {
-        let pos = dCount;
-        while (pos > 0 && dTopDist[pos - 1] > d2) pos--;
-        for (let j = dCount; j > pos; j--) {
-          dTopDist[j] = dTopDist[j - 1];
-          dTopIdx[j] = dTopIdx[j - 1];
-        }
-        dTopDist[pos] = d2;
-        dTopIdx[pos] = i;
-        dCount++;
-      } else if (d2 < dTopDist[DLIGHT_TOP_N - 1]) {
-        let pos = DLIGHT_TOP_N - 1;
-        while (pos > 0 && dTopDist[pos - 1] > d2) pos--;
-        for (let j = DLIGHT_TOP_N - 1; j > pos; j--) {
-          dTopDist[j] = dTopDist[j - 1];
-          dTopIdx[j] = dTopIdx[j - 1];
-        }
-        dTopDist[pos] = d2;
-        dTopIdx[pos] = i;
-      }
-    }
-    const outD = this.dlightOutList;
-    for (let j = 0; j < dCount; j++) {
-      const d = dlights![dTopIdx[j]];
-      const slot = this.dlightOutSlots[j];
-      slot.position = d.position;
-      slot.color = d.color;
-      slot.range = d.range;
-      outD[j] = slot;
-    }
-    outD.length = dCount;
-    setDLights(outD);
   }
 
   /** PVS 区域着色开关（debug 面板用；开启期间不按 PVS/距离剔除，只上色，才能看清「不可见的区域」）。 */
@@ -1515,8 +1086,8 @@ export class RenderSession {
     // `globalThis.__vbspBudgetLevel` 暴露给各降级点（bloom 光晕 cadence、水面镜面 cadence 等）。
     // 采样用渲染段而不是整帧 tick：物理/粒子抖动不应触发画质降级。
     const tBudget = performance.now();
-    const budgetDt = this.budgetLastStart > 0 ? tBudget - this.budgetLastStart : 0;
-    this.budgetLastStart = tBudget;
+    const budgetDt = this.budget.lastStart > 0 ? tBudget - this.budget.lastStart : 0;
+    this.budget.lastStart = tBudget;
     // 分阶段耗时采样：默认关闭（只在每帧多几次 performance.now()），排查「某一帧突然变长」
     // 时在控制台执行 `__vbspDrawDebug = { on: true }`，帧末可从 `__vbspDraws.times` 读到
     // vis/near/sort/water/sky 各段的毫秒数（2026-11 定位「人一动就掉帧」用的就是它）。
@@ -1573,7 +1144,7 @@ export class RenderSession {
       );
     }
     mark('near');
-    this.sortTransparentChunks(this.camera);
+    this.sorter.update(this.camera);
     mark('sort');
     // 水面折射/深度 RT：必须在主渲染**之前**的干净上下文渲染（T-650 v4：原先嵌套在
     // 水面 onBeforeRender 里，嵌套 render 状态被外层半途状态污染且随视角变化，§12.9）。
@@ -1633,230 +1204,9 @@ export class RenderSession {
     // T-P2-1：dt 与等级走上下文（updateFrameBudget 的 write() 更新 `frameCtx.budgetLevel`），
     // 帧末再镜像旧的全局键 + `__vbspDebug` 供外部诊断（只写）。
     this.frameCtx.lastFrameDtMs = budgetDt;
-    this.updateFrameBudget(frameCpuMs, budgetDt);
+    this.budget.update(frameCpuMs, budgetDt, this.frameCtx);
     mirrorFrameContext(this.frameCtx);
     return this.lastVisibility;
-  }
-
-  /**
-   * 帧预算状态机（task-33 方案 C1 的修订版）。**主信号是 rAF 帧间隔**，而不是渲染段 CPU：
-   * 实测（pcf-semantics 2026-11-16）终点机位渲染段 CPU 只有 1.5~2.8ms，却仍有 3.1/6.2ms
-   * 交替 —— 说明超时的那一帧卡在 GPU/合成等待上，用 CPU 时长做阈值永远不触发。
-   *
-   * 采样与时钟口径（2026-11-21 修，审查 P1-3）：
-   * 1) `__vbspBudgetOn=false`（载图预热/用户 A/B）时**先返回、不采样**——预热帧是假帧，
-   *    且与上一帧的间隔跨整个载图段，采进来就是一次假双槽；
-   * 2) 页面隐藏期间与「切回后的第一帧」不采样（`document.hidden` / `budgetSkipSampleOnce`）；
-   * 3) `loadScene()` 与 `prewarmPasses()` 入口调 `resetFrameBudget()` 硬重置（清窗口/稳定计数/
-   *    粘滞/档位），否则新图第一帧拿到的评估窗口里混着旧图样本。
-   *
-   * 判定（2026-11-19 改敏感版，未变）：每 10 帧评估一次，最多 2 级；
-   * - 升 L1：最近 30 帧里双槽帧（dt>4.8ms）≥2（≈6.7%）或最近 60 帧占比 ≥8%；
-   * - 升 L2：L1 基础上最近 30 帧双槽 ≥5（≈16.7%）或 60 帧占比 ≥15%；
-   * - 为什么要求「窗口内出现过单槽帧」：如果显示器本身就是 160Hz（dt 恒 6.25），控制器不该一直降级。
-   * 旧判据（60 帧占比 ≥25% 才升）在实测里几乎不触发：用户机是「每秒丢 15~20 帧」≈5~7% 双槽，
-   * 落在 5%~25% 死区里，导致水面 cadence 自适应从未生效（`__vbspBudgetLevel` 恒 0）。
-   *
-   * 降档（2026-11-21 改，审查 P1-4）：升档后先保持 180 帧；之后按「最近 `BUDGET_RECOVER_WINDOW`
-   * 帧双槽 ≤ `BUDGET_RECOVER_MAX_DOUBLES` 且该状态累计 ≥ `BUDGET_RECOVER_HOLD_MS`」降一级。
-   * 旧的「连续 1600/3200 帧无双槽」在慢机上永远达不到（慢机双槽是常态），一旦误降就永久粘住；
-   * 现在允许窗口里有一次抖动，但要求约 1s 的持续健康（仍比旧实现快一个数量级）。
-   *
-   * 关闭开关：`globalThis.__vbspBudgetOn = false`；强制档位：`__vbspBudgetForce = 0|1|2`。
-   */
-  private updateFrameBudget(cpuMs: number, dtMs: number): void {
-    this.budgetLastMs = cpuMs;
-    const g = globalThis as {
-      __vbspBudgetOn?: boolean;
-      __vbspBudgetForce?: number;
-      __vbspBudgetLevel?: number;
-      __vbspBudget?: {
-        level: number;
-        ms: number;
-        dt: number;
-        doublePct: number;
-        doubles30: number;
-        doubles60: number;
-        doubles120: number;
-        recoverMs: number;
-        stable: number;
-        up: number;
-        down: number;
-        hold: number;
-      };
-    };
-    const write = (): void => {
-      // 等级写进上下文（唯一生产读点来源）；旧的 `__vbspBudgetLevel` 由帧末
-      // `mirrorFrameContext` 统一镜像，这里不再各写一份。
-      this.frameCtx.budgetLevel = this.budgetLevel;
-      g.__vbspBudget = {
-        level: this.budgetLevel,
-        ms: +this.budgetLastMs.toFixed(3),
-        dt: +dtMs.toFixed(3),
-        doublePct: this.budgetDoublePct(),
-        doubles30: this.budgetDoubles(30),
-        doubles60: this.budgetDoubles(60),
-        doubles120: this.budgetRecoverDoubles,
-        recoverMs: Math.round(this.budgetRecoverMs),
-        stable: this.budgetStableFrames,
-        up: this.budgetUp,
-        down: this.budgetDown,
-        hold: this.budgetHold,
-      };
-    };
-    // ① 逃生舱/预热：不采样、不清窗口（窗口由 loadScene/prewarm 入口的硬重置负责）。
-    if (g.__vbspBudgetOn === false) {
-      this.budgetLevel = 0;
-      write();
-      return;
-    }
-    // ② 隐藏期间不采样，也不消费 skip 标记；切回后的首帧间隔跨了整个隐藏期，丢弃一次。
-    if (typeof document !== 'undefined' && document.hidden) {
-      write();
-      return;
-    }
-    if (this.budgetSkipSampleOnce) {
-      this.budgetSkipSampleOnce = false;
-      write();
-      return;
-    }
-    // ③ 滚动窗口采样 rAF 帧间隔 + 恢复窗口。
-    if (dtMs > 0) {
-      this.budgetDt[this.budgetDtAt] = dtMs;
-      this.budgetDtAt = (this.budgetDtAt + 1) % this.budgetDt.length;
-      this.budgetDtCount = Math.min(this.budgetDtCount + 1, this.budgetDt.length);
-      this.budgetStableFrames = dtMs > BUDGET_DOUBLE_SLOT_MS ? 0 : this.budgetStableFrames + 1;
-      this.sampleRecoverWindow(dtMs);
-    }
-    if (typeof g.__vbspBudgetForce === 'number') {
-      this.budgetLevel = Math.max(0, Math.min(2, Math.floor(g.__vbspBudgetForce)));
-      write();
-      return;
-    }
-    // 每 `BUDGET_EVALUATE_INTERVAL` 帧评估一次；窗口未填满前不动作。
-    this.budgetEvaluateIn--;
-    if (this.budgetHold > 0) this.budgetHold--;
-    if (this.budgetEvaluateIn > 0 || this.budgetDtCount < BUDGET_EVALUATE_FIRST_FRAMES) {
-      write();
-      return;
-    }
-    this.budgetEvaluateIn = BUDGET_EVALUATE_INTERVAL;
-    const doubles30 = this.budgetDoubles(30);
-    const doubles60 = this.budgetDoubles(60);
-    const ratio60 = doubles60 / Math.max(1, this.budgetDtCount);
-    if (this.budgetLevel === 0) {
-      if ((doubles30 >= 2 || ratio60 >= 0.08) && this.budgetHasSingleSlot(60)) {
-        this.budgetLevel = 1;
-        this.budgetUp++;
-        this.budgetHold = 180;
-      }
-    } else if (this.budgetLevel === 1) {
-      if (doubles30 >= 5 || ratio60 >= 0.15) {
-        this.budgetLevel = 2;
-        this.budgetUp++;
-        this.budgetHold = 180;
-      } else if (this.budgetHold === 0 && this.budgetRecoverReady()) {
-        this.budgetLevel = 0;
-        this.budgetDown++;
-        this.budgetRecoverMs = 0;
-      }
-    } else if (this.budgetHold === 0 && this.budgetRecoverReady()) {
-      this.budgetLevel = 1;
-      this.budgetDown++;
-      this.budgetRecoverMs = 0;
-    }
-    write();
-  }
-
-  /**
-   * 恢复窗口采样：最近 `BUDGET_RECOVER_WINDOW` 帧里双槽帧数 ≤ `BUDGET_RECOVER_MAX_DOUBLES`
-   * （≈0.8%，低于正常偶发抖动）才累计「干净时长」；条件一破即清零。
-   * 320Hz 下窗口只有约 0.38s，不够区分偶发抖动，所以再看累计时长 ≥ `BUDGET_RECOVER_HOLD_MS`。
-   */
-  private sampleRecoverWindow(dtMs: number): void {
-    const isDouble = dtMs > BUDGET_DOUBLE_SLOT_MS ? 1 : 0;
-    if (this.budgetRecoverFilled >= BUDGET_RECOVER_WINDOW) {
-      this.budgetRecoverDoubles -= this.budgetRecoverRing[this.budgetRecoverAt];
-    } else {
-      this.budgetRecoverFilled++;
-    }
-    this.budgetRecoverRing[this.budgetRecoverAt] = isDouble;
-    this.budgetRecoverDoubles += isDouble;
-    this.budgetRecoverAt = (this.budgetRecoverAt + 1) % BUDGET_RECOVER_WINDOW;
-    if (this.budgetRecoverFilled >= BUDGET_RECOVER_WINDOW
-      && this.budgetRecoverDoubles <= BUDGET_RECOVER_MAX_DOUBLES) {
-      this.budgetRecoverMs += dtMs;
-    } else {
-      this.budgetRecoverMs = 0;
-    }
-  }
-
-  /** 降档判据：窗口已填满且双槽数达标，并且该状态累计持续了 `BUDGET_RECOVER_HOLD_MS`。 */
-  private budgetRecoverReady(): boolean {
-    return this.budgetRecoverFilled >= BUDGET_RECOVER_WINDOW
-      && this.budgetRecoverDoubles <= BUDGET_RECOVER_MAX_DOUBLES
-      && this.budgetRecoverMs >= BUDGET_RECOVER_HOLD_MS;
-  }
-
-  /** 清空预算采样与恢复窗口；档位/粘滞等「决策状态」由调用方决定是否保留。 */
-  private clearBudgetSamples(): void {
-    this.budgetDt.fill(0);
-    this.budgetDtAt = 0;
-    this.budgetDtCount = 0;
-    this.budgetStableFrames = 0;
-    this.budgetRecoverRing.fill(0);
-    this.budgetRecoverAt = 0;
-    this.budgetRecoverFilled = 0;
-    this.budgetRecoverDoubles = 0;
-    this.budgetRecoverMs = 0;
-    this.budgetEvaluateIn = BUDGET_EVALUATE_FIRST_FRAMES;
-  }
-
-  /**
-   * 换图/预热的硬重置（审查 P1-3）：窗口、稳定计数、粘滞、档位全归零，下一帧 dt 记为 0。
-   * 不把 `budgetLastStart` 清零的话，新图第一帧的 dt 会跨整个载图段（数百 ms），直接算一次双槽。
-   */
-  private resetFrameBudget(): void {
-    this.clearBudgetSamples();
-    this.budgetHold = 0;
-    this.budgetLevel = 0;
-    this.budgetLastStart = 0;
-    this.budgetSkipSampleOnce = false;
-    (globalThis as { __vbspBudgetLevel?: number }).__vbspBudgetLevel = 0;
-  }
-
-  /** 可见性切换的软重置（审查 P1-4）：只清采样窗口，保留档位与粘滞（后台时间不是性能证据）。 */
-  private softResetBudgetWindow(): void {
-    this.clearBudgetSamples();
-    this.budgetSkipSampleOnce = true;
-  }
-
-  /** 最近 `n` 帧样本里的双槽帧（dt>BUDGET_DOUBLE_SLOT_MS）个数（按时间顺序取最后 n 个）。 */
-  private budgetDoubles(n: number): number {
-    const len = this.budgetDt.length;
-    const count = Math.min(this.budgetDtCount, n);
-    const start = (this.budgetDtAt - count + len * 2) % len;
-    let dbl = 0;
-    for (let i = 0; i < count; i++) if (this.budgetDt[(start + i) % len] > BUDGET_DOUBLE_SLOT_MS) dbl++;
-    return dbl;
-  }
-
-  /** 最近 `n` 帧里是否出现过单槽帧（dt<BUDGET_SINGLE_SLOT_MS）——证明这台机器的 320Hz 档确实可达。 */
-  private budgetHasSingleSlot(n: number): boolean {
-    const len = this.budgetDt.length;
-    const count = Math.min(this.budgetDtCount, n);
-    const start = (this.budgetDtAt - count + len * 2) % len;
-    for (let i = 0; i < count; i++) if (this.budgetDt[(start + i) % len] < BUDGET_SINGLE_SLOT_MS) return true;
-    return false;
-  }
-
-  /** 滚动窗口里「双槽帧」占比（dt>BUDGET_DOUBLE_SLOT_MS）；窗口未填满按已有样本算。 */
-  private budgetDoublePct(): number {
-    const n = this.budgetDtCount;
-    if (n === 0) return 0;
-    let dbl = 0;
-    for (let i = 0; i < n; i++) if (this.budgetDt[i] > BUDGET_DOUBLE_SLOT_MS) dbl++;
-    return +(dbl / n).toFixed(3);
   }
 
   /** 端特有动画/叠加层用：重画一帧但不重复可见性/近平面（只做天空+主世界 draw）。 */
@@ -1956,6 +1306,11 @@ export class RenderSession {
     return { meshes: 0, maxDist: 0, sample: [] };
   }
 
+  /** 诊断集合的只读现场（T-P2-2c：诊断实现已搬到 `chunk-diagnostics.ts`）。 */
+  private diagHost(): ChunkDiagnosticsHost {
+    return { camera: this.camera, root: this.root, pvs: this.pvs, visibility: this.visibility };
+  }
+
   /**
    * 诊断：逐块审计（谁在画、离多远、有几个 cluster、PVS 怎么判的）。
    * `clusters === 0` 的块**不参与 PVS 剔除**（`update` 里要求 `clusterIds.length > 0` 才剔），
@@ -1970,42 +1325,7 @@ export class RenderSession {
     far: Array<{ name: string; d: number; r: number; boxD: number | null; clusters: number; pvsVisible: boolean | null; visible: boolean; tris: number }>;
     nearCulled: Array<{ idx: number; name: string; d: number; r: number; clusters: number; pvsVisible: boolean | null; tris: number }>;
   } {
-    const p = this.camera.position;
-    const items = this.visibility.items;
-    const pvsActive = !!(this.visibility.enablePvs && this.pvs?.enabled);
-    const all: Array<{ name: string; d: number; r: number; boxD: number | null; clusters: number; pvsVisible: boolean | null; visible: boolean; tris: number }> = [];
-    const nearCulled: Array<{ idx: number; name: string; d: number; r: number; clusters: number; pvsVisible: boolean | null; tris: number }> = [];
-    let drawn = 0;
-    let noCluster = 0;
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      const g = item.mesh.geometry as THREE.BufferGeometry | undefined;
-      const tris = g?.index ? g.index.count / 3 : (g?.getAttribute('position')?.count ?? 0) / 3;
-      const d = item.center.distanceTo(p);
-      if (item.clusterIds.length === 0) noCluster++;
-      const pvsVisible = item.clusterIds.length === 0 ? null : item.clusterIds.some((c) => this.pvs?.isVisible(c) ?? false);
-      if (!item.mesh.visible) {
-        // 近处被剔的块 = 「本该出现在眼前却没了」的头号嫌疑（缺墙 / 玻璃消失）。
-        if (d < 8000) {
-          nearCulled.push({ idx: i, name: item.mesh.name || '(anon)', d: Math.round(d), r: Math.round(item.radius), clusters: item.clusterIds.length, pvsVisible, tris: Math.round(tris) });
-        }
-        continue;
-      }
-      drawn++;
-      all.push({
-        name: item.mesh.name || '(anon)',
-        d: Math.round(d),
-        r: Math.round(item.radius),
-        boxD: item.box ? Math.round(item.box.distanceToPoint(p)) : null,
-        clusters: item.clusterIds.length,
-        pvsVisible,
-        visible: true,
-        tris: Math.round(tris),
-      });
-    }
-    all.sort((a, b) => b.d - a.d);
-    nearCulled.sort((a, b) => a.d - b.d);
-    return { cull: this.visibility.cullDistance, total: items.length, drawn, noCluster, pvsActive, far: all.slice(0, limit), nearCulled: nearCulled.slice(0, limit) };
+    return auditChunks(this.diagHost(), limit);
   }
 
   /**
@@ -2023,78 +1343,7 @@ export class RenderSession {
     farLeaked: number;
     chunks: Array<{ name: string; tris: number; sampled: number; leaked: number; farLeaked: number; clusters: number }>;
   } {
-    const empty = { pvsActive: false, sampled: 0, leaked: 0, farLeaked: 0, chunks: [] };
-    const pvs = this.pvs;
-    if (!this.visibility.enablePvs || !pvs) return empty;
-    const out = { pvsActive: true, sampled: 0, leaked: 0, farLeaked: 0, chunks: [] as Array<{ name: string; tris: number; sampled: number; leaked: number; farLeaked: number; clusters: number }> };
-    const cam = this.camera.position;
-    const a = new THREE.Vector3();
-    const b = new THREE.Vector3();
-    const c = new THREE.Vector3();
-    for (const item of this.visibility.items) {
-      if (!item.mesh.visible) continue;
-      // 单 cluster 的块过去被跳过（那时它不可能「半块泄漏」）。拆分之后正好相反：绝大多数
-      // 画着的块都是单 cluster 片，必须一起采样，否则这个指标看不出「拆分是否真的精确」。
-      if (item.clusterIds.length === 0) continue;
-      const g = item.mesh.geometry as THREE.BufferGeometry | undefined;
-      const pos = g?.getAttribute('position') as THREE.BufferAttribute | undefined;
-      const index = g?.index ?? null;
-      if (!pos) continue;
-      // 合并块有两种：带 index 的（多材质 groups）与不带 index 的（单材质）。两种都要能采样。
-      // 逐三角形过滤的块只画 `drawRange` 里的三角形：采样必须跟着 drawRange，否则会把
-      // 「已经裁掉、根本没画」的三角形算成泄漏，指标直接失真（曾把 15% 的精确过滤读成 89%）。
-      const total = index ? Math.floor(index.count / 3) : Math.floor(pos.count / 3);
-      const drawnTris = g && g.drawRange.count !== Infinity
-        ? Math.min(total, Math.floor(g.drawRange.count / 3))
-        : total;
-      const tris = drawnTris;
-      if (tris === 0) continue;
-      const matrix = item.mesh.matrixWorld;
-      const stride = Math.max(1, Math.ceil(tris / 48));
-      let sampled = 0;
-      let leaked = 0;
-      let farLeaked = 0;
-      for (let t = 0; t < tris; t += stride) {
-        const i0 = index ? index.getX(t * 3) : t * 3;
-        const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
-        const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
-        a.fromBufferAttribute(pos, i0);
-        b.fromBufferAttribute(pos, i1);
-        c.fromBufferAttribute(pos, i2);
-        // 面法线：三角形重心**落在表面上**，直接查 leaf 会经常落进 brush 内部（cluster -1），
-        // 那是判据噪声不是泄漏。按法线往外推几档再查，才是「这个面朝向的那间房」。
-        a.add(b).add(c).multiplyScalar(1 / 3);
-        const e1x = b.x - a.x, e1y = b.y - a.y, e1z = b.z - a.z;
-        const e2x = c.x - a.x, e2y = c.y - a.y, e2z = c.z - a.z;
-        let nx = e1y * e2z - e1z * e2y;
-        let ny = e1z * e2x - e1x * e2z;
-        let nz = e1x * e2y - e1y * e2x;
-        const nl = Math.hypot(nx, ny, nz) || 1;
-        nx /= nl; ny /= nl; nz /= nl;
-        a.applyMatrix4(matrix);
-        let cluster = -1;
-        for (const push of CLUSTER_LEAK_PROBE_PUSH) {
-          const px = a.x + nx * push, py = a.y + ny * push, pz = a.z + nz * push;
-          cluster = pvs.getClusterAt({ x: px, y: py, z: pz });
-          if (cluster >= 0) break;
-          const bx = a.x - nx * push, by = a.y - ny * push, bz = a.z - nz * push;
-          cluster = pvs.getClusterAt({ x: bx, y: by, z: bz });
-          if (cluster >= 0) break;
-        }
-        if (cluster < 0) continue; // 两侧都采不到房间（纯内部面），不参与判定
-        sampled++;
-        if (pvs.isVisible(cluster)) continue;
-        leaked++;
-        if (a.distanceTo(cam) > 12000) farLeaked++;
-      }
-      out.sampled += sampled;
-      out.leaked += leaked;
-      out.farLeaked += farLeaked;
-      if (leaked > 0) out.chunks.push({ name: item.mesh.name || '(anon)', tris, sampled, leaked, farLeaked, clusters: item.clusterIds.length });
-    }
-    out.chunks.sort((x, y) => y.leaked - x.leaked);
-    out.chunks.splice(limit);
-    return out;
+    return leakChunks(this.diagHost(), limit);
   }
 
   /**
@@ -2102,40 +1351,7 @@ export class RenderSession {
    * `sameChunk: true` 就说明「这块肉眼可见却被剔了」＝PVS 判错（先用它区分 PVS 误剔与单纯背对相机）。
    */
   rayCheck(idx: number): { name: string; chunkVisible: boolean; sameChunk: boolean; hitName: string; hitDist: number; targetDist: number } | null {
-    const item = this.visibility.items[idx];
-    if (!item || !this.root) return null;
-    const cam = this.camera.position;
-    const g = item.mesh.geometry as THREE.BufferGeometry;
-    const pos = g.getAttribute('position') as THREE.BufferAttribute | undefined;
-    if (!pos) return null;
-    const m = new THREE.Matrix4();
-    item.mesh.updateWorldMatrix(true, false);
-    m.copy(item.mesh.matrixWorld);
-    const v = new THREE.Vector3();
-    const best = new THREE.Vector3();
-    let bestD = Infinity;
-    const step = Math.max(1, Math.floor(pos.count / 4000));
-    for (let i = 0; i < pos.count; i += step) {
-      v.fromBufferAttribute(pos, i).applyMatrix4(m);
-      const d = v.distanceToSquared(cam);
-      if (d < bestD) { bestD = d; best.copy(v); }
-    }
-    if (!Number.isFinite(bestD)) return null;
-    const dir = best.clone().sub(cam);
-    const targetDist = dir.length();
-    if (targetDist < 1e-3) return null;
-    dir.divideScalar(targetDist);
-    const rc = new THREE.Raycaster(cam.clone(), dir, 0.1, targetDist + 50);
-    const hits = rc.intersectObject(this.root!, true);
-    const first = hits.find((h) => (h.object as THREE.Mesh).isMesh && h.object.visible);
-    return {
-      name: item.mesh.name || '(anon)',
-      chunkVisible: item.mesh.visible,
-      sameChunk: !!first && first.object === item.mesh,
-      hitName: first ? ((first.object as THREE.Mesh).name || '(anon)') : '(nothing)',
-      hitDist: first ? Math.round(first.distance) : -1,
-      targetDist: Math.round(targetDist),
-    };
+    return rayCheckChunk(this.diagHost(), idx);
   }
 
   /**
@@ -2144,40 +1360,7 @@ export class RenderSession {
    * 比看截图快，也不需要知道相机朝向。
    */
   frustumAudit(sx = 40, sy = 24): { rays: number; hits: number; culledFirst: number; samples: Array<{ name: string; d: number; clusters: number; pvsVisible: boolean | null }> } {
-    const out = { rays: 0, hits: 0, culledFirst: 0, samples: [] as Array<{ name: string; d: number; clusters: number; pvsVisible: boolean | null }> };
-    if (!this.root) return out;
-    const byMesh = new Map<THREE.Object3D, number>();
-    for (let i = 0; i < this.visibility.items.length; i++) byMesh.set(this.visibility.items[i].mesh, i);
-    const cam = this.camera;
-    const rc = new THREE.Raycaster();
-    rc.far = 60000;
-    const ndc = new THREE.Vector2();
-    for (let y = 0; y < sy; y++) {
-      for (let x = 0; x < sx; x++) {
-        ndc.set(((x + 0.5) / sx) * 2 - 1, -(((y + 0.5) / sy) * 2 - 1));
-        rc.setFromCamera(ndc, cam);
-        out.rays++;
-        const hits = rc.intersectObject(this.root, true);
-        const first = hits.find((h) => (h.object as THREE.Mesh).isMesh);
-        if (!first) continue;
-        out.hits++;
-        const obj = first.object as THREE.Mesh;
-        if (obj.visible) continue;
-        const idx = byMesh.get(obj);
-        if (idx === undefined) continue;
-        const item = this.visibility.items[idx];
-        out.culledFirst++;
-        if (out.samples.length < 12) {
-          out.samples.push({
-            name: obj.name || '(anon)',
-            d: Math.round(first.distance),
-            clusters: item.clusterIds.length,
-            pvsVisible: item.clusterIds.length === 0 ? null : item.clusterIds.some((c) => this.pvs?.isVisible(c) ?? false),
-          });
-        }
-      }
-    }
-    return out;
+    return auditFrustum(this.diagHost(), sx, sy);
   }
 
   /**
@@ -2193,71 +1376,12 @@ export class RenderSession {
     selfVisible: boolean | null;
     nearest: Array<{ name: string; d: number; clusters: number[]; hasCamera: boolean; visible: boolean }>;
   } | null {
-    if (!this.pvs) return null;
-    const p = this.camera.position;
-    const at = this.pvs.getClusterAt({ x: p.x, y: p.y, z: p.z });
-    const st = this.pvs.getStats();
-    const near = this.visibility.items
-      .map((it) => ({ it, d: it.center.distanceTo(p) }))
-      .sort((a, b) => a.d - b.d)
-      .slice(0, limit)
-      .map(({ it, d }) => ({
-        name: it.mesh.name || '(anon)',
-        d: Math.round(d),
-        clusters: it.clusterIds.slice(0, 8),
-        hasCamera: it.clusterIds.includes(at),
-        visible: it.mesh.visible,
-      }));
-    return {
-      camera: [p.x, p.y, p.z].map(Math.round),
-      clusterAtCamera: at,
-      current: st.currentCluster,
-      visible: st.visibleCount,
-      total: st.totalClusters,
-      selfVisible: at >= 0 ? this.pvs.isVisible(at) : null,
-      nearest: near,
-    };
+    return pvsSnapshot(this.diagHost(), limit);
   }
 
   /** 诊断：屏幕某点（NDC）射线打中的第一个块，及其 cluster / 可见性——「眼前这面墙到底被谁剔了」。 */
   pickAt(ndcX = 0, ndcY = 0): { idx: number; name: string; d: number; clusters: number[]; cameraCluster: number; hasCamera: boolean; pvsVisible: boolean | null; visible: boolean; mat: string; matTransparent: boolean; matMap: string; matWater: boolean; srcMesh: string; srcFace: number | null; srcTri: number } | null {
-    if (!this.root) return null;
-    const rc = new THREE.Raycaster();
-    rc.far = 60000;
-    rc.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
-    const hits = rc.intersectObject(this.root, true);
-    const first = hits.find((h) => (h.object as THREE.Mesh).isMesh);
-    if (!first) return null;
-    const obj = first.object as THREE.Mesh;
-    const idx = this.visibility.items.findIndex((it) => it.mesh === obj);
-    const item = idx >= 0 ? this.visibility.items[idx] : null;
-    const p = this.camera.position;
-    const camCluster = this.pvs ? this.pvs.getClusterAt({ x: p.x, y: p.y, z: p.z }) : -1;
-    const clusters = item ? item.clusterIds : [];
-    // 材质名 + 是否透明：用来区分「被剔了」和「画了但材质/贴图不对」（两种现象看起来都是「空的」）。
-    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-    const g = first.face?.materialIndex ?? 0;
-    const mat = mats[Math.min(g, mats.length - 1)] as THREE.Material | undefined;
-    // 来源面：合并块本身无名，按 faceIndex 反查区间表 → 来源 glTF 网格名 + BSP 面号（extras.faceIndex）。
-    const src = lookupMergeSource(obj.geometry, first.faceIndex);
-    const srcTri = src && first.faceIndex != null ? Math.floor((first.faceIndex * 3 - src.start) / 3) : -1;
-    return {
-      idx,
-      name: obj.name || '(anon)',
-      d: Math.round(first.distance),
-      clusters: clusters.slice(0, 12),
-      cameraCluster: camCluster,
-      hasCamera: clusters.includes(camCluster),
-      pvsVisible: item ? (clusters.length === 0 ? null : clusters.some((c) => this.pvs?.isVisible(c) ?? false)) : null,
-      visible: obj.visible,
-      mat: mat?.name || '(unnamed)',
-      matTransparent: mat?.transparent ?? false,
-      matMap: (mat as THREE.MeshBasicMaterial | undefined)?.map?.name || '(nomap)',
-      matWater: (mat?.userData as { vbsp_water?: unknown } | undefined)?.vbsp_water != null,
-      srcMesh: src?.meshName || '(unknown)',
-      srcFace: src?.faceIndex ?? null,
-      srcTri,
-    };
+    return pickChunkAt(this.diagHost(), ndcX, ndcY);
   }
 
   /**
@@ -2277,96 +1401,16 @@ export class RenderSession {
     radius: number;
     matrixBaked: boolean;
   } | null {
-    const item = this.visibility.items[idx];
-    if (!item || !this.pvs) return null;
-    const mesh = item.mesh;
-    const geom = mesh.geometry;
-    const pos = geom.attributes.position;
-    const nrm = geom.attributes.normal;
-    const cam = this.camera.position;
-    const counts = new Map<number, number>();
-    const nearVerts: Array<{ d: number; c: number }> = [];
-    const v = new THREE.Vector3();
-    let solid = 0;
-    for (let i = 0; i < pos.count; i++) {
-      v.set(pos.getX(i), pos.getY(i), pos.getZ(i));
-      if (nrm) v.addScaledVector(new THREE.Vector3(nrm.getX(i), nrm.getY(i), nrm.getZ(i)), 4);
-      v.applyMatrix4(mesh.matrixWorld);
-      const c = this.pvs.getClusterAt({ x: v.x, y: v.y, z: v.z });
-      if (c < 0) solid++;
-      else counts.set(c, (counts.get(c) ?? 0) + 1);
-      const d = v.distanceTo(cam);
-      if (d <= nearHU) nearVerts.push({ d: Math.round(d), c });
-    }
-    const clusters = [...counts.entries()].map(([c, n]) => ({ c, n })).sort((a, b) => b.n - a.n).slice(0, 12);
-    nearVerts.sort((a, b) => a.d - b.d);
-    const m = mesh.matrixWorld.elements;
-    const matrixBaked = m[12] === 0 && m[13] === 0 && m[14] === 0 && m[0] === 1 && m[5] === 1 && m[10] === 1;
-    return {
-      name: mesh.name || '(anon)',
-      tris: pos.count / 3,
-      verts: pos.count,
-      solid,
-      clusters,
-      nearVerts: nearVerts.slice(0, 16),
-      center: [item.center.x, item.center.y, item.center.z].map(Math.round) as [number, number, number],
-      radius: Math.round(item.radius),
-      matrixBaked,
-    };
+    return chunkClusterSample(this.diagHost(), idx, nearHU);
   }
 
   /** 诊断：按名字查块级可见性（「这个模型到底是被剔了还是没画」）。 */  probeChunk(name: string): { name: string; found: number; d: number; r: number; clusters: number; pvsVisible: boolean | null; visible: boolean; tris: number; collider: boolean } | null {
-    const key = name.trim();
-    for (const item of this.visibility.items) {
-      const n = item.mesh.name || '';
-      if (n !== key) continue;
-      const g = item.mesh.geometry as THREE.BufferGeometry | undefined;
-      const tris = g?.index ? g.index.count / 3 : (g?.getAttribute('position')?.count ?? 0) / 3;
-      return {
-        name: n,
-        found: 1,
-        d: Math.round(item.center.distanceTo(this.camera.position)),
-        r: Math.round(item.radius),
-        clusters: item.clusterIds.length,
-        pvsVisible: item.clusterIds.length === 0 ? null : item.clusterIds.some((c) => this.pvs?.isVisible(c) ?? false),
-        visible: item.mesh.visible,
-        tris: Math.round(tris),
-        collider: false,
-      };
-    }
-    return null;
+    return probeChunkByName(this.diagHost(), name);
   }
 
   /** 诊断：主根内「当前被绘制」的块按距离分桶（判断 PVS 是否把很远的东西也留着）。 */
   drawnChunkStats(): { drawn: number; buckets: Record<string, number>; far: string[] } {
-    const p = this.camera.position;
-    const v = new THREE.Vector3();
-    const buckets: Record<string, number> = { '0-2k': 0, '2-5k': 0, '5-10k': 0, '10-20k': 0, '>20k': 0 };
-    const far: string[] = [];
-    let drawn = 0;
-    if (!this.root) return { drawn, buckets, far };
-    this.root.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (!m.isMesh || !m.visible) return;
-      drawn++;
-      const g = m.geometry as THREE.BufferGeometry | undefined;
-      if (!g) return;
-      if (!g.boundingSphere) g.computeBoundingSphere();
-      const bs = g.boundingSphere;
-      if (!bs) return;
-      // 合并块的几何已烘焙世界坐标、mesh 自身矩阵通常是单位阵 ⇒ 必须用包围球心，不能取 matrixWorld 平移。
-      v.copy(bs.center).applyMatrix4(m.matrixWorld);
-      const d = v.distanceTo(p);
-      if (d < 2000) buckets['0-2k']++;
-      else if (d < 5000) buckets['2-5k']++;
-      else if (d < 10000) buckets['5-10k']++;
-      else if (d < 20000) buckets['10-20k']++;
-      else {
-        buckets['>20k']++;
-        if (far.length < 5) far.push(`${m.name || '(anon)'}@${Math.round(d)}`);
-      }
-    });
-    return { drawn, buckets, far };
+    return drawnChunkStats(this.diagHost());
   }
 
   /** 可见性统计（形状与 debug 的 `LodStats` 兼容）。 */
@@ -2406,342 +1450,17 @@ export class RenderSession {
     this.renderer.dispose();
   }
 
-  // ── 内部 ────────────────────────────────────────────────────────────────
-
-  /**
-   * 收集主根里的半透明块。
-   *
-   * 为什么需要：合并后的块 `position` 都是 `(0,0,0)`，three 的半透明排序在
-   * `groupOrder/renderOrder` 相同后按对象 z（这里全为 0）再按 id ⇒ **退化成创建顺序**。
-   * surf_666 的模型容器里，玻璃块 id 比水面块小 ⇒ 玻璃先画、水后画；水的 alpha 随视角
-   * 变化，就把玻璃“盖淡”甚至盖没（owner 2026-10-24 报的“玻璃板有时像消失”）。
-   */
-  private collectTransparentChunks(): void {
-    this.transparentChunks = [];
-    this.root?.traverse((obj) => {
-      const mesh = obj as THREE.Mesh;
-      if (!mesh.isMesh) return;
-      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      if (!mats.some((m) => m && m.transparent === true)) return;
-      if (mesh.userData.__vbspTransparentBaseOrder === undefined) {
-        mesh.userData.__vbspTransparentBaseOrder = mesh.renderOrder;
-      }
-      this.transparentChunks.push(mesh);
-    });
-  }
-
-  /**
-   * 半透明网格内部的**逐三角形**前后排序（通用口径，不依赖材质/水面分组）。
-   *
-   * three 只能按 object 排 `renderOrder`；同一块里的重叠玻璃面仍会按索引顺序画。
-   * 这里直接按三角形中心到相机的距离重写 index buffer（远→近），组内保持材质组
-   * 边界不变；非索引几何先补一条顺序 index。来源位置用几何原生 position，不重采样。
-   */
-  private sortTransparentFaces(mesh: THREE.Mesh, camera: THREE.Camera): void {
-    const geom = mesh.geometry;
-    const pos = geom.attributes.position as THREE.BufferAttribute | undefined;
-    if (!pos) return;
-    type Tri = { a: number; b: number; c: number; group: number };
-    type Cache = {
-      positionCount: number;
-      indexCount: number;
-      /** `geom.groups.length` 快照（0 = 没有材质组，按单组处理）；变了就重建索引缓存。 */
-      groupCount: number;
-      tris: Tri[];
-      dists: Float64Array;
-      prevIdx: Uint32Array | null;
-      /** 复用 scratch（长度随三角形数固定），逐面排序每帧 0 分配。 */
-      order: Int32Array;
-      orderTmp: Int32Array;
-      bucketCounts: Int32Array;
-      bucketOffsets: Int32Array;
-      bucketCursors: Int32Array;
-      bucketSorted: Int32Array;
-    };
-    let cache = mesh.userData.__vbspFaceSort as Cache | undefined;
-    let idx = geom.index;
-    if (!idx) {
-      const n = pos.count;
-      const arr = n > 65535 ? new Uint32Array(n) : new Uint16Array(n);
-      for (let i = 0; i < n; i++) arr[i] = i;
-      geom.setIndex(new THREE.BufferAttribute(arr, 1));
-      idx = geom.index;
-    }
-    if (!idx) return;
-    if (
-      !cache ||
-      cache.positionCount !== pos.count ||
-      cache.indexCount !== idx.count ||
-      cache.groupCount !== geom.groups.length
-    ) {
-      const groupsEmpty = geom.groups.length === 0;
-      const groupCount = groupsEmpty ? 1 : geom.groups.length;
-      const tris: Tri[] = [];
-      for (let gi = 0; gi < groupCount; gi++) {
-        const gStart = groupsEmpty ? 0 : geom.groups[gi].start;
-        const gCount = groupsEmpty ? idx.count : geom.groups[gi].count;
-        for (let i = gStart; i + 2 < gStart + gCount; i += 3) {
-          tris.push({ a: idx.getX(i), b: idx.getX(i + 1), c: idx.getX(i + 2), group: gi });
-        }
-      }
-      const triCount = tris.length;
-      cache = {
-        positionCount: pos.count,
-        indexCount: idx.count,
-        groupCount: groupsEmpty ? 0 : geom.groups.length,
-        tris,
-        dists: new Float64Array(triCount),
-        prevIdx: null,
-        order: new Int32Array(triCount),
-        orderTmp: new Int32Array(triCount),
-        bucketCounts: new Int32Array(groupCount),
-        bucketOffsets: new Int32Array(groupCount),
-        bucketCursors: new Int32Array(groupCount),
-        bucketSorted: new Int32Array(triCount),
-      };
-      mesh.userData.__vbspFaceSort = cache;
-    }
-    const c = cache;
-    const cam = camera.position;
-    const p = this.transparentSortPoint;
-    for (let i = 0; i < c.tris.length; i++) {
-      const t = c.tris[i];
-      p.set(
-        (pos.getX(t.a) + pos.getX(t.b) + pos.getX(t.c)) / 3,
-        (pos.getY(t.a) + pos.getY(t.b) + pos.getY(t.c)) / 3,
-        (pos.getZ(t.a) + pos.getZ(t.b) + pos.getZ(t.c)) / 3,
-      ).applyMatrix4(mesh.matrixWorld);
-      c.dists[i] = p.distanceToSquared(cam);
-    }
-    const idxArr = idx.array as unknown as number[];
-    const triCount = c.tris.length;
-    // 原地归并（稳定、0 分配）：旧的 `order: number[]` + `order.sort` 每帧都要建一个数组，
-    // V8 的 TimSort 还要再分配一份工作副本；这里只复用两根 Int32Array，语义见 `isFaceBefore`。
-    let src = c.order;
-    let dst = c.orderTmp;
-    for (let i = 0; i < triCount; i++) src[i] = i;
-    for (let width = 1; width < triCount; width <<= 1) {
-      const step = width << 1;
-      for (let lo = 0; lo < triCount; lo += step) {
-        const mid = Math.min(lo + width, triCount);
-        const hi = Math.min(lo + step, triCount);
-        let i = lo;
-        let j = mid;
-        let k = lo;
-        while (i < mid && j < hi) {
-          const a = src[i];
-          const b = src[j];
-          if (isFaceBefore(c.dists, a, b)) {
-            dst[k++] = a;
-            i++;
-          } else {
-            dst[k++] = b;
-            j++;
-          }
-        }
-        while (i < mid) dst[k++] = src[i++];
-        while (j < hi) dst[k++] = src[j++];
-      }
-      const swap = src;
-      src = dst;
-      dst = swap;
-    }
-    const sorted = src;
-    // 组内写回：每组 `start/count` 不变，组顺序仍是材质组顺序。
-    // 计数分桶替代 `groups.map(() => [])` 的嵌套数组：两趟 O(tris) 得到「按组、组内已排序」。
-    const groupsEmpty = c.groupCount === 0;
-    const groupCount = groupsEmpty ? 1 : c.groupCount;
-    const counts = c.bucketCounts;
-    const offsets = c.bucketOffsets;
-    const cursors = c.bucketCursors;
-    const bucketSorted = c.bucketSorted;
-    for (let gi = 0; gi < groupCount; gi++) counts[gi] = 0;
-    for (let i = 0; i < triCount; i++) counts[c.tris[i].group]++;
-    let acc = 0;
-    for (let gi = 0; gi < groupCount; gi++) {
-      offsets[gi] = acc;
-      cursors[gi] = acc;
-      acc += counts[gi];
-    }
-    for (let i = 0; i < triCount; i++) {
-      const oi = sorted[i];
-      bucketSorted[cursors[c.tris[oi].group]++] = oi;
-    }
-    let changed = false;
-    const prevIdx = c.prevIdx;
-    if (!prevIdx || prevIdx.length !== idxArr.length) {
-      changed = true;
-    }
-    let k = 0;
-    for (let gi = 0; gi < groupCount; gi++) {
-      let cursor = groupsEmpty ? 0 : geom.groups[gi].start;
-      const end = offsets[gi] + counts[gi];
-      for (let j = offsets[gi]; j < end; j++) {
-        const t = c.tris[bucketSorted[j]];
-        if (!changed && (prevIdx![k] !== t.a || prevIdx![k + 1] !== t.b || prevIdx![k + 2] !== t.c)) changed = true;
-        idxArr[cursor] = t.a;
-        idxArr[cursor + 1] = t.b;
-        idxArr[cursor + 2] = t.c;
-        cursor += 3;
-        k += 3;
-      }
-    }
-    // 只有排列真的变了才重传（three 的 WebGLAttributes.update 会整块 bufferSubData）。
-    if (changed) {
-      if (!c.prevIdx || c.prevIdx.length !== idxArr.length) c.prevIdx = new Uint32Array(idxArr.length);
-      c.prevIdx.set(idxArr as unknown as ArrayLike<number>);
-      idx.needsUpdate = true;
-    }
-  }
-
-  /**
-   * 每帧把半透明块按**相机到该块最近表面**的距离远→近重排 `renderOrder`（three 升序绘制）。
-   *
-   * 之前按“材质/水位归组”是补丁；通用口径应该来自几何本身：对每块取世界 AABB，
-   * 把相机点 clamp 到盒内得到最近点，用这个距离决定前后。这样不猜材质，也不受
-   * 合并后 `position=(0,0,0)`、three 退化成 id 顺序的影响。地图解析侧的
-   * `faceIndex` 已随来源区间表保留，后续要升级到逐面排序时可直接用。
-   */
-  /** 上次逐面排序时的相机位置；位置没动就不必重算三角形距离（转视角不改距离）。 */
-  private readonly faceSortLastPos = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);
-  private sortTransparentChunks(camera: THREE.Camera): void {
-    const list = this.transparentChunks;
-    if (list.length === 0) return;
-    const box = this.transparentSortBox;
-    const point = this.transparentSortPoint;
-    const cameraPos = camera.position;
-    // 早退：排序结果只取决于「相机位置」和「这帧哪些半透明块可见」。原地转视角（Q/E）相机位置不变，
-    // 可见集不变时重排是纯浪费 —— pose3 实测 sortTransparentFaces 占整帧 CPU 的 7%（≈0.22ms），
-    // 而它算的三角形-相机距离一个都没变。哈希用 id 的加权和，碰撞只会让顺序不变时多做一次排序。
-    let visHash = 0;
-    let visCount = 0;
-    for (const mesh of list) {
-      if (!mesh.visible) continue;
-      visCount++;
-      visHash = (visHash * 31 + mesh.id) | 0;
-    }
-    // 逐面排序（每块逐三角形算距离 + 重排 + index 重传）只在相机位置真的变了才做：
-    // 转视角时相机位置不变 ⇒ 距离不变 ⇒ 排序结果与上一帧逐位相同（实测占整帧 7%）。
-    const moved = cameraPos.distanceToSquared(this.faceSortLastPos) > 0.0625;
-    if (moved) this.faceSortLastPos.copy(cameraPos);
-    if (
-      visCount === this.transparentSortLastVisible &&
-      visHash === this.transparentSortLastHash &&
-      !moved
-    ) {
-      return;
-    }
-    this.transparentSortLastVisible = visCount;
-    this.transparentSortLastHash = visHash;
-    this.transparentSortLastPos.copy(cameraPos);
-    for (const mesh of list) {
-      const geom = mesh.geometry;
-      if (!geom) continue;
-      if (!mesh.visible) continue; // 被剔除的块不排序：省掉它的逐三角形重排
-      if (!geom.boundingBox) geom.computeBoundingBox();
-      const local = geom.boundingBox;
-      if (!local) {
-        mesh.userData.__vbspTransparentDist = 0;
-        continue;
-      }
-      box.copy(local).applyMatrix4(mesh.matrixWorld);
-      box.clampPoint(cameraPos, point);
-      mesh.userData.__vbspTransparentDist = point.distanceToSquared(cameraPos);
-      if (moved && (globalThis as { __vbspNoFaceSort?: unknown }).__vbspNoFaceSort !== true) {
-        this.sortTransparentFaces(mesh, camera);
-      }
-    }
-    list.sort((a, b) => {
-      const da = (a.userData.__vbspTransparentDist as number | undefined) ?? 0;
-      const db = (b.userData.__vbspTransparentDist as number | undefined) ?? 0;
-      return db - da;
-    });
-    for (let i = 0; i < list.length; i++) {
-      const base = (list[i].userData.__vbspTransparentBaseOrder as number | undefined) ?? 0;
-      list[i].renderOrder = base + i;
-    }
-  }
-
   /** 主模型分块合并：三端唯一包装（新根口径；旧的 game/debug 原地挂回已废弃）。 */
   private mergeMain(root: THREE.Scene): THREE.Object3D {
-    // 不透明块细分粒度：512 的一半（半透明/水面块不受影响，见 MergeOptions.opaqueTargetCells 注释）。
-    // 实测开阔路段 344~503 draw ⇒ 主遍 3~4.4ms，不透明桶砍半是能进 320fps 预算的杠杆。
-    // 再往细分（160）反而更差：同机位 route1 t=7000 311fps / t=12000 309fps（256 是 314 / 316），
-    // 因为单块三角形变多、视锥裁剪变粗 ⇒ 顶点着色与填充反而上涨。256 是这里的最优点。
-    // T-P1-5a：开关打开时先给动态实体打标（必须在合并前，合并会把顶点烘焙成世界坐标、
-    // 丢掉模型身份）；下面的 exclude 把它们留在新根，合并结束后再按实体收进独立组。
-    // 开关关闭时 `dynamicOn` 恒 false：exclude 保持旧实现，mark/collect 整段不执行。
-    const dynamicOn = this.pendingDynamicEntityIndices !== null && this.pendingDynamicEntityIndices.size > 0;
-    if (dynamicOn && this.pendingDynamicEntityIndices) {
-      const marked = markDynamicEntities(root, this.pendingDynamicEntityIndices);
-      if (marked > 0) {
-        console.info(
-          `[optimizeScene] 动态实体: ${marked} 个 mesh 脱静态合并（${this.pendingDynamicEntityIndices.size} 个实体）`,
-        );
-      }
-    }
-    // `exclude`：`momentary_rot_button`（符文盘）这类要单独挂 pivot 转的实体不并进块，
-    // 否则顶点被烘焙到世界空间后找不回模型边界（见 `rot-buttons.ts`）；
-    // 动态 brush 实体同理（T-P1-5a，见 `dynamic-entities.ts`）。
-    const optRoot = mergeIntoNewRoot(root, {
+    // T-P2-2c：合并流水线搬到 `merge-main.ts`（顺序即契约，详见该文件头）。
+    const res = mergeMainRoots(root, {
       translucentSplit: this.translucentSplit,
-      // 视距 18000 时主遍是「可见块数 × 单 draw 提交」的瓶颈（实测 5µs/draw、GPU 只忙 24%）。
-      // 不透明桶再压一档（256→128）换 draw 数：`OPT_CELL_MIN = 128 HU` 会把 cell 边长夹住，
-      // 所以 128 与更小的取值等价，这里写 128 表示「已到最粗」。半透明/水面桶不受影响，
-      // 几何与材质不变 ⇒ cand_c 同机位截图与改前逐像素一致（diff 0 px）。
-      opaqueTargetCells: 128,
-      exclude: dynamicOn
-        ? (m) => Boolean((m.userData as { vbspRot?: unknown }).vbspRot) || isDynamicEntityNode(m)
-        : (m) => Boolean((m.userData as { vbspRot?: unknown }).vbspRot),
+      dynamicEntityIndices: this.pendingDynamicEntityIndices,
+      app: this.app,
     });
-    // 逐顶点烘焙的 prop 曲面（`s1_ramp1_b` / `s1_window01_1` 这类）在 merged chunk 上仍带
-    // `_vbsp_vlight`；vhv 的条带采样不连续，Gouraud 会把跳变画成硬边（见 shader 侧
-    // `smoothVertexLighting` 的说明）。放在合并之后：`applyLightmapToMeshes` 在建场景时
-    // 早于这些 prop 挂载，扫不到它们。
-    // 先按网格尺度均匀细分：地板/坡道这类只有 2~3 列顶点的面，靠改原顶点的值去不掉
-    // 「逐行线性插值」的条带（见 vlight-subdivide.ts 的说明）；细分把插值带压到视觉以下，
-    // 再做拓扑平滑收敛中点值。顺序不能反：细分后平滑才有足够的顶点可用。
-    let smoothed = 0;
-    let subdivided = 0;
-    optRoot.traverse((obj) => {
-      const mesh = obj as THREE.Mesh;
-      if (!mesh.isMesh || !mesh.geometry) return;
-      if (!mesh.geometry.getAttribute('_vbsp_vlight')) return;
-      subdivided += subdivideVertexLit(mesh.geometry);
-      smoothed += smoothVertexLighting(mesh.geometry);
-    });
-    if (smoothed > 0) console.info(`[optimizeScene] 逐顶点光照去接缝: 细分 ${subdivided} 层, 改写 ${smoothed} 个空间格子`);
-    // 二级合批：把「同材质、不同 chunk/不同槽」的重复提交按材质并成 1 个 draw。
-    // 依据（2026-11-16 实测）：终点机位可见不透明 154 mesh / 259 材质槽，但只有 55 种材质 ——
-    // 主遍 306 draw / 2.30ms 的大头就是这种「同材质被切碎」。合并后仍保留 `_vbsp_face` 属性与
-    // 来源区间表，PVS 三角级过滤由 `cluster-filter.ts` 的增量路径继续负责（见该文件注释）。
-    // A/B：装载期 `__vbspOpaqueMatMergeOff = true` 关闭；`__vbspOpaqueMatMergeCell = HU` 开空间二级分桶。
-    // 必须在这一步（vlight 平滑之后、装配返回之前）做：可见性索引与深度代理都在之后建立，
-    // 会自动看到合并后的网格。
-    const matStats = mergeOpaqueByMaterial(optRoot);
-    if (matStats) {
-      console.info(
-        `[optimizeScene] 材质二级合批: ${matStats.meshes} mesh / ${matStats.slots} 槽 / ${matStats.materials} 材质` +
-          ` → ${matStats.drawCallsAfter} draw（合并 ${matStats.mergedMeshes} 个，移除 ${matStats.removedMeshes} 个，` +
-          `${matStats.tris} 三角，${matStats.ms.toFixed(1)}ms${matStats.failed > 0 ? `，失败 ${matStats.failed}` : ''}）`,
-      );
-    }
-    const stats = mergeStatsOf(optRoot);
-    if (stats) {
-      console.log(
-        `[optimizeScene] 分块合并: ${stats.meshes} mesh → ${stats.chunks} 块（${this.app}）` +
-          ` | draw call 估算 ${stats.drawCallEst}`,
-      );
-    }
-    // T-P1-5a：合并结束后按实体收组（必须在 `mergeWaterSurfaces` 之前完成——装配侧紧接着
-    // 会按父节点归并水面，提前成组能让每个实体成为独立 parent，避免跨实体水面被并掉）。
-    if (dynamicOn) {
-      this.dynGroups = collectDynamicEntityGroups(optRoot);
-      if (this.dynGroups.size > 0) {
-        console.info(`[optimizeScene] 动态实体: ${this.dynGroups.size} 组独立挂载（运行期可整体变换）`);
-      }
-    }
-    return optRoot;
+    // 开关关闭时 `dynGroups` 为 null：保持会话里原有的表（原实现同样不改写）。
+    if (res.dynGroups) this.dynGroups = res.dynGroups;
+    return res.root;
   }
 
   /** 判某个 mesh 是否落在指定 BSP cluster（包围盒中心 + 6 个 ±r 轴点；全仓唯一实现）。 */
