@@ -181,9 +181,6 @@ const NUMERIC_RENAME_ALLOW = new Set([
   'src/renderer-shared/shader/bumpmap.ts',
   'src/renderer-shared/shader/world-transition.ts',
   'src/ts-shared/phys/map-cvars.ts',
-  // 移动 brush（func_movelinear 位移驱动）落地后 debug/game 顶层命名冲突变化，
-  // esbuild 给局部标识符加数字后缀；语义同一份源码，非实现分叉。
-  'src/ts-shared/entity/classes/brush.ts',
   // G 键关联 UI 重做（interact-ui/entity-chain 等 debug 新模块）改变 debug bundle
   // 顶层命名空间，esbuild 对这两个共享模块内的局部标识符也加了数字后缀；
   // 归一化后 debug/game 文本逐字相同（同一份源码、同一套导出），非实现分叉。
@@ -209,6 +206,17 @@ const KNOWN_CONTENT_DIFF_ALLOW = new Map([
   [
     'src/renderer-shared/scene/brush-entity-visibility.ts',
     'debug 增强插件同时引用触发 esbuild __esm 延迟初始化包装（包装行/缩进差异，语义相同）',
+  ],
+  // T-P2-5 跨端 start_solid 契约：debug 的增强插件动态 import brush-visibility 后，esbuild
+  // 把它的静态依赖链（start-solid.ts → brush.ts）也包进 __esm 延迟初始化包装；game/viewer
+  // 无插件是内联形态。差异只是 wrapper 行、声明提升与 init_start_solid() 调用，语义同一份。
+  [
+    'src/ts-shared/entity/start-solid.ts',
+    'debug 增强插件动态 import 触发 __esm 包装（声明提升/wrapper 差异，语义相同）',
+  ],
+  [
+    'src/ts-shared/entity/classes/brush.ts',
+    'debug 侧 brush.ts 因依赖 start-solid 被卷入 __esm 包装（多 init_start_solid()，语义相同）',
   ],
 ]);
 

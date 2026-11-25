@@ -19,6 +19,7 @@
  * `context.sceneRoot`，不做类型断言。
  */
 import { BrushEntityVisibility } from '../../../../../src/renderer-shared/scene/brush-entity-visibility.js';
+import { entityStartSolidRaw } from '../../../../../src/ts-shared/entity/start-solid.js';
 import type { EnhancePlugin, EnhanceRuntime, EnhanceSceneContext } from '../../../../../src/ts-shared/enhance/plugin.js';
 import type { EntityEvent } from '../../../../../src/ts-shared/entity/types.js';
 
@@ -48,8 +49,12 @@ function parseBrushEventDetail(detail: string): ParsedBrushEvent | null {
 /**
  * 判断单个实体文本块（BSP entities 的 KV 原文）在载图初态是否应为「不可见」。
  *
- * 这里与 `src/ts-shared/entity/classes/brush.ts` 的 spawn 语义保持一致：
- * `StartDisabled != 0`，或 `func_wall_toggle` 的 spawnflags bit0（START_OFF）。
+ * 判定本身走共享单源 `src/ts-shared/entity/start-solid.ts`（逐字镜像 Rust
+ * `render_bundle::eval_entity_start_solid`），这里只保留**类别过滤**：门族的初态由
+ * EntityGameplay 的 `brush:...` 事件链负责，本插件只管 `func_brush` / `func_wall_toggle`。
+ *
+ * 注意 `func_wall_toggle` 与 `func_brush` 的键含义不同：前者只看 spawnflags bit0
+ * （START_OFF，**不吃** StartDisabled），后者只看 StartDisabled（不看 spawnflags）。
  */
 function blockShouldStartHidden(block: string): boolean {
   const props = new Map<string, string>();
@@ -59,13 +64,11 @@ function blockShouldStartHidden(block: string): boolean {
   }
   const classname = (props.get('classname') ?? '').toLowerCase();
   if (classname !== 'func_brush' && classname !== 'func_wall_toggle') return false;
-  const startDisabled = Number.parseInt(props.get('startdisabled') ?? '0', 10);
-  if (Number.isFinite(startDisabled) && startDisabled !== 0) return true;
-  if (classname === 'func_wall_toggle') {
-    const spawnFlags = Number.parseInt(props.get('spawnflags') ?? '0', 10);
-    if (Number.isFinite(spawnFlags) && (spawnFlags & 1) !== 0) return true;
-  }
-  return false;
+  return !entityStartSolidRaw(classname, {
+    spawnflags: props.get('spawnflags'),
+    startdisabled: props.get('startdisabled'),
+    spawnpos: props.get('spawnpos'),
+  });
 }
 
 /**
@@ -162,7 +165,8 @@ export function createBrushVisibilityPlugin(runtime: EnhanceRuntime): EnhancePlu
       runtime.log(
         `brush 可见性索引：${after.entities} 个实体 / ${after.slots} 区间 / ${after.triangles} 三角` +
           `（几何 ${after.tablesAccepted} 张：索引写 0 ${after.indexSlots} 区间、顶点塌缩 ${after.vertexSlots} 区间；` +
-          `跳过 ${after.skippedGeometries} 张；初态隐藏 ${initialHiddenCount} 个）`,
+          `跳过 ${after.skippedGeometries} 张；初态隐藏 ${initialHiddenCount} 个` +
+          `${after.groupEntities > 0 ? `；动态组 ${after.groupEntities} 个` : ''}）`,
       );
     },
 
@@ -195,9 +199,11 @@ export function createBrushVisibilityPlugin(runtime: EnhanceRuntime): EnhancePlu
         return;
       }
       if (result.status === 'unchanged') return;
+      const amount = result.slots > 0
+        ? `${result.triangles} 三角 / ${result.slots} 区间`
+        : '整组显隐（不写几何缓冲）';
       runtime.log(
-        `brush 实体 ${parsed.entityIndex} ${shouldHide ? '隐藏' : '恢复'}：` +
-          `${result.triangles} 三角 / ${result.slots} 区间`,
+        `brush 实体 ${parsed.entityIndex} ${shouldHide ? '隐藏' : '恢复'}：${amount}`,
       );
     },
 
@@ -206,9 +212,12 @@ export function createBrushVisibilityPlugin(runtime: EnhanceRuntime): EnhancePlu
       if (!sceneLoaded) return '尚未载图（未建立实体→区间索引）';
       const last = lastEvent ?? '—';
       const limit = stats.limitations.length > 0 ? `；限制 ${stats.limitations.length} 项` : '';
+      const groupPart = stats.groupEntities > 0
+        ? `；动态组 ${stats.groupEntities}（隐藏 ${stats.groupHidden}）`
+        : '';
       return (
         `已隐藏 ${stats.hiddenEntities}/${stats.entities} 实体，退化 ${stats.hiddenTriangles} 三角/${stats.hiddenSlots} 区间` +
-        `（索引写 0 ${stats.hiddenIndexSlots} 区间；顶点塌缩 ${stats.hiddenVertexSlots} 区间）；` +
+        `（索引写 0 ${stats.hiddenIndexSlots} 区间；顶点塌缩 ${stats.hiddenVertexSlots} 区间）${groupPart}；` +
         `初态隐藏 ${initialHiddenCount}；最后事件 ${last}；未定位 ${stats.unresolvedEvents}${limit}`
       );
     },

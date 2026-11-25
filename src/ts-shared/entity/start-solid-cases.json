@@ -1,0 +1,227 @@
+[
+  {
+    "name": "func_wall_toggle spawnflags=0",
+    "classname": "func_wall_toggle",
+    "spawnflags": "0",
+    "startdisabled": null,
+    "spawnpos": null,
+    "startSolid": true,
+    "startHidden": false
+  },
+  {
+    "name": "func_wall_toggle spawnflags=1 (START_OFF)",
+    "classname": "func_wall_toggle",
+    "spawnflags": "1",
+    "startdisabled": null,
+    "spawnpos": null,
+    "startSolid": false,
+    "startHidden": true
+  },
+  {
+    "name": "func_wall_toggle spawnflags=3 + startdisabled=1（bit0 优先）",
+    "classname": "func_wall_toggle",
+    "spawnflags": "3",
+    "startdisabled": "1",
+    "spawnpos": null,
+    "startSolid": false,
+    "startHidden": true
+  },
+  {
+    "name": "func_wall_toggle spawnflags=0 + startdisabled=1（Rust 不看 startdisabled）",
+    "classname": "func_wall_toggle",
+    "spawnflags": "0",
+    "startdisabled": "1",
+    "spawnpos": null,
+    "startSolid": true,
+    "startHidden": false
+  },
+  {
+    "name": "func_wall_toggle spawnflags=+1（合法 i64）",
+    "classname": "func_wall_toggle",
+    "spawnflags": "+1",
+    "startdisabled": null,
+    "spawnpos": null,
+    "startSolid": false,
+    "startHidden": true
+  },
+  {
+    "name": "func_wall_toggle spawnflags=1abc（非法串当 0）",
+    "classname": "func_wall_toggle",
+    "spawnflags": "1abc",
+    "startdisabled": null,
+    "spawnpos": null,
+    "startSolid": true,
+    "startHidden": false
+  },
+  {
+    "name": "func_brush startdisabled=0",
+    "classname": "func_brush",
+    "spawnflags": "2",
+    "startdisabled": "0",
+    "spawnpos": null,
+    "startSolid": true,
+    "startHidden": false
+  },
+  {
+    "name": "func_brush startdisabled=1",
+    "classname": "func_brush",
+    "spawnflags": "2",
+    "startdisabled": "1",
+    "spawnpos": null,
+    "startSolid": false,
+    "startHidden": true
+  },
+  {
+    "name": "func_brush 无 startdisabled",
+    "classname": "func_brush",
+    "spawnflags": "2",
+    "startdisabled": null,
+    "spawnpos": null,
+    "startSolid": true,
+    "startHidden": false
+  },
+  {
+    "name": "func_brush startdisabled=abc（非法串当 0）",
+    "classname": "func_brush",
+    "spawnflags": "2",
+    "startdisabled": "abc",
+    "spawnpos": null,
+    "startSolid": true,
+    "startHidden": false
+  },
+  {
+    "name": "func_brush startdisabled=1abc（parseFloat 会误判成 1）",
+    "classname": "func_brush",
+    "spawnflags": "2",
+    "startdisabled": "1abc",
+    "spawnpos": null,
+    "startSolid": true,
+    "startHidden": false
+  },
+  {
+    "name": "func_brush startdisabled=\" 5 \"（trim 后合法）",
+    "classname": "func_brush",
+    "spawnflags": "2",
+    "startdisabled": " 5 ",
+    "spawnpos": null,
+    "startSolid": false,
+    "startHidden": true
+  },
+  {
+    "name": "func_door spawnpos=0 spawnflags=0",
+    "classname": "func_door",
+    "spawnflags": "0",
+    "startdisabled": null,
+    "spawnpos": "0",
+    "startSolid": true,
+    "startHidden": false
+  },
+  {
+    "name": "func_door spawnpos=1",
+    "classname": "func_door",
+    "spawnflags": "0",
+    "startdisabled": null,
+    "spawnpos": "1",
+    "startSolid": false,
+    "startHidden": true
+  },
+  {
+    "name": "func_door spawnflags=512 (START_OPEN_OBSOLETE)",
+    "classname": "func_door",
+    "spawnflags": "512",
+    "startdisabled": null,
+    "spawnpos": "0",
+    "startSolid": false,
+    "startHidden": true
+  },
+  {
+    "name": "func_door spawnflags=4096",
+    "classname": "func_door",
+    "spawnflags": "4096",
+    "startdisabled": null,
+    "spawnpos": "0",
+    "startSolid": true,
+    "startHidden": false
+  },
+  {
+    "name": "func_door spawnpos=1 + spawnflags=512",
+    "classname": "func_door",
+    "spawnflags": "512",
+    "startdisabled": null,
+    "spawnpos": "1",
+    "startSolid": false,
+    "startHidden": true
+  },
+  {
+    "name": "func_door_rotating spawnpos=0",
+    "classname": "func_door_rotating",
+    "spawnflags": "0",
+    "startdisabled": null,
+    "spawnpos": "0",
+    "startSolid": true,
+    "startHidden": false
+  },
+  {
+    "name": "func_door_rotating spawnpos=1",
+    "classname": "func_door_rotating",
+    "spawnflags": "0",
+    "startdisabled": null,
+    "spawnpos": "1",
+    "startSolid": false,
+    "startHidden": true
+  },
+  {
+    "name": "func_water_analog spawnpos=0",
+    "classname": "func_water_analog",
+    "spawnflags": "0",
+    "startdisabled": null,
+    "spawnpos": "0",
+    "startSolid": true,
+    "startHidden": false
+  },
+  {
+    "name": "func_water_analog spawnpos=1",
+    "classname": "func_water_analog",
+    "spawnflags": "0",
+    "startdisabled": null,
+    "spawnpos": "1",
+    "startSolid": false,
+    "startHidden": true
+  },
+  {
+    "name": "func_water_analog spawnflags=512",
+    "classname": "func_water_analog",
+    "spawnflags": "512",
+    "startdisabled": null,
+    "spawnpos": "0",
+    "startSolid": false,
+    "startHidden": true
+  },
+  {
+    "name": "func_movelinear（默认实心）",
+    "classname": "func_movelinear",
+    "spawnflags": null,
+    "startdisabled": null,
+    "spawnpos": null,
+    "startSolid": true,
+    "startHidden": false
+  },
+  {
+    "name": "worldspawn（默认实心）",
+    "classname": "worldspawn",
+    "spawnflags": null,
+    "startdisabled": null,
+    "spawnpos": null,
+    "startSolid": true,
+    "startHidden": false
+  },
+  {
+    "name": "未知类 func_weird_thing（默认实心）",
+    "classname": "func_weird_thing",
+    "spawnflags": null,
+    "startdisabled": null,
+    "spawnpos": null,
+    "startSolid": true,
+    "startHidden": false
+  }
+]

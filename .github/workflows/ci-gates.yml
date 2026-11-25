@@ -17,6 +17,8 @@
 #   ts-typecheck    — 三端 `npm run typecheck`（tsc；此前 TS 类型错误只在合并后的 deploy-pages 才暴露）
 #                     + `test-ts-shared.mjs`（node:test：sim-clock / shared-state / config-sync 纯逻辑单测）
 #                     + `check-entity-io.mjs`（实体 I/O 合成自测 20 例；无 `test/maps` 时地图组 SKIP，2026-11-25）
+#                     + `check-entity-start-solid.mjs`（Rust ↔ TS 的 brush 出生实心规则共读同一份
+#                     `start-solid-cases.json`；Rust 侧同名夹具测试在 wasm-core-tests，2026-11-25）
 #   glb-parity      — 三端 `npm run build:wasm` + `build:ts`（产物）+ 三端 `check:api`（wasm 导出 ↔ TS 导入契约）
 #                     + `check-shared-artifacts.mjs`（产物内共享模块指纹，缺产物 SKIP）
 #                     + `check-lock-consistency.mjs`（Cargo.lock 归属/版本 + wasm 导出面）
@@ -197,6 +199,11 @@ jobs:
       # 与 check-glb-parity.mjs 的缺夹具约定一致。
       - name: Entity I/O selftest (synthetic; map groups SKIP without fixtures)
         run: node src/scripts/check-entity-io.mjs
+
+      # 跨端契约：同一份 start-solid-cases.json 由 Rust #[cfg(test)]（include_str!）与本脚本读取，
+      # 任一侧规则漂移都会红；不依赖 wasm / 地图夹具。
+      - name: Entity start_solid contract (shared Rust/TS fixture)
+        run: node src/scripts/check-entity-start-solid.mjs
 
   # ── debug：wasm 构建冒烟（T-653 削减验证层后，本 job 只剩 build:wasm）────────
   debug-gates:

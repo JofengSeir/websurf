@@ -702,50 +702,60 @@ pub fn brush_entity_indices(bsp: &vbsp::Bsp) -> Vec<i32> {
 
 /// 每个实体**出生时**是否实心（`true` = 实心；非 brush 类恒 `true`，仅 brush 类有意义）。
 ///
-/// 与 TS 实体层 `src/ts-shared/entity/classes/brush.ts` 的 spawn 语义对齐：
-/// - `func_wall_toggle`：spawnflags bit0 = `START_OFF` ⇒ 出生即「关」，应不可穿过；
-/// - `func_brush`：`StartDisabled != 0` ⇒ 出生即关；
-/// - `func_door*`：`spawnpos != 0` 或 spawnflags bit9（512 = START_OPEN_OBSOLETE）⇒ 初始开着；
-/// - 其余 brush 类（`func_movelinear` / `func_rotating` …）出生即实心。
+/// 规则唯一真源；TS 侧 `src/ts-shared/entity/start-solid.ts` 是它的逐字镜像，两侧共用
+/// `src/ts-shared/entity/start-solid-cases.json` 契约夹具（本文件 `#[cfg(test)]` 与
+/// `src/scripts/check-entity-start-solid.mjs` 都读同一份）。改规则必须同时改两侧与夹具。
 ///
 /// 消费方是 brush JSON 导出：初始关的实体 brush 带上 `start_solid=false`，物理世界建好后
 /// 这些碰撞体不参与查询——修复「实体层判关、物理层仍当实心墙」（ze_cursed 的 `lvl3_wt03`
 /// 横在购买区出口，玩家出不去）。
 pub fn entity_start_solid(bsp: &vbsp::Bsp) -> Vec<bool> {
-    let mut out = Vec::new();
-    for ent in bsp.entities.iter() {
-        let Ok(classname) = ent.prop("classname") else {
-            out.push(true);
-            continue;
-        };
-        // Source 的 spawnflags 是十进制整数串；StartDisabled 可能是 0/1 或空串。
-        let parse_int = |value: &str| value.trim().parse::<i64>().ok();
-        let solid = match classname {
-            "func_wall_toggle" => {
-                let flags = ent.prop("spawnflags").ok().and_then(parse_int).unwrap_or(0);
-                flags & 1 == 0
-            }
-            "func_brush" => {
-                let disabled = ent
-                    .prop("startdisabled")
-                    .ok()
-                    .and_then(parse_int)
-                    .unwrap_or(0);
-                disabled == 0
-            }
-            // 门：`spawnpos != 0` 表示初始开到最大（ze_cursed 46 扇门中 8 扇如此，且它们只被
-            // `Close` 连接驱动——设计上初始就是开的）；START_OPEN_OBSOLETE(512) 是同一语义
-            // 的旧写法。与 TS `FuncDoorClass.spawn` / EntityGameplay 初态可见性规则一一对应。
-            "func_door" | "func_door_rotating" | "func_water_analog" => {
-                let spawnpos = ent.prop("spawnpos").ok().and_then(parse_int).unwrap_or(0);
-                let flags = ent.prop("spawnflags").ok().and_then(parse_int).unwrap_or(0);
-                spawnpos == 0 && flags & 512 == 0
-            }
-            _ => true,
-        };
-        out.push(solid);
+    bsp.entities
+        .iter()
+        .map(|ent| {
+            let Ok(classname) = ent.prop("classname") else {
+                return true;
+            };
+            eval_entity_start_solid(
+                classname,
+                ent.prop("startdisabled").ok(),
+                ent.prop("spawnflags").ok(),
+                ent.prop("spawnpos").ok(),
+            )
+        })
+        .collect()
+}
+
+/// [`entity_start_solid`] 的纯判定核心：只看 classname 与三条 KV 原文，不依赖完整 BSP。
+///
+/// 口径与 Source 一致：`spawnflags` / `StartDisabled` / `spawnpos` 都是 KV 文本，
+/// `trim()` 后必须**整体**是 i64，否则当 0（`"1abc"` 是 0，不是 1——`parseFloat`/`atoi`
+/// 会截断成 1，这正是 TS 侧旧实现与 Rust 漂移的来源）。
+///
+/// - `func_wall_toggle`：`spawnflags & 1 == 0`（bit0 = START_OFF；**不看** StartDisabled）；
+/// - `func_brush`：`StartDisabled == 0`（不看 spawnflags）；
+/// - `func_door` | `func_door_rotating` | `func_water_analog`：
+///   `spawnpos == 0 && spawnflags & 512 == 0`（512 = START_OPEN_OBSOLETE）；
+/// - 其余（含未知类、`func_movelinear` / `func_rotating`）：恒实心。
+pub fn eval_entity_start_solid(
+    classname: &str,
+    startdisabled: Option<&str>,
+    spawnflags: Option<&str>,
+    spawnpos: Option<&str>,
+) -> bool {
+    let parse_int = |value: Option<&str>| -> i64 {
+        value
+            .and_then(|raw| raw.trim().parse::<i64>().ok())
+            .unwrap_or(0)
+    };
+    match classname {
+        "func_wall_toggle" => parse_int(spawnflags) & 1 == 0,
+        "func_brush" => parse_int(startdisabled) == 0,
+        "func_door" | "func_door_rotating" | "func_water_analog" => {
+            parse_int(spawnpos) == 0 && parse_int(spawnflags) & 512 == 0
+        }
+        _ => true,
     }
-    out
 }
 
 /// 确定每个 brush 应平移的模型 origin（Z-up 世界坐标）。
@@ -1137,7 +1147,43 @@ pub fn export_entity_io_data(bsp: &vbsp::Bsp) -> EntityIoData {
 
 #[cfg(test)]
 mod tests {
-    use super::entity_is_non_solid;
+    use super::{entity_is_non_solid, eval_entity_start_solid};
+
+    /// 跨端契约夹具（Rust `eval_entity_start_solid` ↔ TS `entityStartSolidRaw`）：
+    /// 同一份 JSON 也被 `src/scripts/check-entity-start-solid.mjs` 读取，两侧必须逐条一致；
+    /// `startHidden` 恒为 `!startSolid`（EntityGameplay 载图初态就按这个口径藏几何）。
+    #[test]
+    fn shared_start_solid_cases_match_ts_contract() {
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(include_str!("../ts-shared/entity/start-solid-cases.json"))
+                .expect("start-solid-cases.json 必须是合法 JSON");
+        assert!(
+            cases.len() >= 16,
+            "契约夹具至少 16 条（覆盖各实体类与非法串），实际 {} 条",
+            cases.len()
+        );
+        for case in &cases {
+            let name = case["name"].as_str().unwrap_or("<unnamed>");
+            let classname = case["classname"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{name}: classname 必须是字符串"));
+            let get = |key: &str| case[key].as_str();
+            let solid = eval_entity_start_solid(
+                classname,
+                get("startdisabled"),
+                get("spawnflags"),
+                get("spawnpos"),
+            );
+            let expect_solid = case["startSolid"]
+                .as_bool()
+                .unwrap_or_else(|| panic!("{name}: startSolid 必须是布尔"));
+            assert_eq!(solid, expect_solid, "startSolid 不符：{name}");
+            let expect_hidden = case["startHidden"]
+                .as_bool()
+                .unwrap_or_else(|| panic!("{name}: startHidden 必须是布尔"));
+            assert_eq!(!solid, expect_hidden, "startHidden 应为 !startSolid：{name}");
+        }
+    }
 
     #[test]
     fn func_buyzone_is_non_solid() {

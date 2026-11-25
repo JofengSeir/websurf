@@ -23,6 +23,7 @@
  * 需先做「同图同回放」A/B 基线再切。
  */
 import { attachEntitySystem } from '../entity/attach.js';
+import { entityStartsNonSolid } from '../entity/start-solid.js';
 import { DEFAULT_HULL_MAXS, DEFAULT_HULL_MINS, playerStateFromRaw, type RawPlayerState } from '../entity/host.js';
 import type { EntitySystem, EntitySystemStats } from '../entity/entity-system.js';
 import type { EntityEvent } from '../entity/types.js';
@@ -163,45 +164,6 @@ function parseBrushOffsetDetail(detail: string | undefined): { entity: number; o
   const offset: [number, number, number] = [Number(m[2]), Number(m[3]), Number(m[4])];
   if (!offset.every((v) => Number.isFinite(v))) return null;
   return { entity, offset };
-}
-
-/**
- * 出生即非实心的 brush 实体（与 Rust `render_bundle::entity_start_solid` 同一套规则）。
- *
- * 用处：载图时把「实体层判定为关」的 brush 几何也同步隐藏（Rust 侧已按同一规则把
- * `start_solid=false` 的 brush 排除出碰撞查询，但渲染层没有事件就不会藏几何）。
- *
- * - `func_door*`：`spawnpos != 0` 或 spawnflags bit9（512 = START_OPEN_OBSOLETE）⇒ 初始开着；
- * - `func_wall_toggle`：spawnflags bit0（1 = START_OFF）；
- * - `func_brush`：`StartDisabled != 0`。
- *
- * 注意 `spawnpos` 是这张 ze 图（BSP 里 46 扇门中 8 扇）带的地图键：带它的门只被 `Close`
- * 连接驱动（#568 counter OnHitMax → lvl1_door_03 Close），即设计上初始就是开着的；两侧
- * 规则必须一致，否则会出现「物理放行、渲染显示关着的门」或反过来。
- */
-function entityStartsNonSolid(entity: {
-  classname: string;
-  spawnflags: number;
-  getNumber(key: string, fallback: number): number;
-  getRaw(key: string): string | undefined;
-}): boolean {
-  // `spawnpos` / `startdisabled` 是 raw 键（字符串值），`getNumber` 只认 number 字段；
-  // 不按原文解析会把 `spawnpos=1` 的初始开门误判成 0（实测门「看着关着、能穿过去」）。
-  const rawNumber = (key: string, fallback: number): number => {
-    const raw = entity.getRaw(key);
-    if (raw !== undefined) {
-      const parsed = Number.parseFloat(raw);
-      if (Number.isFinite(parsed)) return parsed;
-    }
-    return entity.getNumber(key, fallback);
-  };
-  const cls = entity.classname;
-  if (cls.startsWith('func_door')) {
-    return rawNumber('spawnpos', 0) !== 0 || (entity.spawnflags & 512) !== 0;
-  }
-  if (cls === 'func_wall_toggle') return (entity.spawnflags & 1) !== 0;
-  if (cls === 'func_brush') return rawNumber('startdisabled', 0) !== 0;
-  return false;
 }
 
 /**

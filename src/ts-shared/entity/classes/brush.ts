@@ -12,6 +12,7 @@
  * 由地图的 I/O 连接图决定谁在什么时候给它 `Open`。
  */
 import type { Entity, EntityClass } from '../base-entity.js';
+import { entityStartSolidRaw } from '../start-solid.js';
 import { FIELD_FLOAT, FIELD_STRING, FIELD_VOID } from '../variant.js';
 import { fire, input } from './common.js';
 import { registerClass } from './registry.js';
@@ -261,13 +262,15 @@ export const FuncBrushClass: EntityClass = {
     { name: 'SetExcluded', type: FIELD_STRING, key: 'excludednpc' },
   ],
   spawn: (e) => {
-    // SDK 语义：`StartDisabled`（键值）与 spawnflags 的 `START_OFF` 都表示出生即关闭。
-    // START_OFF 之前只有声明、没有消费点（ze_cursed 的 lvl3_wt03 就是这种实体），
-    // 结果本应「要开了才出现」的墙载图时就可见。派生类 spawn 先于基类执行，
-    // 所以两件事必须写在同一处，避免子类先设 false、基类又按 StartDisabled 设回 true。
-    const startOffBit = e.spawnFlagOf('START_OFF');
-    const startOff = startOffBit !== 0 && e.hasSpawnFlags(startOffBit);
-    brushSetEnabled(e, e.getNumber('startdisabled', 0) === 0 && !startOff, false);
+    // 出生即关的规则只有一份：`src/ts-shared/entity/start-solid.ts`（逐字镜像 Rust
+    // `render_bundle::eval_entity_start_solid`）。`func_brush` 只看 StartDisabled，
+    // `func_wall_toggle` 只看 spawnflags bit0（START_OFF），互不吃对方的键。派生类
+    // （func_wall_toggle）的 spawn 也走这里，避免基类再按另一套键设回 true。
+    brushSetEnabled(e, entityStartSolidRaw(e.classname, {
+      spawnflags: e.getRaw('spawnflags'),
+      startdisabled: e.getRaw('startdisabled'),
+      spawnpos: e.getRaw('spawnpos'),
+    }), false);
   },
 };
 
