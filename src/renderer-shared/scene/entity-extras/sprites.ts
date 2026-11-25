@@ -69,6 +69,9 @@ export function collectSpriteEntities(blocks: EntityBlockRecords): SpriteEntity[
     const scale = Number.isFinite(scaleRaw) && scaleRaw > 0 ? scaleRaw : 1;
     const color = new THREE.Color();
     parseEntityColor(block['rendercolor'], block['renderamt'], color);
+    const hdrRaw = Number.parseFloat(block['hdrcolorscale'] ?? block['HDRColorScale'] ?? '');
+    const hdrScale = Number.isFinite(hdrRaw) && hdrRaw > 0 ? Math.min(2.0, Math.max(0.2, hdrRaw)) : 1;
+    if (hdrScale !== 1) color.multiplyScalar(hdrScale);
     // Source Z-up → 引擎 Y-up：world = (src.y, src.z, src.x)。
     out.push({
       entityIndex,

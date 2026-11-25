@@ -34,8 +34,8 @@ export interface PunctualSpot {
 }
 
 const MAX_BEAM_WIDTH = 102.3;
-/** 双层体积光锥基准亮度：核心过白丝、外层柔和锥雾，适配泛光管线不刺眼。 */
-const BEAM_PEAK = 0.42;
+/** 柔和体积散射基准亮度：无尖锐高亮芯，保持半透明雾感、不刺眼。 */
+const BEAM_PEAK = 0.24;
 /** 起源 `FBEAM_SHADEOUT` 的近似：贴脸 30 HU 内淡出。 */
 const SHADEOUT_DISTANCE = 30;
 
@@ -134,7 +134,7 @@ void main() {
 `;
 
 /**
- * 体积射灯光锥片元：高热中心芯（gauss） + 柔和体积外散射（pow） + 灯口渐入/尾端渐出/掠射消隐。
+ * 体积射灯光锥片元：柔和大气散射 + 仅在灯口极短距离保留微弱白芯 + 掠角/贴脸淡出。
  */
 const BEAM_FRAG = `
 uniform vec3 uColor;
@@ -144,21 +144,21 @@ varying vec3 vBeamWorld;
 varying float vViewFade;
 void main() {
 	float across = abs(vBeamUv.x * 2.0 - 1.0);
-	float core = exp(-across * across * 6.5);
-	float cone = pow(max(0.0, 1.0 - across), 2.3);
-	float radial = core * 0.55 + cone * 0.45;
-	float along = smoothstep(0.0, 0.05, vBeamUv.y) * pow(max(0.0, 1.0 - vBeamUv.y), 1.65);
+	float edgeMask = max(0.0, 1.0 - across * across);
+	float scatter = exp(-across * across * 2.4) * edgeMask * edgeMask;
+	float mouthHot = exp(-vBeamUv.y * 10.0) * exp(-across * across * 5.0);
+	float along = smoothstep(0.0, 0.025, vBeamUv.y) * pow(max(0.0, 1.0 - vBeamUv.y), 2.15);
 	float camFade = smoothstep(0.0, ${SHADEOUT_DISTANCE.toFixed(1)}, distance(cameraPosition, vBeamWorld));
-	float a = uPeak * radial * along * camFade * vViewFade;
+	float a = uPeak * (scatter * 0.85 + mouthHot * 0.35) * along * camFade * vViewFade;
 	if (a <= 0.001) discard;
-	vec3 tint = mix(uColor, vec3(1.0), core * 0.42);
+	vec3 tint = mix(uColor, vec3(1.0), mouthHot * 0.45);
 	gl_FragColor = vec4(tint * a, a);
 }
 `;
 
 let glowTexture: THREE.Texture | null = null;
 
-/** 径向渐变贴图（高热中心 + 柔和外光晕），只建一次；多盏灯共享。 */
+/** 逐像素双高斯径向渐变贴图（柔和扩散、无硬盘台阶），只建一次；多盏灯共享。 */
 function getGlowTexture(): THREE.Texture {
 	if (glowTexture) return glowTexture;
 	const size = 128;
@@ -167,14 +167,25 @@ function getGlowTexture(): THREE.Texture {
 	canvas.height = size;
 	const ctx = canvas.getContext('2d');
 	if (ctx) {
-		const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-		g.addColorStop(0, 'rgba(255,255,255,1)');
-		g.addColorStop(0.12, 'rgba(255,255,255,0.85)');
-		g.addColorStop(0.35, 'rgba(255,255,255,0.28)');
-		g.addColorStop(0.68, 'rgba(255,255,255,0.06)');
-		g.addColorStop(1, 'rgba(255,255,255,0)');
-		ctx.fillStyle = g;
-		ctx.fillRect(0, 0, size, size);
+		const img = ctx.createImageData(size, size);
+		const half = (size - 1) * 0.5;
+		for (let y = 0; y < size; y++) {
+			const dy = (y - half) / half;
+			for (let x = 0; x < size; x++) {
+				const dx = (x - half) / half;
+				const r2 = dx * dx + dy * dy;
+				const edge = Math.max(0, 1 - r2);
+				const falloff =
+					r2 >= 1 ? 0 : (0.55 * Math.exp(-r2 * 7.0) + 0.45 * Math.exp(-r2 * 2.1)) * edge * edge;
+				const a = Math.round(Math.min(1, falloff) * 255);
+				const idx = (y * size + x) * 4;
+				img.data[idx] = 255;
+				img.data[idx + 1] = 255;
+				img.data[idx + 2] = 255;
+				img.data[idx + 3] = a;
+			}
+		}
+		ctx.putImageData(img, 0, 0);
 	}
 	const tex = new THREE.CanvasTexture(canvas);
 	tex.colorSpace = THREE.SRGBColorSpace;
@@ -249,6 +260,19 @@ export class SpotBeamRig {
 			if (key && !byTargetName.has(key)) byTargetName.set(key, i);
 		}
 		for (const entry of this.entries) {
+			if (entry.spot.entityIndex !== null) {
+				const rec = entityBlocks[entry.spot.entityIndex];
+				if (rec) {
+					const amtRaw = Number.parseFloat(rec['renderamt'] ?? '');
+					const amt = Number.isFinite(amtRaw) ? Math.min(255, Math.max(0, amtRaw)) / 255 : 1;
+					const hdrRaw = Number.parseFloat(rec['hdrcolorscale'] ?? rec['HDRColorScale'] ?? '');
+					const hdrScale = Number.isFinite(hdrRaw) && hdrRaw > 0 ? Math.min(2.0, Math.max(0.25, hdrRaw)) : 1;
+					const gain = amt * hdrScale;
+					const beamMat = entry.beam.material as THREE.ShaderMaterial;
+					if (beamMat.uniforms?.uPeak) beamMat.uniforms.uPeak.value = BEAM_PEAK * gain;
+					if (entry.sprite) entry.sprite.material.opacity = 0.45 * gain;
+				}
+			}
 			entry.ancestors.length = 0;
 			let curParent = entry.spot.parentName?.trim().toLowerCase() ?? '';
 			const visited = new Set<number>();
@@ -381,26 +405,30 @@ export function buildSpotBeams(spots: PunctualSpot[], root: THREE.Object3D | nul
 
 	const glow = getGlowTexture();
 	const up = new THREE.Vector3(0, 1, 0);
+	const activeSpots: PunctualSpot[] = [];
 	const dlights: SpotDLightEntry[] = [];
 	const rig = new SpotBeamRig();
 
 	for (const s of spots) {
 		const isPointSpot = s.beamWidth !== null;
-		const startsOff = isPointSpot && s.spawnFlags !== null && (s.spawnFlags & 1) === 0;
-		const noDLight = isPointSpot && s.spawnFlags !== null && (s.spawnFlags & 2) !== 0;
+		// 静态烘焙 light_spot 只用于离线 lightmap，运行期不画体积光柱也不占 SpotLightSelector 槽位。
+		if (!isPointSpot) continue;
+		activeSpots.push(s);
+		const startsOff = s.spawnFlags !== null && (s.spawnFlags & 1) === 0;
+		const noDLight = s.spawnFlags !== null && (s.spawnFlags & 2) !== 0;
 		if (startsOff) s.intensity = 0;
 		const axis = new THREE.Vector3(s.direction[0], s.direction[1], s.direction[2]).normalize();
 		const origin = new THREE.Vector3(s.position[0], s.position[1], s.position[2]);
 		const maxLength = Math.max(48, s.beamLength ?? Math.min(s.range, 900));
 		const hit = traceBeamHit(origin, axis, maxLength, root);
 		const length = hit.length;
-		const width = Math.min(MAX_BEAM_WIDTH, isPointSpot ? (s.beamWidth as number) : 2 * Math.tan(s.outerConeAngle) * length);
+		const width = Math.min(MAX_BEAM_WIDTH, s.beamWidth as number);
 		// 灯头紧凑聚拢（halfStart 窄口）→ 随照射距离自然散开成体积光锥，消除旧版大矩形灯头。
-		const halfStart = isPointSpot ? Math.max(2.2, Math.min(7.5, width * 0.12)) : Math.max(2.0, width * 0.08);
+		const halfStart = Math.max(2.2, Math.min(7.5, width * 0.12));
 		const halfEnd = Math.max(halfStart + 4, (width * 0.5) * (0.28 + 0.72 * (length / maxLength)));
 		const color = new THREE.Color(s.color[0], s.color[1], s.color[2]);
 		let dlight: SpotDLightEntry | null = null;
-		if (isPointSpot && !noDLight && !startsOff) {
+		if (!noDLight && !startsOff) {
 			const k = Math.min(1.5, Math.max(0.25, s.intensity / 1000));
 			dlight = {
 				position: [hit.point.x, hit.point.y + 5, hit.point.z],
@@ -448,25 +476,22 @@ export function buildSpotBeams(spots: PunctualSpot[], root: THREE.Object3D | nul
 		group.add(beam);
 
 		// 灯头辉光：起源里 `point_spotlight` 带 `light_glow03` halo。
-		let sprite: THREE.Sprite | null = null;
-		if (isPointSpot) {
-			const spriteMat = new THREE.SpriteMaterial({
-				map: glow,
-				color,
-				transparent: true,
-				opacity: 0.45,
-				depthWrite: false,
-				depthTest: true,
-				blending: THREE.AdditiveBlending,
-				fog: false,
-			});
-			sprite = new THREE.Sprite(spriteMat);
-			sprite.position.copy(origin);
-			sprite.scale.setScalar(Math.max(18, Math.min(48, (s.beamWidth ?? 75) * 0.42)));
-			sprite.renderOrder = 11;
-			sprite.visible = !startsOff;
-			group.add(sprite);
-		}
+		const spriteMat = new THREE.SpriteMaterial({
+			map: glow,
+			color,
+			transparent: true,
+			opacity: 0.45,
+			depthWrite: false,
+			depthTest: true,
+			blending: THREE.AdditiveBlending,
+			fog: false,
+		});
+		const sprite = new THREE.Sprite(spriteMat);
+		sprite.position.copy(origin);
+		sprite.scale.setScalar(Math.max(18, Math.min(48, (s.beamWidth ?? 75) * 0.42)));
+		sprite.renderOrder = 11;
+		sprite.visible = !startsOff;
+		group.add(sprite);
 
 		rig.addEntry({
 			spot: s,
@@ -480,7 +505,8 @@ export function buildSpotBeams(spots: PunctualSpot[], root: THREE.Object3D | nul
 		});
 	}
 
-	group.userData.spots = spots;
+	if (activeSpots.length === 0) return null;
+	group.userData.spots = activeSpots;
 	group.userData.dlights = dlights;
 	group.userData.rig = rig;
 	return group;

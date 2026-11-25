@@ -24,25 +24,34 @@ export function makeGlowTexture(size = 128): THREE.Texture {
   canvas.height = size;
   const ctx = canvas.getContext('2d');
   if (!ctx) return new THREE.Texture();
-  const center = size / 2;
-  const gradient = ctx.createRadialGradient(center, center, 0, center, center, center);
-  gradient.addColorStop(0.0, 'rgba(255,255,255,1)');
-  gradient.addColorStop(0.22, 'rgba(255,255,255,0.93)');
-  gradient.addColorStop(0.45, 'rgba(255,255,255,0.45)');
-  gradient.addColorStop(0.7, 'rgba(255,255,255,0.13)');
-  gradient.addColorStop(1.0, 'rgba(255,255,255,0)');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, size, size);
+  const image = ctx.createImageData(size, size);
+  const half = (size - 1) * 0.5;
+  for (let y = 0; y < size; y++) {
+    const dy = (y - half) / half;
+    for (let x = 0; x < size; x++) {
+      const dx = (x - half) / half;
+      const r2 = dx * dx + dy * dy;
+      const edge = Math.max(0, 1 - r2);
+      const falloff = r2 >= 1 ? 0 : (0.55 * Math.exp(-r2 * 7.5) + 0.45 * Math.exp(-r2 * 2.2)) * edge * edge;
+      const alpha = Math.round(Math.min(1, falloff) * 255);
+      const offset = (y * size + x) * 4;
+      image.data[offset] = 255;
+      image.data[offset + 1] = 255;
+      image.data[offset + 2] = 255;
+      image.data[offset + 3] = alpha;
+    }
+  }
+  ctx.putImageData(image, 0, 0);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
 }
 
 /**
- * 光束横截面：U 向半椭圆剖面、V 向恒定。
+ * 光束横截面：U 向双层高斯+幂次柔边剖面、V 向恒定。
  *
  * `env_beam` 的 `sprites/physbeam.vmt` 同样不在资产里。加法混合下形状完全由
- * 「RGB × alpha」决定，所以这里给白色 RGB + 半椭圆 alpha 剖面（中心满亮、边缘平滑归零），
+ * 「RGB × alpha」决定，所以这里给白色 RGB + 柔和光晕剖面（中心明亮、边缘柔和散开），
  * 颜色交给实体 `rendercolor × renderamt` 的顶点色。
  */
 export function makeBeamTexture(width = 64, height = 8): THREE.Texture {
@@ -54,8 +63,8 @@ export function makeBeamTexture(width = 64, height = 8): THREE.Texture {
   const image = ctx.createImageData(width, height);
   for (let x = 0; x < width; x++) {
     const u = ((x + 0.5) / width) * 2 - 1;
-    const profile = Math.sqrt(Math.max(0, 1 - u * u));
-    const alpha = Math.round(255 * profile);
+    const profile = 0.55 * Math.exp(-u * u * 7.5) + 0.45 * Math.pow(Math.max(0, 1 - u * u), 2.2);
+    const alpha = Math.round(Math.min(1, profile) * 255);
     for (let y = 0; y < height; y++) {
       const offset = (y * width + x) * 4;
       image.data[offset] = 255;
