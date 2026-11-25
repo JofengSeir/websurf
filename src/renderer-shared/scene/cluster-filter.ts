@@ -17,6 +17,7 @@
  *   和这里的重建互相覆盖 ⇒ 直接跳过，让它们走原来的块级判定。
  */
 import * as THREE from 'three';
+import { MERGE_SOURCE_TABLE_KEY, type MergeSourceTable } from './scene-optimizer.js';
 
 /** 装载期求几何法线的临时向量（`normalSideCluster` 无 `normal` 属性时用）。 */
 const scratchA = new THREE.Vector3();
@@ -120,7 +121,6 @@ const pendingChanged: number[] = [];
 let pendingFull = true;
 /** 增量翻位去重用的 epoch（每帧 +1，避免每帧清 marks 数组）。 */
 let flipEpoch = 0;
-let lastCullAll = false;
 /** 装载期建倒排用的 cluster→局部下标临时表（65536 项，建完复位，避免每块 256KB 常驻）。 */
 const probeIndex = new Int32Array(0x10000).fill(-1);
 
@@ -169,18 +169,16 @@ function locateCluster(keys: Uint16Array, id: number): number {
   return -1;
 }
 
-/** 单个三角形在当前可见行下是否要画（三来源任一可见 / 全定不到位照画，全剔除时除外）。 */
+/** 单个三角形在当前可见行下是否要画（三来源任一可见；已做子模型继承，仍为 0xffff 说明纯虚空，直接剔除）。 */
 function triVisible(
   st: ClusterIndexState,
   t: number,
   row: Uint8Array | null,
   pvs: PvsFilterQuery,
-  cullAll: boolean,
 ): boolean {
   const ca = st.triClusters[t];
   const cn = st.triClustersN[t];
   const cn2 = st.triClustersN2[t];
-  if (ca === 0xffff && cn === 0xffff && cn2 === 0xffff) return !cullAll;
   if (row) {
     return (
       (ca !== 0xffff && ca < row.length && row[ca] === 1) ||
@@ -290,7 +288,6 @@ function rebuildIncrementalFull(
   st: ClusterIndexState,
   row: Uint8Array | null,
   pvs: PvsFilterQuery,
-  cullAll: boolean,
 ): void {
   const inc = st.incremental;
   if (!inc) return;
@@ -300,7 +297,7 @@ function rebuildIncrementalFull(
   inc.slotTri.fill(-1);
   let n = 0;
   for (let t = 0; t < tris; t++) {
-    if (!triVisible(st, t, row, pvs, cullAll)) continue;
+    if (!triVisible(st, t, row, pvs)) continue;
     const s = t * 3;
     outIndex[n * 3] = origIndex[s];
     outIndex[n * 3 + 1] = origIndex[s + 1];
@@ -319,7 +316,6 @@ function flipChangedClusters(
   pvs: PvsFilterQuery,
   changed: readonly number[],
   epoch: number,
-  cullAll: boolean,
 ): void {
   const inc = st.incremental;
   if (!inc) return;
@@ -333,7 +329,7 @@ function flipChangedClusters(
       const t = inc.triIds[k];
       if (inc.marks[t] === epoch) continue;
       inc.marks[t] = epoch;
-      const on = triVisible(st, t, row, pvs, cullAll);
+      const on = triVisible(st, t, row, pvs);
       const pos = inc.posOfTri[t];
       if (on) {
         if (pos < 0) visTris = insertTri(inc, outIndex, origIndex, t, visTris);
@@ -520,6 +516,48 @@ export function prepareClusterIndex(
       why('noface');
       continue;
     }
+    // 子模型继承：同一源子模型内（如伸出地板进虚空的 s2_pillbig 柱底），部分三角形落进 -1 虚空时
+    // 继承同子模型内其余有效三角形的 cluster，既不漏到别的关卡，飞到该关卡时也不会缺底面。
+    const mergeTable = geom.userData?.[MERGE_SOURCE_TABLE_KEY] as MergeSourceTable | undefined;
+    const subRanges =
+      mergeTable && mergeTable.ranges.length > 0
+        ? mergeTable.ranges.map((r) => [
+            Math.max(0, Math.floor(r.start / 3)),
+            Math.min(tris, Math.floor((r.start + r.count) / 3)),
+          ] as const)
+        : ([[0, tris]] as const);
+    for (const [from, to] of subRanges) {
+      if (to <= from) continue;
+      let c0 = 0xffff;
+      let c1 = 0xffff;
+      let c2 = 0xffff;
+      let hasUnknown = false;
+      for (let t = from; t < to; t++) {
+        const a = triClusters[t];
+        const b = triClustersN[t];
+        const c = triClustersN2[t];
+        if (a === 0xffff && b === 0xffff && c === 0xffff) {
+          hasUnknown = true;
+          continue;
+        }
+        for (const vCl of [a, b, c]) {
+          if (vCl === 0xffff) continue;
+          if (c0 === 0xffff) c0 = vCl;
+          else if (c1 === 0xffff && vCl !== c0) c1 = vCl;
+          else if (c2 === 0xffff && vCl !== c0 && vCl !== c1) c2 = vCl;
+        }
+      }
+      if (hasUnknown && c0 !== 0xffff) {
+        for (let t = from; t < to; t++) {
+          if (triClusters[t] === 0xffff && triClustersN[t] === 0xffff && triClustersN2[t] === 0xffff) {
+            triClusters[t] = c0;
+            triClustersN[t] = c1;
+            triClustersN2[t] = c2;
+            unmapped--;
+          }
+        }
+      }
+    }
     // 一半以上三角形定不到位 ⇒ 这张脸的映射不可信，宁可整块按老办法（块级）处理。
     if (unmapped > tris * 0.5) { stats.skipped++; continue; }
 
@@ -592,13 +630,6 @@ export function applyClusterIndex(
   const row = pvs.visibleRow ? pvs.visibleRow() : null;
   // 每帧更新一次可见行快照 + 差分（换房间时真正翻位的 cluster 通常只有几十个）。
   refreshRowDiff(row);
-  const cullAll = (globalThis as { __vbspPvsCullAll?: boolean }).__vbspPvsCullAll === true;
-  const cullAllChanged = cullAll !== lastCullAll;
-  if (cullAllChanged) {
-    lastCullAll = cullAll;
-    pendingFull = true;
-    rowVersion++;
-  }
   const epoch = ++flipEpoch;
   for (const item of items) {
     const st = (item.mesh.userData as { clusterIndex?: ClusterIndexState }).clusterIndex;
@@ -618,10 +649,10 @@ export function applyClusterIndex(
       const canFlip =
         row !== null && !pendingFull && st.lastCluster !== -1 && st.rowVersion === rowVersion - 1;
       if (canFlip) {
-        flipChangedClusters(st, row, pvs, pendingChanged, epoch, cullAll);
+        flipChangedClusters(st, row, pvs, pendingChanged, epoch);
         flipped++;
       } else {
-        rebuildIncrementalFull(st, row, pvs, cullAll);
+        rebuildIncrementalFull(st, row, pvs);
         rebuilt++;
       }
       st.lastCluster = camCluster;
@@ -637,7 +668,7 @@ export function applyClusterIndex(
     // 多 group 块：保留原来的「块可见签名」快路径 + 全量重排。
     // 快路径：本块用到的 cluster 可见性没变 ⇒ 上次写进 index 的三组三角形集合仍然是正确的，
     // 直接跳过（换房间时绝大多数块都属于这一类；全量重排 123 万三角实测 15–25ms）。
-    if (!cullAllChanged && row && st.lastCluster !== -1 && st.clusters.length > 0) {
+    if (row && st.lastCluster !== -1 && st.clusters.length > 0) {
       let sig = 0x811c9dc5;
       const cl = st.clusters;
       for (let i = 0; i < cl.length; i++) {
@@ -665,17 +696,12 @@ export function applyClusterIndex(
         const ca = triClusters[t];
         const cn = triClustersN[t];
         const cn2 = triClustersN2[t];
-        // 三个来源全定不到位（都在实体/虚空里，比如薄斜柱的中段三角形）时**照画**：
-        // 判据是「已知不可见才剔」，不是「没查清就剔」。没查清就剔的代价是直接看穿到后面的
-        // 砖墙（用户报的缺三角面），而多画的代价只是几个三角形。
-        const unknown = !cullAll && ca === 0xffff && cn === 0xffff && cn2 === 0xffff;
+        // 已做子模型继承，仍为全 0xffff 说明该子模型完全在虚空里，不再放行。
         const on = row
-          ? unknown ||
-            (ca !== 0xffff && ca < row.length && row[ca] === 1) ||
+          ? (ca !== 0xffff && ca < row.length && row[ca] === 1) ||
             (cn !== 0xffff && cn < row.length && row[cn] === 1) ||
             (cn2 !== 0xffff && cn2 < row.length && row[cn2] === 1)
-          : unknown ||
-            (ca !== 0xffff && pvs.isVisible(ca)) ||
+          : (ca !== 0xffff && pvs.isVisible(ca)) ||
             (cn !== 0xffff && pvs.isVisible(cn)) ||
             (cn2 !== 0xffff && pvs.isVisible(cn2));
         // 两个来源都定不到位（墙外/虚空/地图外壳的重复道具）才剔——「悬空尖刺」正是这一类。
