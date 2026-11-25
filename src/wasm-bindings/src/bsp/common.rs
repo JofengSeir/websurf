@@ -540,7 +540,7 @@ pub(crate) fn export_brushes_planes_impl(
             for (p, bevel) in bsp_plane_refs.iter().zip(plane_bevels.iter().copied()) {
                 all_planes_src.push((
                     Plane {
-                        normal: p.normal.clone(),
+                        normal: p.normal,
                         dist: p.dist,
                         ty: p.ty,
                     },

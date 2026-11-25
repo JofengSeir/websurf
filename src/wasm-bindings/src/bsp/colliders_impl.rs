@@ -16,6 +16,11 @@ use websurf_wasm_core::render_bundle::{load_vmdl, PakfileModels};
 #[cfg(any(feature = "glb-lite", feature = "debug-tools"))]
 use websurf_wasm_core::{model_integrator, pakfile_models, phyfile};
 
+/// 单个 brush 的局部区域：`(AABB min, AABB max, 凸包平面 [nx,ny,nz,dist])`。
+/// viewer-export 只编译 PVS 导出，用不到本别名，故与下面的碰撞函数同条件编译。
+#[cfg(any(feature = "glb-lite", feature = "debug-tools"))]
+type BrushRegion = ([f32; 3], [f32; 3], Vec<[f32; 4]>);
+
 #[cfg(any(feature = "glb-lite", feature = "debug-tools"))]
 pub(crate) fn parse_teleports(bsp: &vbsp::Bsp) -> Result<String, JsValue> {
     #[derive(serde::Serialize)]
@@ -141,7 +146,7 @@ pub(crate) fn parse_teleports(bsp: &vbsp::Bsp) -> Result<String, JsValue> {
     fn model_brush_aabbs(
         bsp: &vbsp::Bsp,
         model_idx: usize,
-    ) -> Vec<([f32; 3], [f32; 3], Vec<[f32; 4]>)> {
+    ) -> Vec<BrushRegion> {
         let Some(model) = bsp.models.get(model_idx) else {
             return Vec::new();
         };
@@ -162,12 +167,12 @@ pub(crate) fn parse_teleports(bsp: &vbsp::Bsp) -> Result<String, JsValue> {
                     }
                 }
             } else if let Some(node) = bsp.nodes.get(ni as usize) {
-                stack.push(node.children[0] as i32);
-                stack.push(node.children[1] as i32);
+                stack.push(node.children[0]);
+                stack.push(node.children[1]);
             }
         }
         // 2. 每个 brush：planes → 凸包顶点 → 局部 AABB（与 compute_vertices 同算法）
-        let mut out: Vec<([f32; 3], [f32; 3], Vec<[f32; 4]>)> = Vec::new();
+        let mut out: Vec<BrushRegion> = Vec::new();
         for bi in brush_set {
             let Some(brush) = bsp.brushes.get(bi) else {
                 continue;
@@ -320,7 +325,7 @@ pub(crate) fn parse_teleports(bsp: &vbsp::Bsp) -> Result<String, JsValue> {
             let origin_yup = rotate_yup(origin);
 
             // 每个 brush 一个区域（局部 AABB + 凸包平面，BSP Z-up）
-            let regions: Vec<([f32; 3], [f32; 3], Vec<[f32; 4]>)> = match model.as_deref() {
+            let regions: Vec<BrushRegion> = match model.as_deref() {
                 Some(m) if m.starts_with('*') => m[1..]
                     .parse::<usize>()
                     .ok()
@@ -329,7 +334,7 @@ pub(crate) fn parse_teleports(bsp: &vbsp::Bsp) -> Result<String, JsValue> {
                 _ => Vec::new(),
             };
             // 世界 AABB 与世界凸包平面：局部值经 Y-up 旋转后加实体 origin 平移
-            let world_regions: Vec<([f32; 3], [f32; 3], Vec<[f32; 4]>)> =
+            let world_regions: Vec<BrushRegion> =
                 if !regions.is_empty() {
                     regions
                         .iter()
@@ -568,7 +573,7 @@ pub(crate) fn parse_pvs_data(bsp: &vbsp::Bsp) -> Result<String, JsValue> {
     // 逐簇调 `vbsp::decode_pvs_row`，不走 `VisData::visible_clusters`——后者是另一份独立
     // RLE 循环，offset 越界时 panic，而 wasm 导出的 panic 会破坏 wasm-bindgen 状态。
     let cluster_count = bsp.vis_data.cluster_count;
-    let bytes_per_row = ((cluster_count as usize) + 7) / 8;
+    let bytes_per_row = (cluster_count as usize).div_ceil(8);
     let mut pvs_bits = vec![0u8; (cluster_count as usize) * bytes_per_row];
 
     // 仅在有 PVS 数据时解码

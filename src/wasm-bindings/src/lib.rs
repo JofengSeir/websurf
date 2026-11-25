@@ -2,7 +2,6 @@
 //!
 //! 本文件与 `bsp/` 由 task-73 slice2 从三端原绑定层搬迁而来；搬迁后即为三端共享的
 //! 唯一实现源，可直接修改（feature 分组见 `Cargo.toml`）。
-#![allow(clippy::all)]
 
 #[cfg(feature = "core")]
 mod texture;

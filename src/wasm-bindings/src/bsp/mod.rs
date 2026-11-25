@@ -81,6 +81,10 @@ mod teleport_filters;
 // 只保留 #[wasm_bindgen] 外壳与各自的错误文案 / 日志档位；viewer-export 也编 glb.rs，故一并纳入。
 #[cfg(any(feature = "glb", feature = "debug-tools", feature = "viewer-export"))]
 mod colliders_impl;
+// 元数据 / 实体 / 出生点 / pakfile / mosaic manifest 的共享实现（T-P1-1b）：glb.rs 的
+// game / viewer 两份与 debug_tools.rs 一份此前逐字重复，现只保留各端薄外壳。
+#[cfg(any(feature = "glb-lite", feature = "viewer-export", feature = "debug-tools"))]
+mod meta_impl;
 
 #[allow(unused_imports)]
 #[cfg(feature = "core")]

@@ -393,19 +393,8 @@ impl BspProcessor {
                 .bsp
                 .as_ref()
                 .ok_or_else(|| JsValue::from_str("BSP 未解析"))?;
-            let mut pairs = websurf_wasm_core::mosaic::manifest::build_mosaic_manifest(bsp);
-            // 模型贴图（材质名 → PNG → mosaic）；失败静默跳过（不影响地图纹理覆盖）
-            if let Ok(pak) = self.collect_models(VhvLog::Always) {
-                let index = pakfile_models::PakIndex::build(&pak.entry_names);
-                let materials = resolve_pakfile_materials(bsp, &pak.models, &index, true, None);
-                for (name, png) in materials.textures {
-                    if let Ok(code) = websurf_wasm_core::mosaic::encode::img_to_code(&png, &name) {
-                        pairs.push((name.to_ascii_lowercase(), code));
-                    }
-                }
-            }
-            let map: std::collections::HashMap<String, String> = pairs.into_iter().collect();
-            serde_json::to_string(&map).map_err(|e| to_js_err(e, "序列化 mosaic manifest 失败"))
+            let pak = self.collect_models(VhvLog::Always).ok();
+            super::meta_impl::export_mosaic_manifest(bsp, pak.as_deref())
         }
 
     /// 获取元数据 JSON 字符串（不消耗内部 Bsp 实例）。
@@ -414,18 +403,15 @@ impl BspProcessor {
                 .bsp
                 .as_ref()
                 .ok_or_else(|| JsValue::from_str("BSP 未解析"))?;
-            let metadata = BspMetadata::from_bsp(bsp, self.packed_files);
-            metadata.to_json()
+            super::meta_impl::metadata(bsp, self.packed_files)
         }
 
     /// 创建处理器并立即解析 BSP 数据。
         #[wasm_bindgen(constructor)]
         pub fn new(data: &[u8]) -> Result<BspProcessor, JsValue> {
-            let bsp = vbsp::Bsp::read(data).map_err(|e| to_js_err(e, "BSP 解析失败"))?;
-            // 一次性计算并缓存 packed_files，避免 metadata() 重复克隆 Packfile
-            let packed_files = bsp.pack.clone().into_zip().lock().map_err(|e| JsValue::from_str(&format!("pakfile 锁定失败: {e}")))?.len();
+            let (bsp, packed_files) = super::meta_impl::load_bsp(data)?;
             Ok(BspProcessor {
-                bsp: Some(std::sync::Arc::new(bsp)),
+                bsp: Some(bsp),
                 packed_files,
                 mosaic_cache: std::collections::HashMap::new(),
                 pak_models: RefCell::new(None),
@@ -434,42 +420,12 @@ impl BspProcessor {
         }
 
     pub fn parse_entities(&self) -> Result<String, JsValue> {
-            let bsp = self
-                .bsp
-                .as_ref()
-                .ok_or_else(|| JsValue::from_str("BSP 未解析"))?;
-
-            #[derive(serde::Serialize)]
-            struct EntityOut {
-                index: usize,
-                classname: String,
-                targetname: String,
-                props: std::collections::BTreeMap<String, String>,
-                outputs: Vec<String>,
-                origin_raw: String,
-                model_raw: Option<String>,
-            }
-
-            let mut result: Vec<EntityOut> = Vec::new();
-            for (i, ent) in bsp.entities.iter().enumerate() {
-                let classname = ent.prop("classname").map(|s| s.to_string()).unwrap_or_default();
-                let targetname = ent.prop("targetname").map(|s| s.to_string()).unwrap_or_default();
-                let origin_raw = ent.prop("origin").map(|s| s.to_string()).unwrap_or_default();
-                let model_raw = ent.prop("model").ok().map(|s| s.to_string());
-                let mut props = std::collections::BTreeMap::new();
-                let mut outputs = Vec::new();
-                for (key, val) in ent.properties() {
-                    if key.starts_with("On") || key.starts_with("on") {
-                        outputs.push(format!("{} {}", key, val));
-                    } else {
-                        props.insert(key.to_string(), val.to_string());
-                    }
-                }
-                result.push(EntityOut { index: i, classname, targetname, props, outputs, origin_raw, model_raw });
-            }
-
-            serde_json::to_string(&result).map_err(|e| JsValue::from_str(&format!("序列化失败: {e}")))
-        }
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 未解析"))?;
+        super::meta_impl::parse_entities(bsp)
+    }
 
     /// 提取出生点实体，输出 JSON：`{ "spawn_points": [{ classname, origin, angles, origin_raw,
         /// angles_raw }], "total": N, "primary": M }`（`primary` 无值时为 `null`）。
@@ -488,104 +444,7 @@ impl BspProcessor {
                 .bsp
                 .as_ref()
                 .ok_or_else(|| JsValue::from_str("BSP 未解析"))?;
-
-            #[derive(serde::Serialize)]
-            struct SpawnPoint {
-                classname: String,
-                origin: [f32; 3],
-                angles: [f32; 3],
-                origin_raw: String,
-                angles_raw: Option<String>,
-            }
-
-            #[derive(serde::Serialize)]
-            struct SpawnReport {
-                spawn_points: Vec<SpawnPoint>,
-                total: usize,
-                primary: Option<usize>,
-            }
-
-            fn parse_vec3(s: &str) -> Option<[f32; 3]> {
-                let parts: Vec<&str> = s.split_whitespace().collect();
-                if parts.len() < 3 {
-                    return None;
-                }
-                Some([
-                    parts[0].parse::<f32>().ok()?,
-                    parts[1].parse::<f32>().ok()?,
-                    parts[2].parse::<f32>().ok()?,
-                ])
-            }
-
-            // 坐标旋转 [x,y,z]→[y,z,x]（det=+1，正交变换，BSP Z-up → Three.js Y-up）
-            fn rotate_yup(v: [f32; 3]) -> [f32; 3] {
-                [v[1], v[2], v[0]]
-            }
-
-            // 出生点 classname 列表（按优先级排序）
-            const SPAWN_CLASSNAMES: &[&str] = &[
-                "info_player_start",         // HL2 / CS:S 主出生点
-                "info_player_terrorist",      // CS T 出生点
-                "info_player_counterterrorist", // CS CT 出生点
-                "info_player_deathmatch",     // CS DM 出生点
-                "info_player_teamspawn",      // CS 团队出生点
-                "info_player_axis",           // DOD 轴心出生点
-                "info_player_allied",         // DOD 同盟出生点
-                "info_player_coop",           // HL Coop 出生点
-                "info_teleport_destination",  // 传送目标点（作为备用）
-            ];
-
-            let mut spawn_points: Vec<SpawnPoint> = Vec::new();
-            let mut primary: Option<(u8, usize)> = None;
-
-            for ent in bsp.entities.iter() {
-                let Ok(classname) = ent.prop("classname") else {
-                    continue;
-                };
-
-                let is_spawn = SPAWN_CLASSNAMES.iter().any(|sc| classname == *sc);
-                // 也匹配 info_player_* 通配
-                let is_player_spawn = is_spawn || classname.starts_with("info_player_");
-
-                if !is_player_spawn {
-                    continue;
-                }
-
-                let origin_raw = ent.prop("origin").unwrap_or("").to_string();
-                let Some(origin) = parse_vec3(&origin_raw) else {
-                    continue;
-                };
-                let angles_raw = ent.prop("angles").ok().map(|s| s.to_string());
-                let angles = angles_raw
-                    .as_ref()
-                    .and_then(|s| parse_vec3(s))
-                    .unwrap_or([0.0, 0.0, 0.0]);
-
-                // 真实玩家出生点按优先级竞争 primary（info_teleport_destination 等不参与）
-                primary = super::track_spawn_primary(primary, spawn_points.len(), classname);
-
-                spawn_points.push(SpawnPoint {
-                    classname: classname.to_string(),
-                    origin: rotate_yup(origin),
-                    angles,
-                    origin_raw,
-                    angles_raw,
-                });
-            }
-
-            // 优先真实玩家出生点；完全没有玩家出生点时才回退到列表第一个
-            // （可能是 info_teleport_destination），一个出生点都没有时为 null。
-            let primary = primary
-                .map(|(_, index)| index)
-                .or_else(|| (!spawn_points.is_empty()).then_some(0));
-
-            let report = SpawnReport {
-                total: spawn_points.len(),
-                spawn_points,
-                primary,
-            };
-
-            serde_json::to_string(&report).map_err(|e| to_js_err(e, "序列化出生点数据失败"))
+            super::meta_impl::parse_spawn_points(bsp)
         }
 
     /// 解析传送网络：传送目标点与传送触发器，并按 `target` → `targetname` 建立连接。
@@ -626,11 +485,7 @@ impl BspProcessor {
                 .bsp
                 .as_ref()
                 .ok_or_else(|| JsValue::from_str("BSP 未解析"))?;
-            match bsp.pack.get(name) {
-                Ok(Some(data)) => Ok(data),
-                Ok(None) => Ok(Vec::new()),
-                Err(e) => Err(to_js_err(e, "读取 pakfile 文件失败")),
-            }
+            super::meta_impl::read_pakfile_file(bsp, name)
         }
 }
 
@@ -778,7 +633,7 @@ pub struct BspMetadata {
 impl BspMetadata {
     // packed_files 由调用方传入：`Packfile` 的 zip 字段私有，要拿条目数只能 clone 后走
     // `Packfile::into_zip()`（消费 self）再 `len()`，克隆代价高 ⇒ 在处理器构造时算一次缓存。
-    fn from_bsp(bsp: &vbsp::Bsp, packed_files: usize) -> Self {
+    pub(super) fn from_bsp(bsp: &vbsp::Bsp, packed_files: usize) -> Self {
         let num_entities = bsp.entities.iter().count();
         let num_static_props = bsp.static_props().count();
 
@@ -806,7 +661,7 @@ impl BspMetadata {
         }
     }
 
-    fn to_json(&self) -> Result<String, JsValue> {
+    pub(super) fn to_json(&self) -> Result<String, JsValue> {
         serde_json::to_string(self).map_err(|e| to_js_err(e, "序列化 BSP 元数据失败"))
     }
 }
@@ -946,24 +801,13 @@ impl BspProcessor {
         }
 
     pub fn export_mosaic_manifest(&self) -> Result<String, JsValue> {
-            let bsp = self
-                .bsp
-                .as_ref()
-                .ok_or_else(|| JsValue::from_str("BSP 已被消费或未加载"))?;
-            let mut pairs = websurf_wasm_core::mosaic::manifest::build_mosaic_manifest(bsp);
-            // 模型贴图（材质名 → PNG → mosaic）；失败静默跳过（不影响地图纹理覆盖）
-            if let Ok(pak) = self.collect_models(VhvLog::Never) {
-                let index = pakfile_models::PakIndex::build(&pak.entry_names);
-                let materials = resolve_pakfile_materials(bsp, &pak.models, &index, true, None);
-                for (name, png) in materials.textures {
-                    if let Ok(code) = websurf_wasm_core::mosaic::encode::img_to_code(&png, &name) {
-                        pairs.push((name.to_ascii_lowercase(), code));
-                    }
-                }
-            }
-            let map: std::collections::HashMap<String, String> = pairs.into_iter().collect();
-            serde_json::to_string(&map).map_err(|e| to_js_err(e, "序列化 mosaic manifest 失败"))
-        }
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 已被消费或未加载"))?;
+        let pak = self.collect_models(VhvLog::Never).ok();
+        super::meta_impl::export_mosaic_manifest(bsp, pak.as_deref())
+    }
 
     /// 元数据 JSON 字符串；借用内部 `Bsp`，不消耗它。
         /// 实例已被导出方法取走时返回 "BSP 未解析或已导出" 错误。
@@ -972,8 +816,7 @@ impl BspProcessor {
                 .bsp
                 .as_ref()
                 .ok_or_else(|| JsValue::from_str("BSP 未解析或已导出"))?;
-            let metadata = BspMetadata::from_bsp(bsp, self.packed_files, self.cached_static_props);
-            metadata.to_json()
+            super::meta_impl::metadata(bsp, self.packed_files, self.cached_static_props)
         }
 
     /// 解析 BSP 字节并建处理器；解析失败时转成上下文为 "BSP 解析失败" 的 JS 错误。
@@ -981,12 +824,10 @@ impl BspProcessor {
         /// 转成 JS 错误，不再 `unwrap` panic——T-146）。
         #[wasm_bindgen(constructor)]
         pub fn new(data: &[u8]) -> Result<BspProcessor, JsValue> {
-            let bsp = vbsp::Bsp::read(data).map_err(|e| to_js_err(e, "BSP 解析失败"))?;
-            // zip 只在这里 clone 一次：Packfile 没有「只读条目数」的接口
-            let packed_files = bsp.pack.clone().into_zip().lock().map_err(|e| JsValue::from_str(&format!("pakfile 锁定失败: {e}")))?.len();
+            let (bsp, packed_files) = super::meta_impl::load_bsp(data)?;
             let cached_static_props = bsp.static_props().count();
             Ok(BspProcessor {
-                bsp: Some(std::sync::Arc::new(bsp)),
+                bsp: Some(bsp),
                 packed_files,
                 cached_static_props,
                 mosaic_cache: std::collections::HashMap::new(),
@@ -996,42 +837,12 @@ impl BspProcessor {
         }
 
     pub fn parse_entities(&self) -> Result<String, JsValue> {
-            let bsp = self
-                .bsp
-                .as_ref()
-                .ok_or_else(|| JsValue::from_str("BSP 未解析或已导出"))?;
-
-            #[derive(serde::Serialize)]
-            struct EntityOut {
-                index: usize,
-                classname: String,
-                targetname: String,
-                props: std::collections::BTreeMap<String, String>,
-                outputs: Vec<String>,
-                origin_raw: String,
-                model_raw: Option<String>,
-            }
-
-            let mut result: Vec<EntityOut> = Vec::new();
-            for (i, ent) in bsp.entities.iter().enumerate() {
-                let classname = ent.prop("classname").map(|s| s.to_string()).unwrap_or_default();
-                let targetname = ent.prop("targetname").map(|s| s.to_string()).unwrap_or_default();
-                let origin_raw = ent.prop("origin").map(|s| s.to_string()).unwrap_or_default();
-                let model_raw = ent.prop("model").ok().map(|s| s.to_string());
-                let mut props = std::collections::BTreeMap::new();
-                let mut outputs = Vec::new();
-                for (key, val) in ent.properties() {
-                    if key.starts_with("On") || key.starts_with("on") {
-                        outputs.push(format!("{} {}", key, val));
-                    } else {
-                        props.insert(key.to_string(), val.to_string());
-                    }
-                }
-                result.push(EntityOut { index: i, classname, targetname, props, outputs, origin_raw, model_raw });
-            }
-
-            serde_json::to_string(&result).map_err(|e| JsValue::from_str(&format!("序列化失败: {e}")))
-        }
+        let bsp = self
+            .bsp
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("BSP 未解析或已导出"))?;
+        super::meta_impl::parse_entities(bsp)
+    }
 
     /// 提取出生点实体（info_player_start / info_player_terrorist / info_player_counterterrorist 等）。
         ///
@@ -1048,104 +859,7 @@ impl BspProcessor {
                 .bsp
                 .as_ref()
                 .ok_or_else(|| JsValue::from_str("BSP 未解析或已导出"))?;
-
-            #[derive(serde::Serialize)]
-            struct SpawnPoint {
-                classname: String,
-                origin: [f32; 3],
-                angles: [f32; 3],
-                origin_raw: String,
-                angles_raw: Option<String>,
-            }
-
-            #[derive(serde::Serialize)]
-            struct SpawnReport {
-                spawn_points: Vec<SpawnPoint>,
-                total: usize,
-                primary: Option<usize>,
-            }
-
-            fn parse_vec3(s: &str) -> Option<[f32; 3]> {
-                let parts: Vec<&str> = s.split_whitespace().collect();
-                if parts.len() < 3 {
-                    return None;
-                }
-                Some([
-                    parts[0].parse::<f32>().ok()?,
-                    parts[1].parse::<f32>().ok()?,
-                    parts[2].parse::<f32>().ok()?,
-                ])
-            }
-
-            // 坐标旋转 [x,y,z]→[y,z,x]（det=+1，正交变换，BSP Z-up → Three.js Y-up）
-            fn rotate_yup(v: [f32; 3]) -> [f32; 3] {
-                [v[1], v[2], v[0]]
-            }
-
-            // 出生点 classname 列表（按优先级排序）
-            const SPAWN_CLASSNAMES: &[&str] = &[
-                "info_player_start",         // HL2 / CS:S 主出生点
-                "info_player_terrorist",      // CS T 出生点
-                "info_player_counterterrorist", // CS CT 出生点
-                "info_player_deathmatch",     // CS DM 出生点
-                "info_player_teamspawn",      // CS 团队出生点
-                "info_player_axis",           // DOD 轴心出生点
-                "info_player_allied",         // DOD 同盟出生点
-                "info_player_coop",           // HL Coop 出生点
-                "info_teleport_destination",  // 传送目标点（作为备用）
-            ];
-
-            let mut spawn_points: Vec<SpawnPoint> = Vec::new();
-            let mut primary: Option<(u8, usize)> = None;
-
-            for ent in bsp.entities.iter() {
-                let Ok(classname) = ent.prop("classname") else {
-                    continue;
-                };
-
-                let is_spawn = SPAWN_CLASSNAMES.iter().any(|sc| classname == *sc);
-                // 也匹配 info_player_* 通配
-                let is_player_spawn = is_spawn || classname.starts_with("info_player_");
-
-                if !is_player_spawn {
-                    continue;
-                }
-
-                let origin_raw = ent.prop("origin").unwrap_or("").to_string();
-                let Some(origin) = parse_vec3(&origin_raw) else {
-                    continue;
-                };
-                let angles_raw = ent.prop("angles").ok().map(|s| s.to_string());
-                let angles = angles_raw
-                    .as_ref()
-                    .and_then(|s| parse_vec3(s))
-                    .unwrap_or([0.0, 0.0, 0.0]);
-
-                // 真实玩家出生点按优先级竞争 primary（info_teleport_destination 等不参与）
-                primary = super::track_spawn_primary(primary, spawn_points.len(), classname);
-
-                spawn_points.push(SpawnPoint {
-                    classname: classname.to_string(),
-                    origin: rotate_yup(origin),
-                    angles,
-                    origin_raw,
-                    angles_raw,
-                });
-            }
-
-            // 优先真实玩家出生点；完全没有玩家出生点时才回退到列表第一个
-            // （可能是 info_teleport_destination），一个出生点都没有时为 null。
-            let primary = primary
-                .map(|(_, index)| index)
-                .or_else(|| (!spawn_points.is_empty()).then_some(0));
-
-            let report = SpawnReport {
-                total: spawn_points.len(),
-                spawn_points,
-                primary,
-            };
-
-            serde_json::to_string(&report).map_err(|e| to_js_err(e, "序列化出生点数据失败"))
+            super::meta_impl::parse_spawn_points(bsp)
         }
 
     /// **诊断**：只跑一遍材质/贴图解析（probe_only，不产出像素、不落 GLB），
@@ -1189,12 +903,7 @@ impl BspProcessor {
                 .bsp
                 .as_ref()
                 .ok_or_else(|| JsValue::from_str("BSP 未解析或已导出"))?;
-
-            match bsp.pack.get(name) {
-                Ok(Some(data)) => Ok(data),
-                Ok(None) => Ok(Vec::new()),
-                Err(e) => Err(to_js_err(e, "读取 pakfile 文件失败")),
-            }
+            super::meta_impl::read_pakfile_file(bsp, name)
         }
 }
 
@@ -1313,7 +1022,7 @@ impl BspMetadata {
     /// 由 `Bsp` 组元数据；`packed_files` 与 `num_static_props` 都由 `BspProcessor` 的构造期
     /// 缓存传入——`Packfile` 的 zip 字段私有（`src/wasm-core/vbsp/data/mod.rs`），取条目数只能先
     /// `clone()` 再 `into_zip()`（消费 self）；`static_props()` 是线性扫描。两者都只在构造期算一次。
-    fn from_bsp(bsp: &vbsp::Bsp, packed_files: usize, num_static_props: usize) -> Self {
+    pub(super) fn from_bsp(bsp: &vbsp::Bsp, packed_files: usize, num_static_props: usize) -> Self {
 
         let h = &bsp.header;
         let magic = format!("{}{}{}{}", h.v as char, h.b as char, h.s as char, h.p as char);
@@ -1331,7 +1040,7 @@ impl BspMetadata {
         }
     }
 
-    fn to_json(&self) -> Result<String, JsValue> {
+    pub(super) fn to_json(&self) -> Result<String, JsValue> {
         serde_json::to_string(self).map_err(|e| to_js_err(e, "序列化 BSP 元数据失败"))
     }
 }
