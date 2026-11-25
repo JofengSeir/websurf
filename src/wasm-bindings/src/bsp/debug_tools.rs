@@ -532,19 +532,19 @@ impl BspProcessor {
                 .bsp
                 .take()
                 .ok_or_else(|| JsValue::from_str("BSP 未解析或已被导出消费"))?;
-
-            let options = bsp_to_gltf_core::ConvertOptions::default();
-            let result = bsp_to_gltf_core::export_bsp(bsp, options)
-                .map_err(|e| to_js_err(e, "GLB 导出失败"))?;
-
-            // Glb::to_writer 接受任何 std::io::Write 对象
-            let mut output: Vec<u8> = Vec::new();
-            result
-                .glb
-                .to_writer(&mut output)
-                .map_err(|e| to_js_err(e, "GLB 序列化失败"))?;
-
-            Ok(output)
+            super::glb_impl::run_glb_export(
+                self,
+                bsp,
+                super::glb_impl::GlbExportOpts {
+                    vhv_log: VhvLog::IfAnyProp,
+                    options: super::glb_impl::OptionsSource::Plain,
+                    include_lights: false,
+                    force_integrator: false,
+                    skip_model_extraction: true,
+                    cache_mosaic: false,
+                    materials_win_mosaic: false,
+                },
+            )
         }
 
     /// 导出为 GLB，并把调用方传入的**内存模型**（`.mdl/.vvd/.dx90.vtx` 字节）合并进同一地图。
@@ -632,53 +632,19 @@ impl BspProcessor {
                 .bsp
                 .take()
                 .ok_or_else(|| JsValue::from_str("BSP 未解析或已被导出消费，请重新 new"))?;
-
-            // 1~3. 提取被引用且三件套齐全的模型 + 放置表 + PAKFILE 条目清单
-            let PakfileModels { models, static_props, entry_names } =
-                self.take_models_for(&bsp, VhvLog::IfAnyProp)?;
-
-            // 4. 模型表为空 → 改走纯地图导出；此处已消费 `bsp`，不能再回到模型路径
-            if models.is_empty() {
-                let options = bsp_to_gltf_core::ConvertOptions::default();
-                let result = bsp_to_gltf_core::export_bsp(bsp, options)
-                    .map_err(|e| to_js_err(e, "GLB 导出失败"))?;
-                let mut output: Vec<u8> = Vec::new();
-                result
-                    .glb
-                    .to_writer(&mut output)
-                    .map_err(|e| to_js_err(e, "GLB 序列化失败"))?;
-                return Ok(output);
-            }
-
-            // 5. 解 PAKFILE 内的 VMT/VTF：贴图 PNG 字节 + 材质透明度 / 无光照标注（`decode_textures = true`）
-            // 本入口（`export_glb_with_pakfile_models`）不带默认纹理包回退表 ⇒ `fallback` 传 `None`
-            // （与 game 同名入口一致；带回退的那条是 `export_glb_with_defaults_opts`）。
-            let index = pakfile_models::PakIndex::build(&entry_names);
-            let materials = resolve_pakfile_materials(&bsp, &models, &index, true, None);
-
-            let resources = InMemoryResources {
-                models,
-                entities: model_integrator::collect_model_entities(&bsp),
-                static_props,
-                textures: materials.textures,
-                material_alpha_mode: materials.alpha_modes,
-                material_unlit: materials.unlit,
-                material_envmap: materials.envmap_tints, material_bumpmap: materials.bumpmaps, material_water: materials.waters,
-                light_entities: Vec::new(),
-            };
-
-            let integrator = ModelIntegrator::from_in_memory(resources, ExportOptions::default());
-            let options = bsp_to_gltf_core::ConvertOptions::default();
-            let result = bsp_to_gltf_core::export_bsp_with_models(bsp, options, Some(&integrator))
-                .map_err(|e| to_js_err(e, "GLB 导出失败"))?;
-
-            let mut output: Vec<u8> = Vec::new();
-            result
-                .glb
-                .to_writer(&mut output)
-                .map_err(|e| to_js_err(e, "GLB 序列化失败"))?;
-
-            Ok(output)
+            super::glb_impl::run_glb_export(
+                self,
+                bsp,
+                super::glb_impl::GlbExportOpts {
+                    vhv_log: VhvLog::IfAnyProp,
+                    options: super::glb_impl::OptionsSource::Plain,
+                    include_lights: false,
+                    force_integrator: false,
+                    skip_model_extraction: false,
+                    cache_mosaic: false,
+                    materials_win_mosaic: false,
+                },
+            )
         }
 
     /// 导出 GLB（PAKFILE 模型 + **BSP 光照**），不注入缺失纹理回退表。
@@ -686,7 +652,26 @@ impl BspProcessor {
         /// 实现上是 `export_glb_with_defaults_opts("{}", 0, true)`：回退表为空 map，
         /// 故与 `..._with_defaults_and_lights` 只差一个非空回退表。手写 TS 侧无调用点。
         pub fn export_glb_with_pakfile_models_with_lights(&mut self) -> Result<Vec<u8>, JsValue> {
-            self.export_glb_with_defaults_opts("{}", 0, true)
+            let bsp = self
+                .bsp
+                .take()
+                .ok_or_else(|| JsValue::from_str("BSP 未解析或已被导出消费，请重新 new"))?;
+            super::glb_impl::run_glb_export(
+                self,
+                bsp,
+                super::glb_impl::GlbExportOpts {
+                    vhv_log: VhvLog::IfAnyProp,
+                    options: super::glb_impl::OptionsSource::Defaults {
+                        json: "{}",
+                        atlas: 0,
+                    },
+                    include_lights: true,
+                    force_integrator: false,
+                    skip_model_extraction: false,
+                    cache_mosaic: true,
+                    materials_win_mosaic: false,
+                },
+            )
         }
 
     pub fn export_missing_model_textures(&self, defaults_json: &str) -> Result<String, JsValue> {
@@ -1177,85 +1162,22 @@ impl BspProcessor {
                 .bsp
                 .take()
                 .ok_or_else(|| JsValue::from_str("BSP 未解析或已被导出消费，请重新 new"))?;
-            let fallback: std::collections::HashMap<String, String> =
-                serde_json::from_str(defaults_json).map_err(|e| to_js_err(e, "默认纹理包 JSON 解析失败"))?;
-
-            let PakfileModels { models, static_props, entry_names } =
-                self.take_models_for(&bsp, VhvLog::IfAnyProp)?;
-
-            // 世界面材质的**基名 VMT 回退**索引（填进 `ConvertOptions::vmt_stem_index`）：
-            // texinfo 给的名字（如 `METAL/METALGRATE013A2`）在包内没有精确路径时，改按基名
-            // `metalgrate013a2.vmt` 命中作者写的 VMT，取其中的 `$basetexture` / `$translucent`
-            // 等标注 —— 缺这一条时该类世界面会退化成不透明且无贴图（格栅/铁丝网整块变实心）。
-            let stem_index = build_vmt_stem_index(&entry_names);
-            let vmt_fallback = self.vmt_fallback.clone();
-
-            // 画质切换用的 mosaic manifest 在本函数**顺带产出**（存进 `mosaic_cache`，由
-            // `take_mosaic_manifest` 取）。两半都不再需要「重解一遍贴图」：世界面那一半由 `convert`
-            // 装配材质时顺手缩出来（`ExportResult::mosaic`），模型那一半由 `resolve_pakfile_materials`
-            // 解码 VTF 时顺手缩出来。`export_mosaic_manifest` 那套之所以慢，就是因为它把这批贴图
-            // 整个又解了一遍。
-            let mut mosaic: std::collections::HashMap<String, String> =
-                std::collections::HashMap::new();
-
-            let options = |generate_missing_list: bool| bsp_to_gltf_core::ConvertOptions {
-                missing_fallback: fallback.clone(),
-                vmt_stem_index: stem_index.clone(),
-                vmt_fallback: vmt_fallback.clone(),
-                generate_missing_list,
-                lightmap_max_atlas_area,
-                ..bsp_to_gltf_core::ConvertOptions::default()
-            };
-
-            // 无模型且不要灯光 → 纯地图导出（与 export_glb 同一条 `export_bsp` 路径，
-            // 但这里带上了 missing_fallback 与 generate_missing_list=true）
-            if models.is_empty() && !include_lights {
-                let result = bsp_to_gltf_core::export_bsp(bsp, options(true))
-                    .map_err(|e| to_js_err(e, "GLB 导出失败"))?;
-                // 纯地图支路：manifest 只有世界面那一半（同样来自 convert 的收集器）
-                self.mosaic_cache = result.mosaic.iter().cloned().collect();
-                let mut output: Vec<u8> = Vec::new();
-                result
-                    .glb
-                    .to_writer(&mut output)
-                    .map_err(|e| to_js_err(e, "GLB 序列化失败"))?;
-                return Ok(output);
-            }
-
-            let index = pakfile_models::PakIndex::build(&entry_names);
-            let materials = resolve_pakfile_materials(&bsp, &models, &index, true, Some(&fallback));
-            let resources = InMemoryResources {
-                models,
-                entities: model_integrator::collect_model_entities(&bsp),
-                static_props,
-                textures: materials.textures,
-                material_alpha_mode: materials.alpha_modes,
-                material_unlit: materials.unlit,
-                material_envmap: materials.envmap_tints, material_bumpmap: materials.bumpmaps, material_water: materials.waters,
-                light_entities: if include_lights {
-                    collect_light_entities(&bsp)
-                } else {
-                    Vec::new()
+            super::glb_impl::run_glb_export(
+                self,
+                bsp,
+                super::glb_impl::GlbExportOpts {
+                    vhv_log: VhvLog::IfAnyProp,
+                    options: super::glb_impl::OptionsSource::Defaults {
+                        json: defaults_json,
+                        atlas: lightmap_max_atlas_area,
+                    },
+                    include_lights,
+                    force_integrator: false,
+                    skip_model_extraction: false,
+                    cache_mosaic: true,
+                    materials_win_mosaic: false,
                 },
-            };
-            let integrator = ModelIntegrator::from_in_memory(resources, ExportOptions { include_lights });
-            let result = bsp_to_gltf_core::export_bsp_with_models(bsp, options(true), Some(&integrator))
-                .map_err(|e| to_js_err(e, "GLB 导出失败"))?;
-            // mosaic manifest 两半在此会合：世界面那一半来自 convert 的收集器，模型那一半来自
-            // resolve_pakfile_materials。键口径与 export_mosaic_manifest 一致（统一小写）。
-            for (name, code) in &materials.mosaic {
-                mosaic.insert(name.to_ascii_lowercase(), code.clone());
-            }
-            for (name, code) in &result.mosaic {
-                mosaic.insert(name.clone(), code.clone());
-            }
-            self.mosaic_cache = mosaic;
-            let mut output: Vec<u8> = Vec::new();
-            result
-                .glb
-                .to_writer(&mut output)
-                .map_err(|e| to_js_err(e, "GLB 序列化失败"))?;
-            Ok(output)
+            )
         }
 
 }
