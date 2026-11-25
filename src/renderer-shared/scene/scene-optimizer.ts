@@ -221,7 +221,8 @@ export interface MergeOptions {
    * 空间、变换清成单位阵，与多材质保留口径一致）。
    *
    * 用途：需要保留模型身份、之后还要单独做变换的对象——`momentary_rot_button` 的符文盘
-   * 就是这类（`rot-buttons.ts` 要把它们挂到 pivot 上转，合并掉就找不回模型边界了）。
+   * 就是这类（`rot-buttons.ts` 要把它们挂到 pivot 上转，合并掉就找不回模型边界了）；
+   * 动态 brush 实体（`dynamic-entities.ts`，T-P1-5a）同理。
    */
   exclude?: (mesh: THREE.Mesh) => boolean;
 }
@@ -1007,6 +1008,12 @@ export function mergeOpaqueByMaterial(
     const geom = mesh.geometry as THREE.BufferGeometry | undefined;
     if (!geom || !geom.getAttribute('position')) return;
     if ((mesh.userData as { vbspRot?: unknown })?.vbspRot) { why('rot'); return; }
+    // 动态实体必须在按「父节点 + 材质」分桶前留下：脱合并的 mesh 此时还是新根的直接子节点，
+    // 同父同材质的多个实体会被并成一块、丢掉 `vbspDynamicEntity` 身份（`dynamic-entities.ts`）。
+    if ((mesh.userData as { vbspDynamicEntity?: unknown })?.vbspDynamicEntity !== undefined) {
+      why('dynamic');
+      return;
+    }
     if (Object.keys(geom.morphAttributes).length > 0) { why('morph'); return; }
     if ((mesh as unknown as { isSkinnedMesh?: boolean }).isSkinnedMesh) { why('skinned'); return; }
     if ((mesh as unknown as { isInstancedMesh?: boolean }).isInstancedMesh) { why('instanced'); return; }

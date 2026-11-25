@@ -97,6 +97,12 @@ import { PvsManager } from '../../ts-shared/world/pvs-manager.js';
 import { subdivideVertexLit } from './vlight-subdivide.js';
 import { collectTextureScrolls, updateTextureScrolls, type TextureScrollEntry } from '../shader/texture-scroll.js';
 import { setupRotButtons, updateRotButtons, type RotButtonPivot } from './rot-buttons.js';
+import {
+  collectDynamicEntityGroups,
+  isDynamicEntityNode,
+  markDynamicEntities,
+  parseDynamicEntityIndices,
+} from './dynamic-entities.js';
 import { resetWorldTransitionTextures } from '../shader/world-transition.js';
 import { resetBumpTextures } from '../shader/bumpmap.js';
 import { collectLaserBeams, LaserBeams } from './lasers.js';
@@ -262,6 +268,10 @@ export class RenderSession {
   private lastFrameAt = 0;
   /** `momentary_rot_button` 实体（符文盘等）的 pivot；空 = 本图没有旋转实体。 */
   private rotButtons: RotButtonPivot[] = [];
+  /** T-P1-5a：动态实体组（`dynamic-entities.ts` 收集）；开关关闭时恒为空 Map。 */
+  private dynGroups: Map<number, THREE.Group> = new Map();
+  /** 本图待脱静态合并的实体下标；`loadScene` 按开关决定，关闭时为 null（零执行路径）。 */
+  private pendingDynamicEntityIndices: ReadonlySet<number> | null = null;
   /** 主根里的半透明块（每帧按相机距离重排 `renderOrder`，见 `sortTransparentChunks`）。 */
   private transparentChunks: THREE.Mesh[] = [];
   private readonly transparentSortBox = new THREE.Box3();
@@ -461,6 +471,14 @@ export class RenderSession {
     return this.root;
   }
 
+  /**
+   * 动态 brush 实体组（T-P1-5a，实体下标 → 独立 `THREE.Group`）。
+   * 默认关闭；只有 `globalThis.__vbspDynamicEntityGroups === true` 时才有内容。
+   */
+  get dynamicEntityGroups(): ReadonlyMap<number, THREE.Group> {
+    return this.dynGroups;
+  }
+
   /** 当前天空组（没有 3D 天空盒时为 null）。 */
   get skyGroupObject(): THREE.Group | null {
     return this.skyGroup;
@@ -502,6 +520,12 @@ export class RenderSession {
     // 而载图前后的长帧也不该算进新图的预算；档位清零让新图从默认画质起评。
     this.resetFrameBudget();
     this.disposeScene();
+    // T-P1-5a：动态 brush 实体脱静态合并默认关闭（A/B 开关 `__vbspDynamicEntityGroups`）。
+    // 关闭时 pending 为 null：mark / exclude / collect / 矩阵冻结豁免全都不执行，行为与旧版一致。
+    const dynamicGroupsOn = (globalThis as Record<string, unknown>).__vbspDynamicEntityGroups === true;
+    this.pendingDynamicEntityIndices = dynamicGroupsOn
+      ? parseDynamicEntityIndices(input.entityIoJson)
+      : null;
     const rp = readRenderPrefs();
     this.pvs = input.pvsJson ? new PvsManager(input.pvsJson) : null;
     this.translucentSplit = input.translucentSplit !== false;
@@ -782,8 +806,17 @@ export class RenderSession {
    */
   private freezeStaticMatrices(): number {
     let frozen = 0;
+    // 开关关闭时 dynGroups 恒为空：下面的祖先链检查整段跳过，冻结循环与旧版完全一致。
+    const hasDynamicGroups = this.dynGroups.size > 0;
     this.scene.traverse((obj) => {
       if (obj.userData.vbspRotPivot === true) return;
+      // T-P1-5a：动态实体组及其后代不冻结——运行期要改 `group.position/rotation`，
+      // `matrixAutoUpdate=false` 会让改动不生效（阶段 2 由 BrushEntityVisibility 驱动）。
+      if (hasDynamicGroups) {
+        for (let node: THREE.Object3D | null = obj; node; node = node.parent) {
+          if (typeof (node.userData as { vbspDynamicEntityGroup?: unknown }).vbspDynamicEntityGroup === 'number') return;
+        }
+      }
       obj.matrixAutoUpdate = false;
       frozen++;
     });
@@ -1008,6 +1041,10 @@ export class RenderSession {
     this.textureScrolls = [];
     // pivot 是旧根的子树（mesh 已被 disposeObject 释放），清空引用即可。
     this.rotButtons = [];
+    // T-P1-5a：动态实体组属于旧根（mesh 随 root 一起 dispose），引用与待标记集合都要清，
+    // 否则下一张图会沿用旧图的下标集合。
+    this.dynGroups = new Map();
+    this.pendingDynamicEntityIndices = null;
     this.lastFrameAt = 0;
     if (this.root) {
       disposeObject(this.root);
@@ -2611,8 +2648,21 @@ export class RenderSession {
     // 实测开阔路段 344~503 draw ⇒ 主遍 3~4.4ms，不透明桶砍半是能进 320fps 预算的杠杆。
     // 再往细分（160）反而更差：同机位 route1 t=7000 311fps / t=12000 309fps（256 是 314 / 316），
     // 因为单块三角形变多、视锥裁剪变粗 ⇒ 顶点着色与填充反而上涨。256 是这里的最优点。
+    // T-P1-5a：开关打开时先给动态实体打标（必须在合并前，合并会把顶点烘焙成世界坐标、
+    // 丢掉模型身份）；下面的 exclude 把它们留在新根，合并结束后再按实体收进独立组。
+    // 开关关闭时 `dynamicOn` 恒 false：exclude 保持旧实现，mark/collect 整段不执行。
+    const dynamicOn = this.pendingDynamicEntityIndices !== null && this.pendingDynamicEntityIndices.size > 0;
+    if (dynamicOn && this.pendingDynamicEntityIndices) {
+      const marked = markDynamicEntities(root, this.pendingDynamicEntityIndices);
+      if (marked > 0) {
+        console.info(
+          `[optimizeScene] 动态实体: ${marked} 个 mesh 脱静态合并（${this.pendingDynamicEntityIndices.size} 个实体）`,
+        );
+      }
+    }
     // `exclude`：`momentary_rot_button`（符文盘）这类要单独挂 pivot 转的实体不并进块，
-    // 否则顶点被烘焙到世界空间后找不回模型边界（见 `rot-buttons.ts`）。
+    // 否则顶点被烘焙到世界空间后找不回模型边界（见 `rot-buttons.ts`）；
+    // 动态 brush 实体同理（T-P1-5a，见 `dynamic-entities.ts`）。
     const optRoot = mergeIntoNewRoot(root, {
       translucentSplit: this.translucentSplit,
       // 视距 18000 时主遍是「可见块数 × 单 draw 提交」的瓶颈（实测 5µs/draw、GPU 只忙 24%）。
@@ -2620,7 +2670,9 @@ export class RenderSession {
       // 所以 128 与更小的取值等价，这里写 128 表示「已到最粗」。半透明/水面桶不受影响，
       // 几何与材质不变 ⇒ cand_c 同机位截图与改前逐像素一致（diff 0 px）。
       opaqueTargetCells: 128,
-      exclude: (m) => Boolean((m.userData as { vbspRot?: unknown }).vbspRot),
+      exclude: dynamicOn
+        ? (m) => Boolean((m.userData as { vbspRot?: unknown }).vbspRot) || isDynamicEntityNode(m)
+        : (m) => Boolean((m.userData as { vbspRot?: unknown }).vbspRot),
     });
     // 逐顶点烘焙的 prop 曲面（`s1_ramp1_b` / `s1_window01_1` 这类）在 merged chunk 上仍带
     // `_vbsp_vlight`；vhv 的条带采样不连续，Gouraud 会把跳变画成硬边（见 shader 侧
@@ -2660,6 +2712,14 @@ export class RenderSession {
         `[optimizeScene] 分块合并: ${stats.meshes} mesh → ${stats.chunks} 块（${this.app}）` +
           ` | draw call 估算 ${stats.drawCallEst}`,
       );
+    }
+    // T-P1-5a：合并结束后按实体收组（必须在 `mergeWaterSurfaces` 之前完成——装配侧紧接着
+    // 会按父节点归并水面，提前成组能让每个实体成为独立 parent，避免跨实体水面被并掉）。
+    if (dynamicOn) {
+      this.dynGroups = collectDynamicEntityGroups(optRoot);
+      if (this.dynGroups.size > 0) {
+        console.info(`[optimizeScene] 动态实体: ${this.dynGroups.size} 组独立挂载（运行期可整体变换）`);
+      }
     }
     return optRoot;
   }
