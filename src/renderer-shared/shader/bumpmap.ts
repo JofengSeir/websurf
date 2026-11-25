@@ -149,6 +149,21 @@ export function applyBumpToMaterial(material: THREE.Material, bump: THREE.Textur
 }
 
 /**
+ * 切图释放：dispose 注册表里全部缓存的法线/凹凸纹理并清空注册表。
+ *
+ * 与 `world-transition.ts` 同因：这些贴图来自 `parser.getDependency('texture', index)`，
+ * 不是材质 `normalMap`/`bumpMap` 槽位（本模块故意不设，见文件头），`disposeObject` 扫不到，
+ * 也不是全局共享常量 ⇒ 必须在这里显式 dispose，否则每张图留下一整套 `$bumpmap` 贴图。
+ * 由 `RenderSession.disposeScene()` 在 `resetWaterShaders()` 旁调用。
+ */
+export function resetBumpTextures(): void {
+	for (const texture of bumpByFirstTexture.values()) {
+		texture.dispose();
+	}
+	bumpByFirstTexture.clear();
+}
+
+/**
  * 装配**收尾后**调用：给场景里所有「第一贴图已登记法线贴图、且挂了 envMap」的材质注入反射扰动。
  *
  * 返回注入的材质数；0 表示这张图没有可作用的 `$bumpmap` 材质（或都没有 `$envmap`）。

@@ -109,6 +109,21 @@ export function applyWorldTransitionToMaterial(material: THREE.Material, second:
 }
 
 /**
+ * 切图释放：dispose 注册表里全部第二层过渡纹理并清空注册表。
+ *
+ * 为什么必须显式释放：这些贴图是 `parser.getDependency('texture', index)` 取回的独立对象，
+ * **没有**挂在任何材质槽位上（`disposeObject` 只扫 `map`/`lightMap` 等 11 个标准槽位），
+ * 也不是全局共享常量（每次装配只登记本图解析出的贴图）⇒ 不在这里释放就会跨图常驻显存。
+ * 由 `RenderSession.disposeScene()` 在 `resetWaterShaders()` 旁调用。
+ */
+export function resetWorldTransitionTextures(): void {
+	for (const texture of secondByFirstTexture.values()) {
+		texture.dispose();
+	}
+	secondByFirstTexture.clear();
+}
+
+/**
  * 装配**收尾后**调用：给场景里所有「第一贴图已登记第二贴图」的材质挂上混合注入。
  *
  * 返回注入的材质数；小于等于 0 表示这张图没有双贴图地形（`WorldVertexTransition`）。

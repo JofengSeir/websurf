@@ -74,6 +74,8 @@ import { PvsManager } from '../../ts-shared/world/pvs-manager.js';
 import { subdivideVertexLit } from './vlight-subdivide.js';
 import { collectTextureScrolls, updateTextureScrolls, type TextureScrollEntry } from '../shader/texture-scroll.js';
 import { setupRotButtons, updateRotButtons, type RotButtonPivot } from './rot-buttons.js';
+import { resetWorldTransitionTextures } from '../shader/world-transition.js';
+import { resetBumpTextures } from '../shader/bumpmap.js';
 import { collectLaserBeams, LaserBeams } from './lasers.js';
 import { collectParticleEntities, parseEntityIoBlocks, ParticleSystems } from './particles.js';
 import {
@@ -963,6 +965,10 @@ export class RenderSession {
       this.spotBeams = null;
     }
     resetWaterShaders();
+    // 自定义注入的贴图（双贴图过渡 / $bumpmap）不挂在材质标准槽位上，disposeObject 扫不到；
+    // 这两个注册表是模块级强引用，不在这里清就会把上一张图的整批贴图留在显存里。
+    resetWorldTransitionTextures();
+    resetBumpTextures();
     this.transparentChunks = [];
     clearSceneEnvironment(this.scene, { disposeBackground: true });
     this.renderer.renderLists.dispose();
