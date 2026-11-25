@@ -1,5 +1,6 @@
 # websurf — 单一 WASM crate
 #
+# 本 crate 是仓库根 Cargo workspace 的成员（D-133 收口：唯一 Cargo.lock / 唯一 target/）。
 # 模块结构：本 crate 的唯一源文件是 apps/game/crates/wasm/src/lib.rs（wasm-bindgen 导出层：
 # BSP 解析 / GLB 导出 / brush 平面导出等 JS 入口）；下列模块都在共享 crate websurf-wasm-core
 # 内（仓库根 src/wasm-core/），本目录不含它们的副本：
@@ -11,7 +12,10 @@
 # - src/wasm-core/phyfile.rs、src/wasm-core/vhv.rs、src/wasm-core/mosaic/: .phy 碰撞解析、prop 顶点光照、mosaic 与 MTZ 编解码
 
 [package]
-name = "websurf-wasm"
+# 包名带端前缀：debug 与 game 的 wasm crate 收口前同名 websurf-wasm，无法共存于同一 workspace
+# （D-133）。产物名不受包名影响：apps/game/package.json 的 build:wasm 用
+# `wasm-pack --out-name websurf_wasm` 固定 pkg/ 与 web/ 的 websurf_wasm.* 文件名。
+name = "websurf-game-wasm"
 version = "0.1.0"
 edition = "2021"
 description = "WebSurf WASM 核心：BSP 解析、GLB 导出、brush 平面导出"

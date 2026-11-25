@@ -25,7 +25,7 @@
 
 | 位置 | 内容 |
 |---|---|
-| `apps/debug`、`apps/game`、`apps/viewer` | 三端工程；各自独立 npm + Cargo workspace，另有 `crates/wasm` 薄导出壳 |
+| `apps/debug`、`apps/game`、`apps/viewer` | 三端工程；各自独立 npm，Rust 侧是仓库根**唯一** Cargo workspace 的成员（`apps/<app>/crates/wasm` 薄导出壳），共用根 `Cargo.toml` / `Cargo.lock` / `target/`（D-133 收口） |
 | `src/phys` | 共享物理内核（Rust，`websurf-phys`） |
 | `src/wasm-core` | BSP / 模型 / 材质 / GLB 导出的共享核心（Rust，`websurf-wasm-core`） |
 | `src/wasm-bindings` | 三端共享的 `#[wasm_bindgen]` 绑定与 feature 分层（Rust，`websurf-wasm-bindings`） |
@@ -76,6 +76,8 @@ cargo +stable-x86_64-pc-windows-msvc test -p websurf-wasm-core
 
 > **禁止**为了在 `gnu` 下强行通过而修改 `~/.cargo/registry` 里的 crate 源码（例如 `windows-sys` / `windows-link`）。
 
+> 仓库只有一个 Cargo workspace（根 `Cargo.toml`，6 个成员：`websurf-phys` / `websurf-wasm-core` / `websurf-wasm-bindings` / `websurf-debug-wasm` / `websurf-game-wasm` / `websurf-viewer-wasm`，D-133 收口）：`cargo` 一律在仓库根跑、用 `-p <包名>` 选成员，仓库只有根 `Cargo.lock` 与根 `target/`；三端 wasm 仍由 `apps/<app>` 的 `npm run build:wasm` 触发（wasm-pack 在成员目录内只编该成员，产物名由 `--out-name` 固定）。
+
 ### 2.3 渲染归属（三端不得重写共享渲染步骤）
 
 - 三端公共渲染装配全部在 `src/renderer-shared/scene/render-session.ts`，`apps/*/src` 不得复制渲染步骤或物理副作用。
@@ -83,7 +85,7 @@ cargo +stable-x86_64-pc-windows-msvc test -p websurf-wasm-core
 
 ### 2.4 CI
 
-CI 跑 `.github/workflows/ci-gates.yml`：`cargo test -p websurf-phys`、`cargo test -p websurf-wasm-core`（宿主；缺夹具时相关测试自行跳过）、viewer `check-wasm-api --source-only` 源码契约、`check-render-parity.mjs`、`check-shader-anchors.mjs`（校验 `three@0.165.0` 的 `ShaderChunk`/`ShaderLib` 锚点 + 反空洞守卫）、三端 `typecheck`、`test-ts-shared.mjs`（`node:test`：`sim-clock` / `shared-state` / `config-sync` 纯逻辑单测）+ `check-entity-io.mjs`（合成自测 A1–A20；CI 无 `test/maps` 时地图组 SKIP 并 exit 0）+ `check-entity-start-solid.mjs`（Rust ↔ TS 的 `start-solid-cases.json` 跨端单源契约）+ `check-entity-cycles.mjs`（`src/ts-shared/entity` 的 import 有向图无环；反空洞守卫 文件 ≥ 10 / 边 ≥ 20）、三端 wasm 构建 + `check:api` + 共享产物指纹 / 锁与导出一致性 / GLB 一致性（GLB 无地图夹具时 SKIP）；debug/game 各有一份 wasm+TS 构建冒烟。CI 只随 push `main` 与 PR 跑（推 `dev` 不触发、纯 `*.md` 改动不触发）。
+CI 跑 `.github/workflows/ci-gates.yml`：`cargo test -p websurf-phys`、`cargo test -p websurf-wasm-core`（宿主；缺夹具时相关测试自行跳过）、viewer `check-wasm-api --source-only` 源码契约、`check-render-parity.mjs`、`check-shader-anchors.mjs`（校验 `three@0.165.0` 的 `ShaderChunk`/`ShaderLib` 锚点 + 反空洞守卫）、三端 `typecheck`、`test-ts-shared.mjs`（`node:test`：`sim-clock` / `shared-state` / `config-sync` 纯逻辑单测）+ `check-entity-io.mjs`（合成自测 A1–A20；CI 无 `test/maps` 时地图组 SKIP 并 exit 0）+ `check-entity-start-solid.mjs`（Rust ↔ TS 的 `start-solid-cases.json` 跨端单源契约）+ `check-entity-cycles.mjs`（`src/ts-shared/entity` 的 import 有向图无环；反空洞守卫 文件 ≥ 10 / 边 ≥ 20）、三端 wasm 构建 + `check:api` + 共享产物指纹 / 锁、workspace 与导出一致性（`check-lock-consistency.mjs`：唯一根 `Cargo.lock`、三端 `apps/*/Cargo.{toml,lock}` 不得复生、根 workspace members 6 个、wasm-bindgen/serde/serde_json/js-sys 单源；该门禁的 `DEP_GRAPH_EXPORTS`——依赖图偶然带出的 wasm-bindgen 导出——采用**可选登记**：出现必须已登记、消失不报错，绑定 features 推导的差集仍逐名严格比对）/ GLB 一致性（GLB 无地图夹具时 SKIP）；debug/game 各有一份 wasm+TS 构建冒烟。CI 只随 push `main` 与 PR 跑（推 `dev` 不触发、纯 `*.md` 改动不触发）。
 
 **提交前**至少跑与改动对应档位的 `npm run verify:*`；**没跑成功的项要在提交信息里写清楚**。
 

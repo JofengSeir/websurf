@@ -5,11 +5,9 @@ edition = "2021"
 description = "WebSurf 共享物理系统（源自 game/ WebSurf-game 的 Rust 物理，被 debug/ 与 game/ 两工程共同引用）"
 license = "MIT"
 
-# 归属仓库根 Cargo workspace：仓库根 Cargo.toml 的 [workspace] members = ["src", "src/wasm-core"]，
-# 即本 crate 与 websurf-wasm-core 两个成员，共用仓库根 Cargo.lock 与仓库根 target/。
-# 三个工程的 wasm crate 不在本 workspace：apps/debug、apps/game、apps/viewer 各自的 Cargo.toml
-# 是一个 workspace 根，成员分别是 apps/debug/crates/wasm、apps/game/crates/wasm 与
-# apps/viewer/crates/wasm，各有自己的 Cargo.lock 与 target/。
+# 归属仓库根 Cargo workspace（仓库根 Cargo.toml 的 [workspace] members）：本 crate 与
+# websurf-wasm-core、websurf-wasm-bindings 以及三端 wasm crate（apps/{debug,game,viewer}/crates/wasm）
+# 同为成员，共用仓库根 Cargo.lock 与仓库根 target/。D-133 收口前三端各自是一门独立 workspace。
 
 [lib]
 crate-type = ["rlib"]

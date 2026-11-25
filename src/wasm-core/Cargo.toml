@@ -4,8 +4,8 @@
 # 导出层在 apps/debug/crates/wasm/src/lib.rs、apps/game/crates/wasm/src/lib.rs 与
 # apps/viewer/crates/wasm/src/lib.rs，另含各工程特有的提取与装配逻辑。
 #
-# 归属仓库根 Cargo workspace：与 websurf-phys 同为仓库根 Cargo.toml 的 [workspace] members，
-# 共用仓库根 Cargo.lock 与仓库根 target/；三个工程的 wasm crate 各有自己的 workspace、Cargo.lock 与 target/。
+# 归属仓库根 Cargo workspace（根 Cargo.toml 的 [workspace] members）：与 websurf-phys、
+# websurf-wasm-bindings 以及三端 wasm crate 同为成员，共用仓库根 Cargo.lock 与仓库根 target/。
 
 [package]
 name = "websurf-wasm-core"

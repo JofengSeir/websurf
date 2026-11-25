@@ -1,7 +1,8 @@
 # WebSurf: 构建与契约门禁（不含部署）
 #
 # 结构：门禁与部署解耦——部署只构建/发布 apps（见 deploy-pages.yml 的 build job），门禁在 PR 与
-# main 上独立跑；三个 app 的 Rust 编译各在自己的 job 内进行。
+# main 上独立跑；三端 wasm crate 是仓库根唯一 Cargo workspace 的成员（D-133 收口，共用根
+# Cargo.lock 与依赖解析），但各 app 的 Rust 编译仍按 job 分开跑，便于并行与按端定位失败。
 #
 # 本文件实际跑的清单：
 #   rust-unit-tests — `cargo test -p websurf-phys`（共享层物理单测；含蹲姿/surf 回归、P2 幻影门）
@@ -23,7 +24,8 @@
 #                     反空洞守卫 文件 >= 10 / 边 >= 20，2026-11-25）
 #   glb-parity      — 三端 `npm run build:wasm` + `build:ts`（产物）+ 三端 `check:api`（wasm 导出 ↔ TS 导入契约）
 #                     + `check-shared-artifacts.mjs`（产物内共享模块指纹，缺产物 SKIP）
-#                     + `check-lock-consistency.mjs`（Cargo.lock 归属/版本 + wasm 导出面）
+#                     + `check-lock-consistency.mjs`（单根 workspace/唯一 Cargo.lock：三端 Cargo.* 不得复生、
+#                       核心 crate 单源、物理归属 + wasm 导出面/体积/字符串契约）
 #                     + `check-glb-parity.mjs`（GLB BIN sha + f32 归一化 JSON sha + 结构计数等价，缺地图 SKIP）
 #   debug-gates / game-gates — `npm run build:wasm` + `npm run build:ts`（wasm 构建冒烟 +
 #                     tsc/esbuild 打包冒烟）
@@ -83,7 +85,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: wasm-core-host-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          # 唯一根 Cargo.lock（D-133 收口后仓库只有这一份锁；hashFiles 不必再递归三端锁）
+          key: wasm-core-host-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
 
       # 夹具说明（盘点于 2026-10-24，宿主共 34 个测试）：
       # - phyfile::tests::parse_s2_pillbig_phy 依赖 test/maps/surf_666.bsp（gitignore 本地物），

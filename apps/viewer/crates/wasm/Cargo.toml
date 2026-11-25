@@ -1,5 +1,9 @@
 # WebSurf-viewer — 单一 WASM crate（薄导出层）
 #
+# 本 crate 是仓库根 Cargo workspace 的成员（D-133 收口：唯一 Cargo.lock / 唯一 target/）。
+# 包名 websurf-viewer-wasm 的默认 wasm-pack 产物名已是 websurf_viewer_wasm.*，
+# 故 package.json 不需要 --out-name。
+#
 # 导出 BspProcessor 最小集（websurf-wasm-core 解析层）：
 # metadata / parse_spawn_points / export_glb_with_pakfile_models。
 # 不含 websurf-phys（无物理）、不含 mosaic/缺失纹理/默认纹理包（纯视觉查看器）。

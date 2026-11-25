@@ -1,22 +1,28 @@
 /**
  * 依赖/导出面一致性门禁（task-57 G4）。
  *
- * 背景：三端各自独立 Cargo workspace（物理内核 `websurf-phys` 在共享 `src/`，viewer 只依赖
- * `websurf-wasm-core`）；wasm 导出面因 feature 差异天然不同（debug 94 / game 80 / viewer 27）。
- * 没有机械门禁时，这些差异会静默漂移。本脚本把「允许的差异」写成显式白名单：
+ * 背景：三端共用仓库根的**唯一** Cargo workspace（D-133 收口；物理内核 `websurf-phys` 在共享
+ * `src/`，viewer 只依赖 `websurf-wasm-core`）；wasm 导出面因 feature 差异天然不同
+ * （debug 94 / game 80 / viewer 27）。没有机械门禁时，这些差异会静默漂移。本脚本把「允许的
+ * 差异」写成显式白名单：
+ *   - Cargo workspace 收口：仓库只有根 `Cargo.toml`/`Cargo.lock`（唯一 `target/`）；三端
+ *     `apps/<app>/Cargo.toml` 与 `Cargo.lock` 不得复生（各端再声明 [workspace] 会退回 4 套锁 +
+ *     4 套 target/，同一批依赖重复编译）；根 `[workspace] members` 必须正好是 6 个（3 个共享
+ *     crate + 三端 wasm crate）；
  *   - 物理内核：debug/game 的 crates/wasm/Cargo.toml 必须把 `../../../../src` 接进依赖图——
  *     直接 path 依赖 `websurf-phys`，或经共享 `src/wasm-bindings` crate 的 `phys` feature 间接依赖
  *     （两条路都必须落回同一路径；P4 切片后 game 走后者）；
- *     viewer 必须不含 websurf-phys 且不得启用 bindings 的 phys feature；Cargo.lock 中 websurf-phys
- *     只出现在 debug/game；
- *   - 共同包版本：debug↔game 的共同包版本必须一致，只允许已登记的小版本差（3 个）；
- *   - 共享核心 crate：wasm-bindgen/serde/serde_json/js-sys 三端版本一致；
+ *     viewer 必须不含 websurf-phys 且不得启用 bindings 的 phys feature；根锁里
+ *     `websurf-viewer-wasm` 的依赖表也不得出现 websurf-phys；
+ *   - 共享核心 crate：wasm-bindgen/serde/serde_json/js-sys 在唯一根锁内各自只有一个版本
+ *     （单源；同名多版本会让三端跑不同工具链，体积/导出面随之漂移）；
  *   - wasm 导出面：期望集由 `src/wasm-bindings` 源码 + 三端 `crates/wasm/Cargo.toml` 的
  *     bindings features **推导**（P4 revision 3：不再手写导出名白名单）：
  *       ① 每端 derived ⊆ actual（golden 逐名，源码声明了但 pkg 没有 = FAIL）；
  *       ② game ⊆ debug（game 独有必须为空）；
- *       ③ debug-only / viewer-only 必须正好等于「推导差集 + 依赖图产物登记（DEP_GRAPH_EXPORTS）」，
- *          多余或缺失都 FAIL，不允许把新导出塞进白名单蒙混；
+ *       ③ debug-only / viewer-only 的「features 推导差集」必须逐名命中（缺一即 FAIL）；推导外多出的
+ *          导出必须在 DEP_GRAPH_EXPORTS 登记。登记项是**可选**的：出现必须已登记，消失不报错
+ *          （依赖图偶然带出的 wasm_bindgen 导出不是契约；D-133 实测其存留随链接 GC 变化）；
  *       ④ 物理导出（physworld_* 与 PhysWorld）debug/game 一致、viewer 为 0；
  *       ⑤ `.wasm` 体积预算：task-81 真基线 ±3% 区间，超出（含明显变小）FAIL（防 feature 泄漏
  *          把工具链塞进产品端，也防导出面/feature 被误删）；
@@ -47,62 +53,107 @@ const skips = [];
 const fail = (m) => violations.push(m);
 const skip = (m) => skips.push(m);
 
-// ── 1) Cargo.lock ───────────────────────────────────────────────────────────
-/** 已登记的 debug↔game 小版本差（锁文件时间不同步导致；新差异必须显式登记）。 */
-const ALLOWED_VERSION_DIFFS = new Set(['bytemuck_derive', 'zerocopy', 'zerocopy-derive']);
-/** 三端必须同版本的共享核心 crate。 */
+// ── 1) Cargo workspace / 锁文件收口（D-133：4 套 workspace → 唯一根） ────────
+/** 收口后期望的根 workspace 成员（相对仓库根，正斜杠）。改成员 = 改架构契约，必须同步本表。 */
+const EXPECTED_MEMBERS = [
+  'src', // websurf-phys
+  'src/wasm-core', // websurf-wasm-core
+  'src/wasm-bindings', // websurf-wasm-bindings
+  'apps/debug/crates/wasm', // websurf-debug-wasm
+  'apps/game/crates/wasm', // websurf-game-wasm
+  'apps/viewer/crates/wasm', // websurf-viewer-wasm
+];
+/** 三端 wasm crate 在根锁里的包名（D-133 前 debug/game 同名 websurf-wasm，无法共存于一个 workspace）。 */
+const WASM_PACKAGES = { debug: 'websurf-debug-wasm', game: 'websurf-game-wasm', viewer: 'websurf-viewer-wasm' };
+/** 必须在唯一根锁内单源的共享核心 crate（多版本 = 三端工具链/依赖不一致）。 */
 const CORE_CRATES = ['wasm-bindgen', 'serde', 'serde_json', 'js-sys'];
 /** 必须 path 依赖共享物理 crate 的 Cargo.toml。 */
 const PHYS_PATH_DEP = 'websurf-phys';
 
+/** 解析锁文件：保留每个包的 name/version/依赖名（同名多版本不被折叠）。 */
 function parseLock(file) {
   const text = readFileSync(file, 'utf8');
-  const pkgs = new Map();
+  const pkgs = [];
   for (const block of text.split('[[package]]').slice(1)) {
     const name = /^\s*name\s*=\s*"([^"]+)"/m.exec(block);
     const version = /^\s*version\s*=\s*"([^"]+)"/m.exec(block);
-    if (name && version) pkgs.set(name[1], version[1]);
+    if (!name || !version) continue;
+    const depBlock = /^\s*dependencies\s*=\s*\[([\s\S]*?)\]/m.exec(block);
+    // 同名多版本时锁里写作 "name version"，只取包名
+    const deps = depBlock ? [...depBlock[1].matchAll(/"([^"]+)"/g)].map((m) => m[1].split(' ')[0]) : [];
+    pkgs.push({ name: name[1], version: version[1], deps: new Set(deps) });
   }
   return pkgs;
 }
 
-const locks = {};
-const lockPaths = {};
+const rootManifest = join(ROOT, 'Cargo.toml');
+const rootLock = join(ROOT, 'Cargo.lock');
+
+// 1.1 唯一 workspace 根：三端不得复生独立 workspace / 独立锁
+if (!existsSync(rootManifest)) fail('根 Cargo.toml 不存在（单根 Cargo workspace 是 D-133 的架构约定）');
 for (const app of APPS) {
-  const p = join(ROOT, 'apps', app, 'Cargo.lock');
-  lockPaths[app] = p;
-  if (existsSync(p)) locks[app] = parseLock(p);
+  if (existsSync(join(ROOT, 'apps', app, 'Cargo.toml'))) {
+    fail(`apps/${app}/Cargo.toml 复生：D-133 起三端 wasm crate 是根 workspace 成员，各端不得再声明独立 [workspace]（会退回 4 套 Cargo.lock + 4 套 target/）`);
+  }
+  if (existsSync(join(ROOT, 'apps', app, 'Cargo.lock'))) {
+    fail(`apps/${app}/Cargo.lock 复生：D-133 起仓库只有根 Cargo.lock（各端目录出现锁文件 = 又跑了独立 workspace 构建）`);
+  }
 }
-const lockKeys = Object.keys(locks);
-if (lockKeys.length === 0) {
-  // 锁文件入库；全缺说明仓库被裁剪/门禁被绕过 ⇒ 不能当成功
-  fail('三端 Cargo.lock 均不存在（源码类门禁：锁文件入库，缺失即 FAIL 而非 SKIP）');
-} else if (lockKeys.length !== APPS.length) {
-  fail(`Cargo.lock 部分缺失：${APPS.filter((a) => !locks[a]).join(',')}（全缺才 SKIP）`);
+
+// 1.2 根 members 与收口契约一致（6 个：3 共享 crate + 3 端 wasm crate）
+if (existsSync(rootManifest)) {
+  const manifestCode = readFileSync(rootManifest, 'utf8').replace(/#[^\n]*/g, '');
+  const membersBlock = /^\s*members\s*=\s*\[([\s\S]*?)\]/m.exec(manifestCode);
+  const members = membersBlock ? [...membersBlock[1].matchAll(/"([^"]+)"/g)].map((m) => m[1].replace(/\\/g, '/')) : [];
+  const missing = EXPECTED_MEMBERS.filter((m) => !members.includes(m));
+  const extra = members.filter((m) => !EXPECTED_MEMBERS.includes(m));
+  if (members.length === 0) {
+    fail('根 Cargo.toml 缺少 [workspace] members');
+  } else if (missing.length || extra.length) {
+    fail(`根 Cargo.toml members 与收口契约不一致：缺 ${missing.join(',') || '(none)'}；多 ${extra.join(',') || '(none)'}（期望 ${EXPECTED_MEMBERS.length} 个：${EXPECTED_MEMBERS.join(' ')}）`);
+  }
+}
+
+// 1.3 唯一根锁：三端 wasm 包在册、核心 crate 单源、viewer 依赖表不含物理
+if (!existsSync(rootLock)) {
+  // 锁文件入库；缺失说明仓库被裁剪/门禁被绕过 ⇒ 不能当成功
+  fail('根 Cargo.lock 不存在（源码类门禁：唯一根锁入库，缺失即 FAIL 而非 SKIP）');
 } else {
-  // 物理内核归属
-  if (!locks.debug.has(PHYS_PATH_DEP)) fail('apps/debug/Cargo.lock 不含 websurf-phys（物理内核未接入）');
-  if (!locks.game.has(PHYS_PATH_DEP)) fail('apps/game/Cargo.lock 不含 websurf-phys（物理内核未接入）');
-  if (locks.viewer.has(PHYS_PATH_DEP)) fail('apps/viewer/Cargo.lock 含 websurf-phys（viewer 无物理是架构约定）');
-  if (locks.debug.get(PHYS_PATH_DEP) !== locks.game.get(PHYS_PATH_DEP)) {
-    fail(`websurf-phys 版本不一致：debug=${locks.debug.get(PHYS_PATH_DEP)} game=${locks.game.get(PHYS_PATH_DEP)}`);
+  const pkgs = parseLock(rootLock);
+  const byName = new Map();
+  for (const p of pkgs) {
+    if (!byName.has(p.name)) byName.set(p.name, []);
+    byName.get(p.name).push(p.version);
   }
-  // 共享核心 crate 三端同版本
+  // 三个 wasm crate 必须在唯一根锁里（收口生效的直接证据）
+  for (const app of APPS) {
+    if (!byName.has(WASM_PACKAGES[app])) {
+      fail(`根 Cargo.lock 缺 wasm crate ${WASM_PACKAGES[app]}（apps/${app}/crates/wasm 未收进根 workspace？）`);
+    }
+  }
+  // 旧的同名 crate 必须消失：websurf-wasm 是 D-133 前 debug 与 game 共用的包名（同一 workspace 不允许同名）
+  if (byName.has('websurf-wasm')) {
+    fail('根 Cargo.lock 仍含 websurf-wasm（D-133 前 debug/game 的同名包；两个同名成员无法共存于一个 workspace）');
+  }
+  if (!byName.has(PHYS_PATH_DEP)) {
+    fail(`根 Cargo.lock 不含 ${PHYS_PATH_DEP}（物理内核未接入：debug/game 的 phys feature 断链）`);
+  }
+  // 共享核心 crate 单源：唯一根锁内恰好一个版本
+  const coreVersions = {};
   for (const crate of CORE_CRATES) {
-    const got = APPS.map((a) => `${a}=${locks[a].get(crate) ?? '(absent)'}`);
-    if (new Set(got.map((s) => s.split('=')[1])).size !== 1) fail(`共享 crate ${crate} 三端版本不一致：${got.join(' ')}`);
+    const versions = [...new Set(byName.get(crate) ?? [])];
+    coreVersions[crate] = versions.length ? versions.join('+') : '(absent)';
+    if (versions.length === 0) fail(`根 Cargo.lock 缺共享核心 crate ${crate}`);
+    else if (versions.length > 1) fail(`共享核心 crate ${crate} 在根 Cargo.lock 出现多版本（${versions.join(', ')}）：三端必须跑同一套工具链`);
   }
-  // debug↔game 共同包版本（白名单外必须一致）
-  const commonDG = [...locks.debug.keys()].filter((n) => locks.game.has(n));
-  const newDiffs = commonDG
-    .filter((n) => locks.debug.get(n) !== locks.game.get(n) && !ALLOWED_VERSION_DIFFS.has(n))
-    .map((n) => `${n}:${locks.debug.get(n)}/${locks.game.get(n)}`);
-  for (const d of newDiffs) fail(`debug↔game 共同包出现未登记版本差：${d}`);
-  const allowedSeen = commonDG.filter((n) => locks.debug.get(n) !== locks.game.get(n));
-  // viewer 是独立薄 workspace：与共享端的版本差只做 INFO（不 fail）
-  const viewerDiffCount = [...locks.debug.keys()].filter((n) => locks.viewer.has(n) && locks.debug.get(n) !== locks.viewer.get(n)).length;
-  console.log(`[lock] Cargo.lock：debug=${locks.debug.size} game=${locks.game.size} viewer=${locks.viewer.size} 包；` +
-    `debug/game 共同包 ${commonDG.length}，已登记版本差 ${allowedSeen.join(',') || '(none)'}；viewer 与 debug 版本差 ${viewerDiffCount}（INFO，独立 workspace）`);
+  // 单根锁是 feature 并集，故这里判「viewer wasm 包的依赖表」本身；feature 层由下面的 Cargo.toml 检查兜底
+  const viewerPkg = pkgs.find((p) => p.name === WASM_PACKAGES.viewer);
+  if (viewerPkg && viewerPkg.deps.has(PHYS_PATH_DEP)) {
+    fail(`根 Cargo.lock 的 ${WASM_PACKAGES.viewer} 依赖表含 ${PHYS_PATH_DEP}（viewer 无物理是架构约定）`);
+  }
+  console.log(`[lock] 唯一根 Cargo.lock：${pkgs.length} 包；核心 crate 单源 ` +
+    CORE_CRATES.map((c) => `${c}=${coreVersions[c]}`).join(' ') +
+    `；根 members 契约 ${EXPECTED_MEMBERS.length} 个（含三端 wasm：${APPS.map((a) => WASM_PACKAGES[a]).join(' / ')}）`);
 }
 
 // Cargo.toml 路径依赖（比 lock 更直接：确认物理内核确实接进依赖图）
@@ -164,7 +215,10 @@ const FEATURE_CLOSURE = {
 };
 /** 依赖图（非 bindings 源码）带进 wasm 的导出，必须单列登记并附来源说明。
  *  ChromaSampling = v_frame（rav1e 依赖链）在 wasm32 上的 `#[wasm_bindgen]` 枚举；
- *  2026-11-18 实测只有 debug 的依赖图保留它（game/viewer 无），prod 端不应新增此类项。 */
+ *  2026-11-18 实测只有 debug 的依赖图保留它（game/viewer 无），prod 端不应新增此类项。
+ *  语义（D-133）：可选登记——出现必须已登记，消失不报错（wasm-bindgen 0.2.128 的
+ *  `__wasm_bindgen_unstable` 描述符没有 `#[used]`，存留是链接 GC 的副作用，随 workspace
+ *  布局 / -C metadata 哈希变化，不是稳定契约）。features 推导差集不享受此豁免。 */
 const DEP_GRAPH_EXPORTS = { debug: ['ChromaSampling'], game: [], viewer: [] };
 /** `.wasm` 体积真基线（字节；task-81 在 36cf19a 的干净构建实测）与容忍度（±3% 区间）。
  *  下界与上界都判：体积异常变小通常意味着导出面/feature 被误删，与 ⑥ 的逐名基线互为补充。 */
@@ -472,26 +526,33 @@ if (pkgPresent > 0 && exportSets.debug && exportSets.game && exportSets.viewer) 
   const gameOnly = sorted(exportSets.game).filter((n) => !exportSets.debug.has(n));
   for (const n of gameOnly) fail(`wasm 导出面越界：game 有而 debug 没有 ${n}（game 必须是 debug 子集）`);
 
-  // ③ debug-only = 推导差集 + 依赖图产物登记
+  // ③ debug-only：features 推导差集严格逐名；依赖图偶然导出为「可选登记」（出现必须已登记，消失不报错）
   const debugOnly = sorted(exportSets.debug).filter((n) => !exportSets.game.has(n));
-  const expectDebugOnly = sorted(
-    [...derived.debug].filter((n) => !derived.game.has(n)).concat(DEP_GRAPH_EXPORTS.debug),
-  );
-  if (JSON.stringify(debugOnly) !== JSON.stringify(expectDebugOnly)) {
-    const extra = debugOnly.filter((n) => !expectDebugOnly.includes(n));
-    const missing = expectDebugOnly.filter((n) => !debugOnly.includes(n));
-    if (extra.length) fail(`debug-only 出现 features 推导外的导出：${extra.join(',')}（新差异必须先落到 bindings feature/源码，或登记 DEP_GRAPH_EXPORTS）`);
-    if (missing.length) fail(`features 推导的 debug-only 导出在 pkg 中缺失：${missing.join(',')}`);
+  const derivedDebugOnly = sorted([...derived.debug].filter((n) => !derived.game.has(n)));
+  const missingDebugOnly = derivedDebugOnly.filter((n) => !debugOnly.includes(n));
+  for (const n of missingDebugOnly) {
+    fail(`features 推导的 debug-only 导出在 pkg 中缺失：${n}（推导差集必须逐名命中；DEP_GRAPH_EXPORTS 不豁免）`);
+  }
+  const extraDebugOnly = debugOnly.filter((n) => !derivedDebugOnly.includes(n) && !DEP_GRAPH_EXPORTS.debug.includes(n));
+  for (const n of extraDebugOnly) {
+    fail(`debug-only 出现 features 推导外的导出：${n}（新差异必须先落到 bindings feature/源码，或登记 DEP_GRAPH_EXPORTS）`);
   }
 
-  // ④ viewer-only = 推导差集 + 依赖图产物登记
+  // ④ viewer-only：同 ③ 语义（推导差集严格；登记项可选）
   const viewerOnly = sorted(exportSets.viewer).filter((n) => !exportSets.debug.has(n));
-  const expectViewerOnly = sorted(
-    [...derived.viewer].filter((n) => !derived.debug.has(n)).concat(DEP_GRAPH_EXPORTS.viewer),
-  );
-  if (JSON.stringify(viewerOnly) !== JSON.stringify(expectViewerOnly)) {
-    fail(`viewer-only 导出与 features 推导不符：实际 ${JSON.stringify(viewerOnly)}，期望 ${JSON.stringify(expectViewerOnly)}`);
+  const derivedViewerOnly = sorted([...derived.viewer].filter((n) => !derived.debug.has(n)));
+  const missingViewerOnly = derivedViewerOnly.filter((n) => !viewerOnly.includes(n));
+  for (const n of missingViewerOnly) {
+    fail(`features 推导的 viewer-only 导出在 pkg 中缺失：${n}（推导差集必须逐名命中；DEP_GRAPH_EXPORTS 不豁免）`);
   }
+  const extraViewerOnly = viewerOnly.filter((n) => !derivedViewerOnly.includes(n) && !DEP_GRAPH_EXPORTS.viewer.includes(n));
+  for (const n of extraViewerOnly) {
+    fail(`viewer-only 出现 features 推导外的导出：${n}（新差异必须先落到 bindings feature/源码，或登记 DEP_GRAPH_EXPORTS）`);
+  }
+  const registeredPresent = {
+    debug: DEP_GRAPH_EXPORTS.debug.filter((n) => debugOnly.includes(n)),
+    viewer: DEP_GRAPH_EXPORTS.viewer.filter((n) => viewerOnly.includes(n)),
+  };
 
   // ⑤ 物理导出面（physworld_* / PhysWorld；未被 bindings 源码推导覆盖，单独判据）
   const phys = (app) => sorted(exportSets[app]).filter((n) => PHYS_EXPORT_RE.test(n));
@@ -564,7 +625,8 @@ if (pkgPresent > 0 && exportSets.debug && exportSets.game && exportSets.viewer) 
   console.log(`[lock] 导出面（features 推导）：debug=${derived.debug.size} game=${derived.game.size} viewer=${derived.viewer.size} 项；` +
     `实际 debug=${exportSets.debug.size} game=${exportSets.game.size} viewer=${exportSets.viewer.size}；` +
     `物理导出 debug=${physDebug.length} game=${physGame.length} viewer=${physViewer.length}；` +
-    `debug-only=${debugOnly.length}（推导 ${expectDebugOnly.length}）viewer-only=${viewerOnly.length}（推导 ${expectViewerOnly.length}）`);
+    `debug-only=${debugOnly.length}（推导 ${derivedDebugOnly.length}+登记 ${registeredPresent.debug.length}/${DEP_GRAPH_EXPORTS.debug.length}）` +
+    `viewer-only=${viewerOnly.length}（推导 ${derivedViewerOnly.length}+登记 ${registeredPresent.viewer.length}/${DEP_GRAPH_EXPORTS.viewer.length}）`);
 }
 
 for (const app of APPS) {
@@ -583,4 +645,4 @@ if (violations.length) {
   process.exit(1);
 }
 for (const s of skips) console.log(`[lock-consistency] SKIP：${s}`);
-console.log(`[lock-consistency] OK：物理内核归属/共同包版本/导出面（bindings features 推导）/pkg 导出面基线（task-81 逐名）/体积区间（task-81 基线 ±3%）/字符串契约均符合登记。${skips.length ? `（含 SKIP 项：${skips.join(';')}）` : ''}`);
+console.log(`[lock-consistency] OK：唯一根 Cargo workspace/锁（三端 Cargo.* 未复生、members 6、核心 crate 单源）/物理内核归属/导出面（bindings features 推导）/pkg 导出面基线（task-81 逐名）/体积区间（task-81 基线 ±3%）/字符串契约均符合登记。${skips.length ? `（含 SKIP 项：${skips.join(';')}）` : ''}`);

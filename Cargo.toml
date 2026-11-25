@@ -1,16 +1,24 @@
-# WebSurf — 仓库根 Cargo workspace（共享层）
+# WebSurf — 仓库根 Cargo workspace（D-133 起为仓库唯一的 workspace）
 #
-# 本 workspace 只收共享层 crate：websurf-phys（src/）、websurf-wasm-core（src/wasm-core）
-# 与 websurf-wasm-bindings（src/wasm-bindings，P4 三端共享 wasm-bindgen 导出层）。
+# 2026-11-25（D-133）起仓库内只有一个 Cargo workspace：一个 Cargo.lock、一个 target/。
+# 六个成员：
+# - src/                     websurf-phys：共享物理内核
+# - src/wasm-core/           websurf-wasm-core：BSP/GLB/模型解析导出核心
+# - src/wasm-bindings/       websurf-wasm-bindings：三端共享 wasm-bindgen 导出层（按 features）
+# - apps/debug/crates/wasm/  websurf-debug-wasm：debug 端 wasm 薄壳
+# - apps/game/crates/wasm/   websurf-game-wasm：game 端 wasm 薄壳
+# - apps/viewer/crates/wasm/ websurf-viewer-wasm：viewer 端 wasm 薄壳（不含 websurf-phys）
 #
-# ── 为什么三个工程的 wasm crate 不在本 workspace ─────────────────────
-# debug 与 game 的 crates/wasm 同名：apps/debug/crates/wasm/Cargo.toml 与
-# apps/game/crates/wasm/Cargo.toml 的 [package] name 都是 websurf-wasm，而 Cargo
-# 不允许同一 workspace 有两个同名成员。两工程的 wasm-pack 产物同为 websurf_wasm_bg.wasm，
-# 被 package.json 的 build:wasm、三工程 dev.cmd / build.cmd（无条件重编译）与
-# 已移除的 wasm-stale-check 脚本（T-653）的入参引用（dev.cmd / build.cmd 不再用存在性门判断，
-# 每次都跑 build:wasm ⇒ pkg/ 与 web/ 两份副本同步刷新）。三个工程各自声明 [workspace]，故各自独立：
-# 加上本 workspace 共四个，target/ 分别在仓库根与 apps/debug、apps/game、apps/viewer 下。
+# ── 为什么 debug/game 的 wasm 包要改名 ──────────────────────────────
+# 收口前 apps/debug 与 apps/game 的 crates/wasm 同名 websurf-wasm，而 Cargo 不允许同一
+# workspace 有两个同名成员 ⇒ 三端各自声明 [workspace]（4 套 Cargo.lock + 4 套 target/，
+# 同一批依赖被重复编译）。改名后三端共用根 target/ 与根 Cargo.lock。pkg/ 产物文件名不受
+# 包名影响：debug/game 的 package.json 用 `wasm-pack --out-name websurf_wasm` 固定为
+# websurf_wasm.*，viewer 包名 websurf-viewer-wasm 的默认产物名已是 websurf_viewer_wasm.*，
+# 故 copy-wasm-pkg.mjs / check:api / PKG_EXPORT_BASELINE 的契约均不变。
+#
+# 门禁：src/scripts/check-lock-consistency.mjs 断言 apps/*/Cargo.{toml,lock} 不得复生，
+# 并用根 Cargo.lock 的依赖表校验 viewer 端不依赖 websurf-phys。
 #
 # ── vmdl vendor patch ──────────────────────────────────────────────
 # websurf-wasm-core 依赖 vmdl 0.2，本 workspace 用 [patch.crates-io] 把它换成仓库内副本
@@ -24,9 +32,12 @@
 [workspace]
 resolver = "2"
 members = [
-    "src",                  # websurf-phys：共享物理系统
-    "src/wasm-core",        # websurf-wasm-core：共享 BSP/GLB/模型解析导出
-    "src/wasm-bindings",    # websurf-wasm-bindings：三端共享 wasm-bindgen 导出层（P4，按 features）
+    "src",                        # websurf-phys：共享物理系统
+    "src/wasm-core",              # websurf-wasm-core：共享 BSP/GLB/模型解析导出
+    "src/wasm-bindings",          # websurf-wasm-bindings：三端共享 wasm-bindgen 导出层（P4，按 features）
+    "apps/debug/crates/wasm",     # websurf-debug-wasm：debug 端 wasm 薄壳
+    "apps/game/crates/wasm",      # websurf-game-wasm：game 端 wasm 薄壳
+    "apps/viewer/crates/wasm",    # websurf-viewer-wasm：viewer 端 wasm 薄壳（无物理）
 ]
 
 [patch.crates-io]
@@ -40,7 +51,7 @@ vmdl = { path = "src/vendor/vmdl" }
 lzma = { path = "src/vendor/lzma" }
 
 # ============================================================
-# 性能优化配置（只对本 workspace 的构建生效；三个工程各自的 Cargo.toml 也各有一份）
+# 性能优化配置（对本 workspace 全部成员生效，含三端 wasm 构建；收口前是四份同值副本）
 # ============================================================
 [profile.release]
 opt-level = 3

@@ -1998,6 +1998,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "websurf-debug-wasm"
+version = "0.1.0"
+dependencies = [
+ "websurf-wasm-bindings",
+]
+
+[[package]]
+name = "websurf-game-wasm"
+version = "0.1.0"
+dependencies = [
+ "websurf-wasm-bindings",
+]
+
+[[package]]
 name = "websurf-phys"
 version = "0.1.0"
 dependencies = [
@@ -2005,6 +2019,13 @@ dependencies = [
  "serde",
  "serde_json",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "websurf-viewer-wasm"
+version = "0.1.0"
+dependencies = [
+ "websurf-wasm-bindings",
 ]
 
 [[package]]
