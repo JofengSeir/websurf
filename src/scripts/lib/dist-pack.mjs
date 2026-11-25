@@ -245,6 +245,10 @@ const TYPES = {
 };
 const HEADERS = {
   'Access-Control-Allow-Origin': '*',
+  // COOP/COEP 让首屏即 crossOriginIsolated（SharedArrayBuffer 可用），
+  // 与 src/scripts/serve.mjs 的开发服务一致；缺了它们要等 coi-serviceworker 注入后重载一次。
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'require-corp',
   'Cache-Control': 'no-cache',
 };
 
