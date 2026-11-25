@@ -362,6 +362,7 @@ impl PhysWorld {
             }
         }
         if hull_brushes > 0 || hull_non_convex > 0 {
+            #[cfg(not(target_arch = "wasm32"))]
             eprintln!(
                 "[phys] .phy 凸体 → brush: 块={hull_brushes}（box bevel={hull_box_bevels} edge bevel={hull_edge_bevels}）；非凸/开集/退化退回三角形={hull_non_convex}",
             );
@@ -401,6 +402,7 @@ impl PhysWorld {
             if !self.world.is_position_free(&self.spawn, &mins, &maxs) {
                 match player::find_free_origin(&mut self.world, &self.spawn, &mins, &maxs) {
                     Some(free) => {
+                        #[cfg(not(target_arch = "wasm32"))]
                         eprintln!(
                             "[phys] 出生点嵌入 {:?}，已搬到最近空闲位 {:?}（候选集内首个空闲点）",
                             self.spawn, free
@@ -409,6 +411,7 @@ impl PhysWorld {
                         self.player.origin = free;
                     }
                     None => {
+                        #[cfg(not(target_arch = "wasm32"))]
                         eprintln!(
                             "[phys] 出生点嵌入 {:?} 且候选集（34 HU 内 60 候选）无空闲位，保持原位；\
                              该体型在近邻空间放不下，后续 tick 将持续判卡死",

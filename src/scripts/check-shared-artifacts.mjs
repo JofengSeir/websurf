@@ -234,7 +234,6 @@ const FORBIDDEN_IN_VIEWER = [
   'src/ts-shared/gameplay/entity-gameplay.ts',
   'src/ts-shared/phys/world-builder.ts',
   'src/ts-shared/phys/authority-calibrator.ts',
-  'src/renderer-shared/environment/light-manager.ts',
 ];
 
 /**

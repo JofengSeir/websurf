@@ -34,7 +34,7 @@
 //! 其它导出面：`on_teleported`（把各 trigger 的 `inside` 清回 false，只有步内触发路径调）、
 //! `reset_cooldown`（冷却清零）、`check_death`（掉落死亡），以及给 `phys::seed` 的四个
 //! 通道（`seed_cooldown` / `cooldown_value` / `seed_trigger_inside` / `trigger_inside_vec`，
-//! 调用点都在 `src/phys/seed.rs` 的 `extract_seed` / `apply_seed`）。文件私有的 `in_aabb` 无调用点。
+//! 调用点都在 `src/phys/seed.rs` 的 `extract_seed` / `apply_seed`）。
 //!
 //! 边界：不做 BSP 解析、不发事件（`PhysEvent` 由 `PhysWorld` 组装）、不写玩家状态、
 //! 不判落点是否悬空、不参与碰撞。
@@ -525,25 +525,6 @@ fn probe_below_foot(pos: &V3, t: &TeleportTrigger) -> bool {
     }
     // 下探区间 [pos.y - FOOT_PROBE_DEPTH, pos.y] 与凸包 Y 区间 [lo, hi] 是否相交
     pos[1] - FOOT_PROBE_DEPTH <= hi && pos[1] >= lo
-}
-
-/// 点（玩家 origin）是否落在 trigger 的 model AABB 内（三轴均为闭区间，含边界；
-/// `mins` / `maxs` 任一为 `None` 即 `false`）。
-///
-/// **当前工作区内零调用点**：`check` 的两条路径分别用 `in_trigger_zone` 与
-/// `probe_below_foot`，两者都带凸包优先、AABB 回退的逻辑，本函数不在链路上；
-/// `#[allow(dead_code)]` 就是为它挂的。
-#[allow(dead_code)]
-fn in_aabb(pos: &V3, t: &TeleportTrigger) -> bool {
-    let (Some(min), Some(max)) = (&t.mins, &t.maxs) else {
-        return false;
-    };
-    pos[0] >= min[0]
-        && pos[0] <= max[0]
-        && pos[1] >= min[1]
-        && pos[1] <= max[1]
-        && pos[2] >= min[2]
-        && pos[2] <= max[2]
 }
 
 /// A 路径的贴面容差（HU，**只有"落地 + 斜面"才取这个值**，否则 gap = 0）：
