@@ -387,6 +387,13 @@ const planeB = { value: new THREE.Vector4() };
 const planeCount = { value: 0 };
 // （T-650 v4 后折射/深度 RT 每帧由 renderWaterFramePasses 无条件重渲，旧的 refrDone 每帧一次门已删。）
 let refrRendering = false;
+const _refrCanvasSize = new THREE.Vector2();
+const _refrPrevClear = new THREE.Color();
+const _refrHidden: THREE.Mesh[] = [];
+/** 装配期登记的「水面 mesh → 顶面 bbox.max.y」，供 `renderRefraction` 直接遍历，避免每帧 traverse 整场景。 */
+const waterMeshes = new Map<THREE.Mesh, number>();
+/** 装配期预筛的 `*_beneath` 水下底面材质 → 水位高度，避免每帧对全部水材质跑正则。 */
+const beneathMaterials = new Map<THREE.MeshBasicMaterial, number>();
 
 function refractionOff(): boolean {
   // **缺省开**（2026-10-21 第 4 轮）：编译错误已由 harness 硬门禁兜住（出现 shader error 直接失败），
@@ -423,7 +430,7 @@ function planeDepthRange(sortedHeights: number[], fallback: number): number {
 
 /** 渲染折射 RT：隐藏水面材质后把同一相机看到的场景渲进 color+depth。 */
 export function renderRefraction(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera): void {
-  const canvas = renderer.getDrawingBufferSize(new THREE.Vector2());
+  const canvas = renderer.getDrawingBufferSize(_refrCanvasSize);
   // 只用于 A/B 取证：`__vbspWaterRefrScale = 0.25` 看「RT 分辨率是不是瓶颈」（改了会触发一次重建）。
   const scale = (g as { __vbspWaterRefrScale?: number }).__vbspWaterRefrScale ?? REFR_SCALE;
   const w = Math.max(64, Math.floor(canvas.x * scale));
@@ -495,29 +502,39 @@ export function renderRefraction(renderer: THREE.WebGLRenderer, scene: THREE.Sce
   const nearest = nearestWaterHeight(camera);
   // 隐藏的粒度必须是**网格**而不是材质：666 的 `dev_water2` 同时用作池顶与池底，
   // 按材质隐藏会把底面一起藏掉 ⇒ RT 里没有池底、深度 pass 也量不到厚度（实测厚度恒 0）。
-  const hidden: THREE.Mesh[] = [];
-  scene.traverse((obj) => {
-    const mesh = obj as THREE.Mesh;
-    if (!mesh.isMesh || !mesh.visible || !mesh.geometry) return;
-    const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
-    const list = Array.isArray(mat) ? mat : mat ? [mat] : [];
-    if (!list.some((mm) => waterMaterials.has(mm as THREE.MeshBasicMaterial))) return;
-    mesh.geometry.computeBoundingBox();
-    const bb = mesh.geometry.boundingBox;
-    if (!bb) return;
-    const top = bb.max.y; // 这些合并网格都是水平整层 ⇒ bbox.max.y 就是该层高度
-    const hideAll = g.__vbspWaterHideAllRefr === true;
-    if (hideAll || (nearest !== null && Math.abs(top - nearest) < 1.5)) {
-      mesh.visible = false;
-      hidden.push(mesh);
+  _refrHidden.length = 0;
+  const hideAll = g.__vbspWaterHideAllRefr === true;
+  if (waterMeshes.size > 0) {
+    for (const [mesh, top] of waterMeshes) {
+      if (!mesh.visible) continue;
+      if (hideAll || (nearest !== null && Math.abs(top - nearest) < 1.5)) {
+        mesh.visible = false;
+        _refrHidden.push(mesh);
+      }
     }
-  });
+  } else {
+    scene.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.visible || !mesh.geometry) return;
+      const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+      const list = Array.isArray(mat) ? mat : mat ? [mat] : [];
+      if (!list.some((mm) => waterMaterials.has(mm as THREE.MeshBasicMaterial))) return;
+      if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+      const bb = mesh.geometry.boundingBox;
+      if (!bb) return;
+      const top = bb.max.y;
+      if (hideAll || (nearest !== null && Math.abs(top - nearest) < 1.5)) {
+        mesh.visible = false;
+        _refrHidden.push(mesh);
+      }
+    });
+  }
   const prevTarget = renderer.getRenderTarget();
   refrRendering = true;
   // RT 的"背景"要与主画面接近：本工程的天空是**网格**（不是 `scene.background`），
   // RT 里渲不到 ⇒ 默认清成黑色，位移采样一旦越界就沿轮廓出现黑边噪点。
   // 这里按 `scene.background` 是颜色时用它，否则用天光色兜底。
-  const prevClear = renderer.getClearColor(new THREE.Color());
+  const prevClear = renderer.getClearColor(_refrPrevClear);
   const prevAlpha = renderer.getClearAlpha();
   try {
     // ⚠️ ① 深度附件模式下 `depthRT` 是 null（深度挂在 `refrRT.depthTexture` 上），所以这里
@@ -547,7 +564,8 @@ export function renderRefraction(renderer: THREE.WebGLRenderer, scene: THREE.Sce
     renderer.setRenderTarget(prevTarget);
     renderer.setClearColor(prevClear, prevAlpha);
     refrRendering = false;
-    for (const m of hidden) m.visible = true;
+    for (let i = 0; i < _refrHidden.length; i++) _refrHidden[i].visible = true;
+    _refrHidden.length = 0;
   }
 
   refrOnUniform.value = 1;
@@ -569,7 +587,7 @@ export function renderRefraction(renderer: THREE.WebGLRenderer, scene: THREE.Sce
  */
 export function updateRefrUniforms(camera: THREE.Camera, renderer: THREE.WebGLRenderer): void {
   refrOnUniform.value = 1;
-  const canvas = renderer.getDrawingBufferSize(new THREE.Vector2());
+  const canvas = renderer.getDrawingBufferSize(_refrCanvasSize);
   refrScreen.value.set(canvas.x, canvas.y);
   const cam = camera as THREE.PerspectiveCamera;
   refrProjInv.value.copy(cam.projectionMatrix).invert();
@@ -631,10 +649,7 @@ export function visibleWaterHeights(camera: THREE.Camera): Set<number> | null {
 export function cullBeneathMaterials(camera: THREE.Camera): void {
   if ((g as { __vbspBeneathCull?: boolean }).__vbspBeneathCull === false) return;
   const camY = camera.position.y;
-  for (const m of waterMaterials) {
-    if (!/beneath/i.test(m.name)) continue;
-    const h = materialHeight.get(m);
-    if (h === undefined) continue;
+  for (const [m, h] of beneathMaterials) {
     m.visible = camY < h - 1;
   }
 }
@@ -1130,6 +1145,7 @@ export function applyWaterShaders(root: THREE.Object3D): number {
       const geom = mesh.geometry;
       if (!geom.boundingSphere) geom.computeBoundingSphere();
       if (!geom.boundingBox) geom.computeBoundingBox();
+      if (geom.boundingBox) waterMeshes.set(mesh, geom.boundingBox.max.y);
       const h = (geom.boundingSphere?.center.y ?? 0) + mesh.position.y;
       if (planes.length < 12) {
         planes.push({
@@ -1140,7 +1156,12 @@ export function applyWaterShaders(root: THREE.Object3D): number {
           mats: mats.filter((m) => readWater(m)).map((m) => m.name).slice(0, 3),
         });
       }
-      for (const mm of mats) if (readWater(mm)) materialHeight.set(mm, h);
+      for (const mm of mats) {
+        if (readWater(mm)) {
+          materialHeight.set(mm, h);
+          if (/beneath/i.test(mm.name)) beneathMaterials.set(mm as THREE.MeshBasicMaterial, h);
+        }
+      }
       // R5（T-650 v2）：登记 `*_beneath`（$bottommaterial 派生底面）材质的 $fogcolor 原值候选，
       // 供装配后按「最近下方」给亮雾流水面配对回落色。
       for (const mm of mats) {
@@ -1327,6 +1348,8 @@ export function hasRefractionTarget(): boolean {
 /** 换图/卸载：清空材质登记、释放折射/深度 RT、复位折射相关 uniform 与 pass 标志。 */
 export function resetRefractionState(): void {
   waterMaterials.clear();
+  waterMeshes.clear();
+  beneathMaterials.clear();
   materialHeight.clear();
   materialDepth.clear();
   beneathFogHolders.clear();

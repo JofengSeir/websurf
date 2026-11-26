@@ -283,6 +283,9 @@ export class RenderSession {
   private bloomFx: BloomPostFx | null = null;
   /** 上一次标记到 `GLOW_LAYER` 的加色光效 mesh 数（变化时打日志，便于核对）。 */
   private glowMarked = 0;
+  /** 场景结构变更或子节点数变化时才重新扫描 `GLOW_LAYER`，避免每帧全树遍历。 */
+  private glowDirty = true;
+  private glowSceneChildCount = -1;
   /** 上一帧标进泛光层的加色 mesh（供 `renderGlow` 的深度预渲跳过它们）。 */
   private readonly glowMeshes: THREE.Object3D[] = [];
   /**
@@ -714,6 +717,7 @@ export class RenderSession {
     // 天空 + 泛光 pas 全部执行），让每个材质在**每种 pass 的 render target 形态**下都编译一次。
     // 冷启动实测（`.tmp/flight-195645.json`）：不做这一步时首飞途中才编译 31 个 program，
     // 单帧 159~200ms；做完后飞行途中应为 0 新增。
+    this.glowDirty = true;
     this.prewarmPasses();
 
     return {
@@ -838,6 +842,7 @@ export class RenderSession {
     this.applyGlowDepthProxy(null);
     // 场景扩展（激光 / 粒子）也属于旧图，换图时一起释放。
     this.disposeSceneExtras();
+    this.glowDirty = true;
   }
 
   /**
@@ -915,6 +920,8 @@ export class RenderSession {
     } catch (err) {
       console.warn(`[${this.app}][extras] 场景扩展装配失败（跳过）：`, err);
       this.disposeSceneExtras();
+    } finally {
+      this.glowDirty = true;
     }
   }
 
@@ -1011,6 +1018,7 @@ export class RenderSession {
     g.__vbspLasers = null;
     g.__vbspEntityExtras = null;
     g.__vbspEntityExtrasStats = emptyEntityExtrasStats();
+    this.glowDirty = true;
   }
 
   /**
@@ -1276,14 +1284,17 @@ export class RenderSession {
     const bloom = this.ensureBloomFx();
     if (bloom) {
       // 主画面已直画完；这里只把加色光效单独渲到黑底缓冲，模糊后**加法叠加**回去。
-      // 粒子/激光由各端在装配之后挂进 scene（晚于载图），所以每帧幂等标记一次。
-      // 深度预渲需要知道哪些 mesh 是光效本身（避免透明层互相写深度），故同时收集到数组。
-      this.glowMeshes.length = 0;
-      const marked = markGlowMeshes(this.scene, this.glowMeshes);
-      if (marked !== this.glowMarked) {
-        this.glowMarked = marked;
-        (globalThis as { __vbspGlowMarked?: number }).__vbspGlowMarked = marked;
-        console.info(`[${this.app}][bloom] 加色光效 mesh：${marked} 个`);
+      // 粒子/激光由各端在装配之后挂进 scene（晚于载图），仅在场景结构变更时重扫。
+      if (this.glowDirty || this.scene.children.length !== this.glowSceneChildCount) {
+        this.glowDirty = false;
+        this.glowSceneChildCount = this.scene.children.length;
+        this.glowMeshes.length = 0;
+        const marked = markGlowMeshes(this.scene, this.glowMeshes);
+        if (marked !== this.glowMarked) {
+          this.glowMarked = marked;
+          (globalThis as { __vbspGlowMarked?: number }).__vbspGlowMarked = marked;
+          console.info(`[${this.app}][bloom] 加色光效 mesh：${marked} 个`);
+        }
       }
       bloom.renderGlow(this.scene, this.camera, this.glowMeshes);
       bloom.overlay();

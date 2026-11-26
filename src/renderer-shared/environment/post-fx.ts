@@ -287,6 +287,9 @@ export class BloomPostFx {
    * 开关 `__vbspBloomBudgetCadence=false`。
    */
   private glowTick = 0;
+  /** 仅在 `renderGlow` 真正重画或 RT 尺寸变化后才重跑 bright + 4 趟模糊，复用帧直出 `blurScene`。 */
+  private blurDirty = true;
+  private readonly _sizeBuf = new THREE.Vector2();
 
   /**
    * 本帧是否跳过整条光晕链（Tier2 `bloomDirect`）：`renderGlow` 开头判定，`overlay` 同帧共享。
@@ -387,7 +390,7 @@ export class BloomPostFx {
 
   /** 按渲染器绘制缓冲尺寸重建所有 RT（每帧调用，尺寸没变时是空操作）。 */
   ensureSize(): void {
-    const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+    const size = this.renderer.getDrawingBufferSize(this._sizeBuf);
     const w = Math.max(1, Math.floor(size.x));
     const h = Math.max(1, Math.floor(size.y));
     const glowDiv = Math.max(1, Math.round(envPositiveNumber('__vbspBloomDiv', 2)));
@@ -395,6 +398,8 @@ export class BloomPostFx {
     this.width = w;
     this.height = h;
     this.appliedGlowDiv = glowDiv;
+    this.blurDirty = true;
+    this.glowTick = 0;
     // 光晕是低频信号，默认用半个分辨率（远处一层再降一半，两级模糊叠加）。
     // 终点机位实测双槽帧是 **GPU 填充**瓶颈（136 draw 的光效层 + 深度代理），降分辨率
     // 直接省填充；模糊半径按分辨率缩放，保持屏幕空间光晕范围不变（见 `blur()`）。
@@ -505,9 +510,10 @@ export class BloomPostFx {
     scene.background = background;
     scene.fog = fog;
     this.renderer.setRenderTarget(null);
+    this.blurDirty = true;
   }
 
-  /** 亮部提取 + 两级模糊，最后加法叠加到画布。 */
+  /** 亮部提取 + 两级模糊，最后加法叠加到画布。仅在 `glowTarget` 有更新时重跑前 6 趟模糊。 */
   overlay(): void {
     if (!this.enabled) return;
     // 本帧判定在 `renderGlow` 开头算好（同帧两趟共享）：捷径帧连 bright/blur/overlay 三趟都不做。
@@ -515,19 +521,26 @@ export class BloomPostFx {
     if (this.skipBloomThisFrame) return;
     const prevAutoClear = this.renderer.autoClear;
     this.renderer.autoClear = false;
-    // 光效缓冲 → 亮部提取 + 1/2
-    (this.brightMaterial.uniforms.tDiffuse as { value: THREE.Texture }).value = this.glowTarget.texture;
-    this.baseQuad.material = this.brightMaterial;
-    this.renderer.setRenderTarget(this.nearTarget);
-    this.renderer.render(this.baseScene, this.quadCamera);
-    // 近晕模糊
-    this.blur(this.nearTarget);
-    // 1/4 远晕
-    (this.blurMaterial.uniforms.tDiffuse as { value: THREE.Texture }).value = this.nearTarget.texture;
-    (this.blurMaterial.uniforms.uDirection as { value: THREE.Vector2 }).value.set(0, 0);
-    this.renderer.setRenderTarget(this.farTarget);
-    this.renderer.render(this.baseScene, this.quadCamera);
-    this.blur(this.farTarget);
+    const statsHost = globalThis as { __vbspBloomBlurStats?: { blurRuns: number; overlayRuns: number } };
+    const stats = statsHost.__vbspBloomBlurStats ?? (statsHost.__vbspBloomBlurStats = { blurRuns: 0, overlayRuns: 0 });
+    if (this.blurDirty) {
+      this.blurDirty = false;
+      // 光效缓冲 → 亮部提取 + 1/2
+      (this.brightMaterial.uniforms.tDiffuse as { value: THREE.Texture }).value = this.glowTarget.texture;
+      this.baseQuad.material = this.brightMaterial;
+      this.renderer.setRenderTarget(this.nearTarget);
+      this.renderer.render(this.baseScene, this.quadCamera);
+      // 近晕模糊
+      this.blur(this.nearTarget);
+      // 1/4 远晕
+      (this.blurMaterial.uniforms.tDiffuse as { value: THREE.Texture }).value = this.nearTarget.texture;
+      (this.blurMaterial.uniforms.uDirection as { value: THREE.Vector2 }).value.set(0, 0);
+      this.renderer.setRenderTarget(this.farTarget);
+      this.renderer.render(this.baseScene, this.quadCamera);
+      this.blur(this.farTarget);
+      stats.blurRuns += 1;
+    }
+    stats.overlayRuns += 1;
     // 叠加到画布（加法混合；不清理已画好的画面）
     this.renderer.setRenderTarget(null);
     this.renderer.render(this.blurScene, this.quadCamera);
@@ -537,12 +550,13 @@ export class BloomPostFx {
   private blur(target: THREE.WebGLRenderTarget): void {
     // 步长按分辨率除数缩放：div 越大同样像素数的模糊在屏幕空间越宽，乘 2/div 保持光晕半径。
     const stepScale = 2 / Math.max(1, this.appliedGlowDiv);
+    const scratch = target === this.farTarget ? this.farScratch : this.nearScratch;
     (this.blurMaterial.uniforms.tDiffuse as { value: THREE.Texture }).value = target.texture;
     (this.blurMaterial.uniforms.uDirection as { value: THREE.Vector2 }).value.set((1 / target.width) * stepScale, 0);
     this.baseQuad.material = this.blurMaterial;
-    this.renderer.setRenderTarget(this.nearScratch);
+    this.renderer.setRenderTarget(scratch);
     this.renderer.render(this.baseScene, this.quadCamera);
-    (this.blurMaterial.uniforms.tDiffuse as { value: THREE.Texture }).value = this.nearScratch.texture;
+    (this.blurMaterial.uniforms.tDiffuse as { value: THREE.Texture }).value = scratch.texture;
     (this.blurMaterial.uniforms.uDirection as { value: THREE.Vector2 }).value.set(0, (1 / target.height) * stepScale);
     this.renderer.setRenderTarget(target);
     this.renderer.render(this.baseScene, this.quadCamera);

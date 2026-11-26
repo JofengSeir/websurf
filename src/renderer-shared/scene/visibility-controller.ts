@@ -96,8 +96,11 @@ export interface VisibilityItem {
   clusterGeom?: string;
   /** 空集合的重算次数（有上限，避免每帧重试）。 */
   clusterTries?: number;
-  /** 世界空间 AABB（距离场判定用；按当前几何与 `matrixWorld` 每帧刷新，无分配）。 */
+  /** 世界空间 AABB（距离场判定用；按当前几何与 `matrixWorld` 缓存刷新，无分配）。 */
   box?: THREE.Box3;
+  /** 世界包围缓存键（geometry.uuid + 16 项 matrixWorld 快照），静态块零重算。 */
+  boundsGeom?: string;
+  boundsMat?: Float64Array;
 }
 
 export interface VisibilityUpdateResult {
@@ -559,20 +562,36 @@ export class VisibilityController {
     let nearVisible = 0;
     const reasons = { pvs: 0, distance: 0 };
     for (const item of this.items) {
-      // 用**当前**几何的包围球刷新中心/半径：块在收集之后仍可能被替换几何（合并、光照注入、
-      // 切贴图档都会换 geometry），旧包围球会把眼前的块判到很远。只做一次球心变换，无分配。
+      // 用**当前**几何与 matrixWorld 缓存世界包围球/包围盒：静态合并块占绝大多数，
+      // 矩阵与几何 uuid 未变时跳过全部矩阵乘法；动态实体移动或换几何时立即原位刷新。
       const g = item.mesh.geometry as THREE.BufferGeometry | undefined;
       if (g) {
-        if (!g.boundingSphere) g.computeBoundingSphere();
-        const bs = g.boundingSphere;
-        if (bs) {
-          item.center.copy(bs.center).applyMatrix4(item.mesh.matrixWorld);
-          item.radius = bs.radius;
+        const me = item.mesh.matrixWorld.elements;
+        let boundsValid = item.boundsGeom === g.uuid && item.boundsMat !== undefined && item.box !== undefined;
+        if (boundsValid) {
+          const bm = item.boundsMat!;
+          for (let i = 0; i < 16; i++) {
+            if (bm[i] !== me[i]) {
+              boundsValid = false;
+              break;
+            }
+          }
         }
-        if (!g.boundingBox) g.computeBoundingBox();
-        if (g.boundingBox) {
-          if (!item.box) item.box = new THREE.Box3();
-          item.box.copy(g.boundingBox).applyMatrix4(item.mesh.matrixWorld);
+        if (!boundsValid) {
+          if (!g.boundingSphere) g.computeBoundingSphere();
+          const bs = g.boundingSphere;
+          if (bs) {
+            item.center.copy(bs.center).applyMatrix4(item.mesh.matrixWorld);
+            item.radius = bs.radius;
+          }
+          if (!g.boundingBox) g.computeBoundingBox();
+          if (g.boundingBox) {
+            if (!item.box) item.box = new THREE.Box3();
+            item.box.copy(g.boundingBox).applyMatrix4(item.mesh.matrixWorld);
+          }
+          item.boundsGeom = g.uuid;
+          if (!item.boundsMat) item.boundsMat = new Float64Array(16);
+          for (let i = 0; i < 16; i++) item.boundsMat[i] = me[i];
         }
       }
       const near = item.center.distanceToSquared(camPos) < 2000 * 2000;

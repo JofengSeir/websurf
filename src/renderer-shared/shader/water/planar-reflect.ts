@@ -60,6 +60,7 @@ const BIAS = new THREE.Matrix4().set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 
 const _mirrorDir = new THREE.Vector3();
 const _mirrorLook = new THREE.Vector3();
 const _mirrorUp = new THREE.Vector3();
+const _mirrorHidden: THREE.Material[] = [];
 
 export function mirrorPlaneOf(height: number): MirrorPlane {
   const key = Math.round(height * 100) / 100;
@@ -143,11 +144,11 @@ export function renderMirrorPlane(
   const prevTarget = renderer.getRenderTarget();
   mirrorRendering = true;
   // 水面在镜像 pass 里必须隐藏：否则水面会采样"上一帧的镜面纹理"形成**自反馈**。
-  const hidden: THREE.Material[] = [];
+  _mirrorHidden.length = 0;
   for (const m of waterMaterials) {
     if (m.visible) {
       m.visible = false;
-      hidden.push(m);
+      _mirrorHidden.push(m);
     }
   }
   try {
@@ -157,7 +158,8 @@ export function renderMirrorPlane(
   } finally {
     // ⚠️ 必须 finally：中途抛错会让水面材质永远停在 `visible=false` ⇒ 水面直接消失。
     renderer.setRenderTarget(prevTarget);
-    for (const m of hidden) m.visible = true;
+    for (let i = 0; i < _mirrorHidden.length; i++) _mirrorHidden[i].visible = true;
+    _mirrorHidden.length = 0;
     mirrorRendering = false;
   }
   (globalThis as { __vbspWaterMirrorRenders?: number }).__vbspWaterMirrorRenders =

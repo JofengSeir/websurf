@@ -115,6 +115,9 @@ const { EntityGameplay } = await loadTsBundle('src/ts-shared/gameplay/entity-gam
 const { AuthorityCalibrator } = await loadTsBundle('src/ts-shared/phys/authority-calibrator.ts', 'authority-calibrator');
 // 近平面控制器：验证纯转视角不触发球距离重扫、ratio=0 命中短路。
 const { NearPlaneController } = await loadTsBundle('src/renderer-shared/camera/near-plane.ts', 'near-plane');
+// P0 优化回归：BloomPostFx 复用帧跳过模糊 + VisibilityController 静态包围缓存。
+const { BloomPostFx } = await loadTsBundle('src/renderer-shared/environment/post-fx.ts', 'post-fx');
+const { VisibilityController } = await loadTsBundle('src/renderer-shared/scene/visibility-controller.ts', 'visibility-controller');
 
 // 旋转枢轴的「rest 零变化」不变量：组位置 = pivot、mesh 局部位置 = 原位置 - pivot 时，
 // 世界坐标在旋转 0 的情况下逐分量不变（pivot 加回本身的抵消）。
@@ -1104,6 +1107,93 @@ test('NearPlaneController 视锥安全收缩、防 Z-Fighting、动态位移与�
   ctrl.invalidateCache();
   ctrl.update(cam, scene, 5, 0, 0, { roots: [root] });
   assert.ok(Math.abs(cam.near - 8) < 1e-6, `隐藏父组不应参与探测，应恢复 8，实际 ${cam.near}`);
+});
+
+test('BloomPostFx 复用帧跳过 6 趟冗余模糊，尺寸变化后重新模糊', () => {
+  const renderCalls = [];
+  let drawW = 800;
+  let drawH = 600;
+  const mockRenderer = {
+    capabilities: { isWebGL2: true },
+    autoClear: true,
+    getDrawingBufferSize(target) {
+      return target.set(drawW, drawH);
+    },
+    setRenderTarget() {},
+    clear() {},
+    render(scene) {
+      renderCalls.push(scene);
+    },
+  };
+  const fx = new BloomPostFx(mockRenderer);
+  const scene = new THREE.Scene();
+  const cam = new THREE.PerspectiveCamera(75, 4 / 3, 1, 1000);
+  globalThis.__vbspBloomBlurStats = undefined;
+
+  // 第 1 帧：glowTick=0 重画 glowTarget（2 趟）+ overlay 运行完整 6 趟模糊 + 1 趟叠加（7 趟）
+  fx.ensureSize();
+  renderCalls.length = 0;
+  fx.renderGlow(scene, cam, []);
+  const glowCalls1 = renderCalls.length;
+  renderCalls.length = 0;
+  fx.overlay();
+  const overlayCalls1 = renderCalls.length;
+  assert.equal(glowCalls1, 2, `第 1 帧 renderGlow 应有 2 趟（深度+光效），实际 ${glowCalls1}`);
+  assert.equal(overlayCalls1, 7, `第 1 帧 overlay 应运行完整 7 趟，实际 ${overlayCalls1}`);
+
+  // 第 2 帧：glowTick=1 被隔帧跳过（0 趟），overlay 只跑 1 趟最终叠加（省掉 6 趟模糊）
+  fx.ensureSize();
+  renderCalls.length = 0;
+  fx.renderGlow(scene, cam, []);
+  const glowCalls2 = renderCalls.length;
+  renderCalls.length = 0;
+  fx.overlay();
+  const overlayCalls2 = renderCalls.length;
+  assert.equal(glowCalls2, 0, `第 2 帧 renderGlow 应被隔帧跳过，实际 ${glowCalls2}`);
+  assert.equal(overlayCalls2, 1, `第 2 帧 overlay 应只跑 1 趟最终叠加，实际 ${overlayCalls2}`);
+  assert.equal(globalThis.__vbspBloomBlurStats?.blurRuns, 1);
+  assert.equal(globalThis.__vbspBloomBlurStats?.overlayRuns, 2);
+
+  // 分辨率变化：ensureSize 重置 glowTick 且置 blurDirty=true，下一帧完整重画并模糊
+  drawW = 1280;
+  drawH = 720;
+  fx.ensureSize();
+  renderCalls.length = 0;
+  fx.renderGlow(scene, cam, []);
+  fx.overlay();
+  assert.equal(renderCalls.length, 9, `改尺寸后应完整重画并模糊（2+7=9 趟），实际 ${renderCalls.length}`);
+  fx.dispose();
+});
+
+test('VisibilityController 静态块缓存世界包围盒且动态位移后立即刷新', () => {
+  const vis = new VisibilityController();
+  const geom = new THREE.BoxGeometry(10, 10, 10);
+  geom.computeBoundingSphere();
+  geom.computeBoundingBox();
+  const mesh = new THREE.Mesh(geom, new THREE.MeshBasicMaterial());
+  mesh.position.set(100, 0, 0);
+  mesh.updateMatrixWorld(true);
+  const root = new THREE.Group();
+  root.add(mesh);
+  vis.collect(root);
+  vis.setCullDistance(500, 0);
+
+  const cam = { position: new THREE.Vector3(0, 0, 0) };
+  vis.update(cam, null);
+  assert.equal(vis.items[0].center.x, 100);
+  assert.equal(vis.items[0].box.min.x, 95);
+
+  // 静态块第 2 帧：matrixWorld 未变，走缓存分支；把 center 临时改成哨兵值验证不会重复乘法覆盖
+  vis.items[0].center.x = 12345;
+  vis.update(cam, null);
+  assert.equal(vis.items[0].center.x, 12345, '静态块 matrixWorld 未变时应命中世界包围缓存');
+
+  // 动态块移动后：matrixWorld 变化，必须立即失效缓存并刷新 center/box
+  mesh.position.set(250, 0, 0);
+  mesh.updateMatrixWorld(true);
+  vis.update(cam, null);
+  assert.equal(vis.items[0].center.x, 250, '动态块位移后必须刷新 center');
+  assert.equal(vis.items[0].box.min.x, 245, '动态块位移后必须刷新 box');
 });
 
 
