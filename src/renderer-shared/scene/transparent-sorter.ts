@@ -47,6 +47,8 @@ export class TransparentSorter {
   private readonly pvsTmpC = new THREE.Vector3();
   private readonly pvsTmpN = new THREE.Vector3();
   private readonly pvsTmpP = new THREE.Vector3();
+  private readonly invMat = new THREE.Matrix4();
+  private readonly localCam = new THREE.Vector3();
 
   /** 当前收集到的半透明块数（诊断用）。 */
   get size(): number {
@@ -83,17 +85,25 @@ export class TransparentSorter {
    * 这里直接按三角形中心到相机的距离重写 index buffer（远→近），组内保持材质组
    * 边界不变；非索引几何先补一条顺序 index。来源位置用几何原生 position，不重采样。
    */
-  private sortFaces(mesh: THREE.Mesh, camera: THREE.Camera, pvs: TransparentPvsQuery | null): void {
+  private sortFaces(mesh: THREE.Mesh, camera: THREE.Camera, pvs: TransparentPvsQuery | null, pvsChanged: boolean): void {
     const geom = mesh.geometry;
     const pos = geom.attributes.position as THREE.BufferAttribute | undefined;
     if (!pos) return;
-    type Tri = { a: number; b: number; c: number; group: number };
     type Cache = {
       positionCount: number;
       indexCount: number;
       /** `geom.groups.length` 快照（0 = 没有材质组，按单组处理）；变了就重建索引缓存。 */
       groupCount: number;
-      tris: Tri[];
+      triCount: number;
+      triA: Uint32Array;
+      triB: Uint32Array;
+      triC: Uint32Array;
+      triGroup: Uint16Array;
+      /** 局部空间三角形重心（`[cx, cy, cz, ...]`），建缓存时预计算，避免每帧 9 次 BufferAttribute 读取。 */
+      centroids: Float32Array;
+      /** 局部包围盒某一轴跨度接近 0（纯平面水面/玻璃）：任意视角无互相遮挡，完全跳过归并排序。 */
+      isCoplanar: boolean;
+      pvsSynced: boolean;
       dists: Float64Array;
       triClustersA: Int32Array | null;
       triClustersB: Int32Array | null;
@@ -124,20 +134,62 @@ export class TransparentSorter {
     ) {
       const groupsEmpty = geom.groups.length === 0;
       const groupCount = groupsEmpty ? 1 : geom.groups.length;
-      const tris: Tri[] = [];
+      let triCount = 0;
+      for (let gi = 0; gi < groupCount; gi++) {
+        const gCount = groupsEmpty ? idx.count : geom.groups[gi].count;
+        triCount += Math.floor(gCount / 3);
+      }
+      const triA = new Uint32Array(triCount);
+      const triB = new Uint32Array(triCount);
+      const triC = new Uint32Array(triCount);
+      const triGroup = new Uint16Array(triCount);
+      const centroids = new Float32Array(triCount * 3);
+      let ti = 0;
+      let loX = Infinity, hiX = -Infinity;
+      let loY = Infinity, hiY = -Infinity;
+      let loZ = Infinity, hiZ = -Infinity;
       for (let gi = 0; gi < groupCount; gi++) {
         const gStart = groupsEmpty ? 0 : geom.groups[gi].start;
         const gCount = groupsEmpty ? idx.count : geom.groups[gi].count;
         for (let i = gStart; i + 2 < gStart + gCount; i += 3) {
-          tris.push({ a: idx.getX(i), b: idx.getX(i + 1), c: idx.getX(i + 2), group: gi });
+          const a = idx.getX(i);
+          const b = idx.getX(i + 1);
+          const cc = idx.getX(i + 2);
+          triA[ti] = a;
+          triB[ti] = b;
+          triC[ti] = cc;
+          triGroup[ti] = gi;
+          const ax = pos.getX(a), ay = pos.getY(a), az = pos.getZ(a);
+          const bx = pos.getX(b), by = pos.getY(b), bz = pos.getZ(b);
+          const cx = pos.getX(cc), cy = pos.getY(cc), cz = pos.getZ(cc);
+          centroids[ti * 3] = (ax + bx + cx) / 3;
+          centroids[ti * 3 + 1] = (ay + by + cy) / 3;
+          centroids[ti * 3 + 2] = (az + bz + cz) / 3;
+          if (ax < loX) loX = ax; if (ax > hiX) hiX = ax;
+          if (bx < loX) loX = bx; if (bx > hiX) hiX = bx;
+          if (cx < loX) loX = cx; if (cx > hiX) hiX = cx;
+          if (ay < loY) loY = ay; if (ay > hiY) hiY = ay;
+          if (by < loY) loY = by; if (by > hiY) hiY = by;
+          if (cy < loY) loY = cy; if (cy > hiY) hiY = cy;
+          if (az < loZ) loZ = az; if (az > hiZ) hiZ = az;
+          if (bz < loZ) loZ = bz; if (bz > hiZ) hiZ = bz;
+          if (cz < loZ) loZ = cz; if (cz > hiZ) hiZ = cz;
+          ti++;
         }
       }
-      const triCount = tris.length;
+      const isCoplanar = triCount <= 1 || (hiX - loX < 1e-2 || hiY - loY < 1e-2 || hiZ - loZ < 1e-2);
       cache = {
         positionCount: pos.count,
         indexCount: idx.count,
         groupCount: groupsEmpty ? 0 : geom.groups.length,
-        tris,
+        triCount,
+        triA,
+        triB,
+        triC,
+        triGroup,
+        centroids,
+        isCoplanar,
+        pvsSynced: false,
         dists: new Float64Array(triCount),
         triClustersA: null,
         triClustersB: null,
@@ -152,20 +204,20 @@ export class TransparentSorter {
       mesh.userData.__vbspFaceSort = cache;
     }
     const c = cache;
+    const triCount = c.triCount;
     if (pvs && (!c.triClustersA || !c.triClustersB)) {
-      const tcA = new Int32Array(c.tris.length).fill(-1);
-      const tcB = new Int32Array(c.tris.length).fill(-1);
+      const tcA = new Int32Array(triCount).fill(-1);
+      const tcB = new Int32Array(triCount).fill(-1);
       const mw = mesh.matrixWorld;
       const va = this.pvsTmpA;
       const vb = this.pvsTmpB;
       const vc = this.pvsTmpC;
       const vn = this.pvsTmpN;
       const vp = this.pvsTmpP;
-      for (let i = 0; i < c.tris.length; i++) {
-        const t = c.tris[i];
-        va.fromBufferAttribute(pos, t.a).applyMatrix4(mw);
-        vb.fromBufferAttribute(pos, t.b).applyMatrix4(mw);
-        vc.fromBufferAttribute(pos, t.c).applyMatrix4(mw);
+      for (let i = 0; i < triCount; i++) {
+        va.fromBufferAttribute(pos, c.triA[i]).applyMatrix4(mw);
+        vb.fromBufferAttribute(pos, c.triB[i]).applyMatrix4(mw);
+        vc.fromBufferAttribute(pos, c.triC[i]).applyMatrix4(mw);
         const cx = (va.x + vb.x + vc.x) / 3;
         const cy = (va.y + vb.y + vc.y) / 3;
         const cz = (va.z + vb.z + vc.z) / 3;
@@ -198,21 +250,95 @@ export class TransparentSorter {
       c.triClustersA = tcA;
       c.triClustersB = tcB;
     }
-    const cam = camera.position;
-    const p = this.sortPoint;
-    for (let i = 0; i < c.tris.length; i++) {
-      const t = c.tris[i];
-      p.set(
-        (pos.getX(t.a) + pos.getX(t.b) + pos.getX(t.c)) / 3,
-        (pos.getY(t.a) + pos.getY(t.b) + pos.getY(t.c)) / 3,
-        (pos.getZ(t.a) + pos.getZ(t.b) + pos.getZ(t.c)) / 3,
-      ).applyMatrix4(mesh.matrixWorld);
-      c.dists[i] = p.distanceToSquared(cam);
-    }
+
     const idxArr = idx.array as unknown as number[];
-    const triCount = c.tris.length;
-    // 原地归并（稳定、0 分配）：旧的 `order: number[]` + `order.sort` 每帧都要建一个数组，
-    // V8 的 TimSort 还要再分配一份工作副本；这里只复用两根 Int32Array，语义见 `isFaceBefore`。
+    const cullAll = (globalThis as { __vbspPvsCullAll?: boolean }).__vbspPvsCullAll === true;
+
+    // 共面/单三角快路径：共面三角在任意视角下永不互相遮挡，无需归并排序，只在 PVS 开关/房间变化时写一次 index。
+    if (c.isCoplanar) {
+      if (pvs === null && !c.pvsSynced) return;
+      if (pvs !== null && !pvsChanged && c.pvsSynced) return;
+      let changed = !c.prevIdx || c.prevIdx.length !== idxArr.length;
+      const prevIdx = c.prevIdx;
+      const groupsEmpty = c.groupCount === 0;
+      const groupCount = groupsEmpty ? 1 : c.groupCount;
+      let ti = 0;
+      let k = 0;
+      for (let gi = 0; gi < groupCount; gi++) {
+        let cursor = groupsEmpty ? 0 : geom.groups[gi].start;
+        while (ti < triCount && c.triGroup[ti] === gi) {
+          let hidden = false;
+          if (pvs !== null && c.triClustersA !== null && c.triClustersB !== null) {
+            if (cullAll) {
+              hidden = true;
+            } else {
+              const ca = c.triClustersA[ti];
+              const cb = c.triClustersB[ti];
+              const hasAny = ca >= 0 || cb >= 0;
+              hidden = hasAny && !(ca >= 0 && pvs.isVisible(ca)) && !(cb >= 0 && pvs.isVisible(cb));
+            }
+          }
+          const ia = c.triA[ti];
+          const ib = hidden ? ia : c.triB[ti];
+          const ic = hidden ? ia : c.triC[ti];
+          if (!changed && (prevIdx![k] !== ia || prevIdx![k + 1] !== ib || prevIdx![k + 2] !== ic)) changed = true;
+          idxArr[cursor] = ia;
+          idxArr[cursor + 1] = ib;
+          idxArr[cursor + 2] = ic;
+          cursor += 3;
+          k += 3;
+          ti++;
+        }
+      }
+      c.pvsSynced = pvs !== null;
+      if (changed) {
+        if (!c.prevIdx || c.prevIdx.length !== idxArr.length) c.prevIdx = new Uint32Array(idxArr.length);
+        c.prevIdx.set(idxArr as unknown as ArrayLike<number>);
+        idx.needsUpdate = true;
+      }
+      return;
+    }
+
+    // 把相机点变换一次到局部空间算平方距离（等比正交下局部距离平方与世界距离平方严格正比，省去每三角 4x4 矩阵乘）
+    const me = mesh.matrixWorld.elements;
+    const sx2 = me[0] * me[0] + me[1] * me[1] + me[2] * me[2];
+    const sy2 = me[4] * me[4] + me[5] * me[5] + me[6] * me[6];
+    const sz2 = me[8] * me[8] + me[9] * me[9] + me[10] * me[10];
+    const tol = sx2 * 1e-3 + 1e-6;
+    const uniformRigid =
+      sx2 >= 1e-12 &&
+      Math.abs(sy2 - sx2) <= tol &&
+      Math.abs(sz2 - sx2) <= tol &&
+      Math.abs(me[0] * me[4] + me[1] * me[5] + me[2] * me[6]) <= tol &&
+      Math.abs(me[0] * me[8] + me[1] * me[9] + me[2] * me[10]) <= tol &&
+      Math.abs(me[4] * me[8] + me[5] * me[9] + me[6] * me[10]) <= tol;
+
+    const centroids = c.centroids;
+    const dists = c.dists;
+    if (uniformRigid) {
+      this.invMat.copy(mesh.matrixWorld).invert();
+      this.localCam.copy(camera.position).applyMatrix4(this.invMat);
+      const lx = this.localCam.x;
+      const ly = this.localCam.y;
+      const lz = this.localCam.z;
+      for (let i = 0; i < triCount; i++) {
+        const off = i * 3;
+        const dx = centroids[off] - lx;
+        const dy = centroids[off + 1] - ly;
+        const dz = centroids[off + 2] - lz;
+        dists[i] = dx * dx + dy * dy + dz * dz;
+      }
+    } else {
+      const cam = camera.position;
+      const p = this.sortPoint;
+      for (let i = 0; i < triCount; i++) {
+        const off = i * 3;
+        p.set(centroids[off], centroids[off + 1], centroids[off + 2]).applyMatrix4(mesh.matrixWorld);
+        dists[i] = p.distanceToSquared(cam);
+      }
+    }
+
+    // 原地归并（稳定、0 分配）：复用两根 Int32Array，语义见 `isFaceBefore`。
     let src = c.order;
     let dst = c.orderTmp;
     for (let i = 0; i < triCount; i++) src[i] = i;
@@ -244,7 +370,6 @@ export class TransparentSorter {
     }
     const sorted = src;
     // 组内写回：每组 `start/count` 不变，组顺序仍是材质组顺序。
-    // 计数分桶替代 `groups.map(() => [])` 的嵌套数组：两趟 O(tris) 得到「按组、组内已排序」。
     const groupsEmpty = c.groupCount === 0;
     const groupCount = groupsEmpty ? 1 : c.groupCount;
     const counts = c.bucketCounts;
@@ -252,7 +377,7 @@ export class TransparentSorter {
     const cursors = c.bucketCursors;
     const bucketSorted = c.bucketSorted;
     for (let gi = 0; gi < groupCount; gi++) counts[gi] = 0;
-    for (let i = 0; i < triCount; i++) counts[c.tris[i].group]++;
+    for (let i = 0; i < triCount; i++) counts[c.triGroup[i]]++;
     let acc = 0;
     for (let gi = 0; gi < groupCount; gi++) {
       offsets[gi] = acc;
@@ -261,21 +386,19 @@ export class TransparentSorter {
     }
     for (let i = 0; i < triCount; i++) {
       const oi = sorted[i];
-      bucketSorted[cursors[c.tris[oi].group]++] = oi;
+      bucketSorted[cursors[c.triGroup[oi]]++] = oi;
     }
     let changed = false;
     const prevIdx = c.prevIdx;
     if (!prevIdx || prevIdx.length !== idxArr.length) {
       changed = true;
     }
-    const cullAll = (globalThis as { __vbspPvsCullAll?: boolean }).__vbspPvsCullAll === true;
     let k = 0;
     for (let gi = 0; gi < groupCount; gi++) {
       let cursor = groupsEmpty ? 0 : geom.groups[gi].start;
       const end = offsets[gi] + counts[gi];
       for (let j = offsets[gi]; j < end; j++) {
         const ti = bucketSorted[j];
-        const t = c.tris[ti];
         let hidden = false;
         if (pvs !== null && c.triClustersA !== null && c.triClustersB !== null) {
           if (cullAll) {
@@ -287,9 +410,9 @@ export class TransparentSorter {
             hidden = hasAny && !(ca >= 0 && pvs.isVisible(ca)) && !(cb >= 0 && pvs.isVisible(cb));
           }
         }
-        const ia = t.a;
-        const ib = hidden ? t.a : t.b;
-        const ic = hidden ? t.a : t.c;
+        const ia = c.triA[ti];
+        const ib = hidden ? ia : c.triB[ti];
+        const ic = hidden ? ia : c.triC[ti];
         if (!changed && (prevIdx![k] !== ia || prevIdx![k + 1] !== ib || prevIdx![k + 2] !== ic)) changed = true;
         idxArr[cursor] = ia;
         idxArr[cursor + 1] = ib;
@@ -298,6 +421,7 @@ export class TransparentSorter {
         k += 3;
       }
     }
+    c.pvsSynced = pvs !== null;
     // 只有排列真的变了才重传（three 的 WebGLAttributes.update 会整块 bufferSubData）。
     if (changed) {
       if (!c.prevIdx || c.prevIdx.length !== idxArr.length) c.prevIdx = new Uint32Array(idxArr.length);
@@ -332,7 +456,7 @@ export class TransparentSorter {
     }
     // 逐面排序（每块逐三角形算距离 + 重排 + index 重传）只在相机位置真的变了或 PVS cluster 变化时才做：
     // 转视角时相机位置不变 ⇒ 距离不变 ⇒ 排序结果与上一帧逐位相同（实测占整帧 7%）。
-    const moved = cameraPos.distanceToSquared(this.faceSortLastPos) > 0.0625;
+    const moved = !(cameraPos.distanceToSquared(this.faceSortLastPos) <= 0.0625);
     if (moved) this.faceSortLastPos.copy(cameraPos);
     const pvsChanged = camCluster !== this.lastPvsCluster;
     this.lastPvsCluster = camCluster;
@@ -361,7 +485,7 @@ export class TransparentSorter {
       box.clampPoint(cameraPos, point);
       mesh.userData.__vbspTransparentDist = point.distanceToSquared(cameraPos);
       if ((moved || pvsChanged) && (globalThis as { __vbspNoFaceSort?: unknown }).__vbspNoFaceSort !== true) {
-        this.sortFaces(mesh, camera, pvs);
+        this.sortFaces(mesh, camera, pvs, pvsChanged);
       }
     }
     list.sort((a, b) => {

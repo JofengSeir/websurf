@@ -115,9 +115,11 @@ const { EntityGameplay } = await loadTsBundle('src/ts-shared/gameplay/entity-gam
 const { AuthorityCalibrator } = await loadTsBundle('src/ts-shared/phys/authority-calibrator.ts', 'authority-calibrator');
 // 近平面控制器：验证纯转视角不触发球距离重扫、ratio=0 命中短路。
 const { NearPlaneController } = await loadTsBundle('src/renderer-shared/camera/near-plane.ts', 'near-plane');
-// P0 优化回归：BloomPostFx 复用帧跳过模糊 + VisibilityController 静态包围缓存。
+// P0/P1 优化回归：BloomPostFx 复用帧跳过模糊 + VisibilityController 静态包围缓存 + 水面斜裁剪 + 透明排序。
 const { BloomPostFx } = await loadTsBundle('src/renderer-shared/environment/post-fx.ts', 'post-fx');
 const { VisibilityController } = await loadTsBundle('src/renderer-shared/scene/visibility-controller.ts', 'visibility-controller');
+const { applyObliqueWaterClip } = await loadTsBundle('src/renderer-shared/shader/water/planar-reflect.ts', 'planar-reflect');
+const { TransparentSorter } = await loadTsBundle('src/renderer-shared/scene/transparent-sorter.ts', 'transparent-sorter');
 
 // 旋转枢轴的「rest 零变化」不变量：组位置 = pivot、mesh 局部位置 = 原位置 - pivot 时，
 // 世界坐标在旋转 0 的情况下逐分量不变（pivot 加回本身的抵消）。
@@ -1109,7 +1111,7 @@ test('NearPlaneController 视锥安全收缩、防 Z-Fighting、动态位移与�
   assert.ok(Math.abs(cam.near - 8) < 1e-6, `隐藏父组不应参与探测，应恢复 8，实际 ${cam.near}`);
 });
 
-test('BloomPostFx 复用帧跳过 6 趟冗余模糊，尺寸变化后重新模糊', () => {
+test('BloomPostFx 复用帧跳过 6 趟冗余模糊，无可见光效时零开销全跳过', () => {
   const renderCalls = [];
   let drawW = 800;
   let drawH = 600;
@@ -1128,12 +1130,46 @@ test('BloomPostFx 复用帧跳过 6 趟冗余模糊，尺寸变化后重新模�
   const fx = new BloomPostFx(mockRenderer);
   const scene = new THREE.Scene();
   const cam = new THREE.PerspectiveCamera(75, 4 / 3, 1, 1000);
+  cam.position.set(0, 0, 0);
+  cam.lookAt(0, 0, -1);
+  cam.updateMatrixWorld(true);
+
+  const glowMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(2, 2, 2),
+    new THREE.MeshBasicMaterial({ blending: THREE.AdditiveBlending }),
+  );
+  glowMesh.position.set(0, 0, -20);
+  glowMesh.updateMatrixWorld(true);
+  scene.add(glowMesh);
+
   globalThis.__vbspBloomBlurStats = undefined;
 
-  // 第 1 帧：glowTick=0 重画 glowTarget（2 趟）+ overlay 运行完整 6 趟模糊 + 1 趟叠加（7 趟）
+  // 0. 无光效 / 隐藏 / 视锥外：renderGlow 与 overlay 均 0 次 render
   fx.ensureSize();
   renderCalls.length = 0;
   fx.renderGlow(scene, cam, []);
+  fx.overlay();
+  assert.equal(renderCalls.length, 0, `空光效列表应 0 次 render，实际 ${renderCalls.length}`);
+
+  glowMesh.visible = false;
+  fx.renderGlow(scene, cam, [glowMesh]);
+  fx.overlay();
+  assert.equal(renderCalls.length, 0, '隐藏光效不应触发 render');
+
+  glowMesh.visible = true;
+  glowMesh.position.set(0, 0, 500); // 相机背后，视锥外
+  glowMesh.updateMatrixWorld(true);
+  fx.renderGlow(scene, cam, [glowMesh]);
+  fx.overlay();
+  assert.equal(renderCalls.length, 0, '视锥外光效不应触发 render');
+  assert.equal(globalThis.__vbspBloomBlurStats?.emptySkips, 3);
+
+  // 回到视野内：第 1 帧立即重画 glowTarget（2 趟）+ overlay 完整 7 趟
+  glowMesh.position.set(0, 0, -20);
+  glowMesh.updateMatrixWorld(true);
+  fx.ensureSize();
+  renderCalls.length = 0;
+  fx.renderGlow(scene, cam, [glowMesh]);
   const glowCalls1 = renderCalls.length;
   renderCalls.length = 0;
   fx.overlay();
@@ -1144,7 +1180,7 @@ test('BloomPostFx 复用帧跳过 6 趟冗余模糊，尺寸变化后重新模�
   // 第 2 帧：glowTick=1 被隔帧跳过（0 趟），overlay 只跑 1 趟最终叠加（省掉 6 趟模糊）
   fx.ensureSize();
   renderCalls.length = 0;
-  fx.renderGlow(scene, cam, []);
+  fx.renderGlow(scene, cam, [glowMesh]);
   const glowCalls2 = renderCalls.length;
   renderCalls.length = 0;
   fx.overlay();
@@ -1159,7 +1195,7 @@ test('BloomPostFx 复用帧跳过 6 趟冗余模糊，尺寸变化后重新模�
   drawH = 720;
   fx.ensureSize();
   renderCalls.length = 0;
-  fx.renderGlow(scene, cam, []);
+  fx.renderGlow(scene, cam, [glowMesh]);
   fx.overlay();
   assert.equal(renderCalls.length, 9, `改尺寸后应完整重画并模糊（2+7=9 趟），实际 ${renderCalls.length}`);
   fx.dispose();
@@ -1194,6 +1230,74 @@ test('VisibilityController 静态块缓存世界包围盒且动态位移后立�
   vis.update(cam, null);
   assert.equal(vis.items[0].center.x, 250, '动态块位移后必须刷新 center');
   assert.equal(vis.items[0].box.min.x, 245, '动态块位移后必须刷新 box');
+});
+
+test('applyObliqueWaterClip 将镜像近平面精确对齐水面，剔除水下几何', () => {
+  const vcam = new THREE.PerspectiveCamera(75, 16 / 9, 1, 5000);
+  vcam.position.set(0, -20, 0);
+  vcam.lookAt(0, 0, -50);
+  vcam.updateMatrixWorld(true);
+  vcam.updateProjectionMatrix();
+
+  const ok = applyObliqueWaterClip(vcam, 0, 20, 0);
+  assert.equal(ok, true, '水面上方镜像相机应成功应用斜裁剪');
+
+  // 水面上的点 (0, 0, -50) 应落在近平面 z_ndc ≈ -1.0；水下 (-5) 应 < -1.0 被裁剪；水上 (+20) 应在 (-1, 1) 内保留
+  const projZ = (p) => p.clone().applyMatrix4(vcam.matrixWorldInverse).applyMatrix4(vcam.projectionMatrix).z;
+  const zOnPlane = projZ(new THREE.Vector3(0, 0, -50));
+  const zUnderwater = projZ(new THREE.Vector3(0, -5, -50));
+  const zAboveWater = projZ(new THREE.Vector3(0, 20, -50));
+  assert.ok(Math.abs(zOnPlane - (-1)) < 1e-4, `水面上的点应位于近平面 z=-1，实际 ${zOnPlane}`);
+  assert.ok(zUnderwater < -1, `水下点应被近平面裁剪 (z<-1)，实际 ${zUnderwater}`);
+  assert.ok(zAboveWater > -1 && zAboveWater < 1, `水上点应保留在视锥内，实际 ${zAboveWater}`);
+
+  // 相机几乎贴着水面时安全退回 false
+  const vcamNear = new THREE.PerspectiveCamera(75, 16 / 9, 1, 5000);
+  vcamNear.position.set(0, -0.1, 0);
+  vcamNear.lookAt(0, 0, -50);
+  vcamNear.updateMatrixWorld(true);
+  assert.equal(applyObliqueWaterClip(vcamNear, 0, 0.1, 0.25), false);
+});
+
+test('TransparentSorter 共面跳过排序且非共面走局部空间扁平重心排序', () => {
+  const sorter = new TransparentSorter();
+
+  // 1. 共面水平透明面（y=0 两三角）：相机移动不触发归并排序或 index 重传
+  const flatGeom = new THREE.BufferGeometry();
+  flatGeom.setAttribute('position', new THREE.Float32BufferAttribute([
+    -10, 0, -10,  10, 0, -10,  10, 0, 10,
+    -10, 0, -10,  10, 0, 10,  -10, 0, 10,
+  ], 3));
+  flatGeom.setIndex([0, 1, 2, 3, 4, 5]);
+  const flatMesh = new THREE.Mesh(flatGeom, new THREE.MeshBasicMaterial({ transparent: true }));
+  flatMesh.updateMatrixWorld(true);
+
+  // 2. 非共面 3D 透明体：两块重叠玻璃板在 z=0 与 z=-20
+  const glassGeom = new THREE.BufferGeometry();
+  glassGeom.setAttribute('position', new THREE.Float32BufferAttribute([
+    -5, -5, 0,   5, -5, 0,   0, 5, 0,
+    -5, -5, -20, 5, -5, -20, 0, 5, -20,
+  ], 3));
+  glassGeom.setIndex([0, 1, 2, 3, 4, 5]);
+  const glassMesh = new THREE.Mesh(glassGeom, new THREE.MeshBasicMaterial({ transparent: true }));
+  glassMesh.updateMatrixWorld(true);
+
+  const root = new THREE.Group();
+  root.add(flatMesh, glassMesh);
+  sorter.collect(root);
+
+  const cam = new THREE.PerspectiveCamera(75, 1, 1, 1000);
+  cam.position.set(0, 5, 50);
+  sorter.update(cam, null, -1);
+  const flatVer0 = flatGeom.index.version;
+  // 从 +z 看：远端 z=-20（顶点 3,4,5）必须先画，近端 z=0（0,1,2）后画
+  assert.deepEqual(Array.from(glassGeom.index.array), [3, 4, 5, 0, 1, 2]);
+
+  // 相机移到 -z（-50）：共面块 index.version 不变（零排序/零上传），玻璃块反转为 [0,1,2, 3,4,5]
+  cam.position.set(0, 5, -50);
+  sorter.update(cam, null, -1);
+  assert.equal(flatGeom.index.version, flatVer0, '共面透明块移动相机不应重传 index');
+  assert.deepEqual(Array.from(glassGeom.index.array), [0, 1, 2, 3, 4, 5]);
 });
 
 

@@ -290,6 +290,10 @@ export class BloomPostFx {
   /** 仅在 `renderGlow` 真正重画或 RT 尺寸变化后才重跑 bright + 4 趟模糊，复用帧直出 `blurScene`。 */
   private blurDirty = true;
   private readonly _sizeBuf = new THREE.Vector2();
+  private readonly _glowFrustum = new THREE.Frustum();
+  private readonly _glowProjScreen = new THREE.Matrix4();
+  private readonly _glowSphere = new THREE.Sphere();
+  private emptyGlowStreak = 0;
 
   /**
    * 本帧是否跳过整条光晕链（Tier2 `bloomDirect`）：`renderGlow` 开头判定，`overlay` 同帧共享。
@@ -412,14 +416,62 @@ export class BloomPostFx {
   }
 
   /**
+   * 快速判定当前视野内是否存在至少一个真正可见且未被裁剪的加色光效 mesh。
+   * 全部隐藏 / drawRange=0 / 在视锥外时，整条光晕链（深度预渲 + 光效层 + 模糊 + 叠加）直接零成本跳过。
+   */
+  private hasVisibleGlow(camera: THREE.Camera, glowMeshes: readonly THREE.Object3D[]): boolean {
+    if (glowMeshes.length === 0) return false;
+    let frustumReady = false;
+    for (let i = 0; i < glowMeshes.length; i++) {
+      const obj = glowMeshes[i];
+      let cur: THREE.Object3D | null = obj;
+      while (cur) {
+        if (!cur.visible) break;
+        cur = cur.parent;
+      }
+      if (cur) continue;
+      const geom = (obj as THREE.Mesh).geometry as THREE.BufferGeometry | undefined;
+      if (geom && geom.drawRange && geom.drawRange.count === 0) continue;
+      if (obj.frustumCulled !== false && geom) {
+        if (!geom.boundingSphere && geom.getAttribute('position')) geom.computeBoundingSphere();
+        const bs = geom.boundingSphere;
+        if (bs) {
+          if (!frustumReady) {
+            this._glowProjScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+            this._glowFrustum.setFromProjectionMatrix(this._glowProjScreen);
+            frustumReady = true;
+          }
+          this._glowSphere.copy(bs).applyMatrix4(obj.matrixWorld);
+          if (!this._glowFrustum.intersectsSphere(this._glowSphere)) continue;
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * 只画加色光效到黑底缓冲（相机层筛选；画完还原相机层与背景/雾）。
    *
    * **先做一遍深度预渲**：光效层单独渲染时缓冲里没有墙体的深度，否则隔着岩壁也能看到
    * 光柱/光球（用户报的「光效穿透实体、很远也看得到」）。所以先用只写深度的材质把整场景
    * 画一遍（跳过光效 mesh 本身，免得透明层互相写深度），再画光效层，让光效被实体正确遮挡。
    */
-  renderGlow(scene: THREE.Scene, camera: THREE.Camera, glowMeshes: readonly THREE.Object3D[] = []): void {
+  renderGlow(scene: THREE.Scene, camera: THREE.Camera, glowMeshes?: readonly THREE.Object3D[]): void {
     if (!this.enabled) return;
+    if (glowMeshes !== undefined && !this.hasVisibleGlow(camera, glowMeshes)) {
+      this.skipBloomThisFrame = true;
+      this.emptyGlowStreak += 1;
+      const statsHost = globalThis as { __vbspBloomBlurStats?: { blurRuns: number; overlayRuns: number; emptySkips: number } };
+      const stats = statsHost.__vbspBloomBlurStats ?? (statsHost.__vbspBloomBlurStats = { blurRuns: 0, overlayRuns: 0, emptySkips: 0 });
+      stats.emptySkips += 1;
+      return;
+    }
+    if (this.emptyGlowStreak > 0) {
+      this.emptyGlowStreak = 0;
+      this.glowTick = 0;
+      this.blurDirty = true;
+    }
     // Tier2「优化处理」（2026-11-19）：帧预算紧张时整条光晕链让路。判定必须在最前面——
     // 省掉的是本帧的深度预渲 + 光效层提交 + 下帧 `overlay()` 的 bright/blur/overlay 三趟。
     // 主画面已由 `renderSkyPass` 整幅重画（含 clear）在画布上，跳过 = 直出：不黑屏、无残留。
@@ -485,7 +537,7 @@ export class BloomPostFx {
       // 测量路径：跳过整张地图的深度预渲，光效层直接吃上一帧留下的深度。
     } else {
       const hidden: THREE.Object3D[] = [];
-      for (const obj of glowMeshes) {
+      for (const obj of glowMeshes ?? []) {
         if (obj.visible) {
           obj.visible = false;
           hidden.push(obj);
@@ -521,8 +573,8 @@ export class BloomPostFx {
     if (this.skipBloomThisFrame) return;
     const prevAutoClear = this.renderer.autoClear;
     this.renderer.autoClear = false;
-    const statsHost = globalThis as { __vbspBloomBlurStats?: { blurRuns: number; overlayRuns: number } };
-    const stats = statsHost.__vbspBloomBlurStats ?? (statsHost.__vbspBloomBlurStats = { blurRuns: 0, overlayRuns: 0 });
+    const statsHost = globalThis as { __vbspBloomBlurStats?: { blurRuns: number; overlayRuns: number; emptySkips: number } };
+    const stats = statsHost.__vbspBloomBlurStats ?? (statsHost.__vbspBloomBlurStats = { blurRuns: 0, overlayRuns: 0, emptySkips: 0 });
     if (this.blurDirty) {
       this.blurDirty = false;
       // 光效缓冲 → 亮部提取 + 1/2

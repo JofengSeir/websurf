@@ -102,6 +102,42 @@ export function mirrorSizeNow(): number {
   return optimizeFlag('mirrorLowRes') ? Math.max(256, Math.round(MIRROR_SIZE / 2)) : MIRROR_SIZE;
 }
 
+/**
+ * 水平镜面斜近裁剪平面（Lengyel Oblique Frustum Clipping）：
+ * 把镜像相机 `vcam` 的近裁剪面直接对齐到水面高度 `planeHeight`（在 `camera` 所在一侧），
+ * 让硬件光栅化阶段直接剔除水面以下的全部几何——既省一半无效片元填充，又消除水下实体穿透倒影。
+ * 必须在 `plane.matrix`（投影采样矩阵）算完之后调用，避免影响反射 UV 投影。
+ */
+export function applyObliqueWaterClip(
+  vcam: THREE.PerspectiveCamera,
+  planeHeight: number,
+  camY: number,
+  clipBias = 0.25,
+): boolean {
+  const side = camY >= planeHeight ? 1 : -1;
+  const m = vcam.matrixWorld.elements;
+  const cx = m[1] * side;
+  const cy = m[5] * side;
+  const cz = m[9] * side;
+  const cw = (m[13] - planeHeight) * side + clipBias;
+  // 相机几乎贴着水面时平面对相机退化，回退普通近平面
+  if (cw >= -0.5) return false;
+  const pe = vcam.projectionMatrix.elements;
+  if (Math.abs(pe[0]) < 1e-8 || Math.abs(pe[5]) < 1e-8 || Math.abs(pe[14]) < 1e-8) return false;
+  const qx = (Math.sign(cx) + pe[8]) / pe[0];
+  const qy = (Math.sign(cy) + pe[9]) / pe[5];
+  const qz = -1;
+  const qw = (1 + pe[10]) / pe[14];
+  const dot = cx * qx + cy * qy + cz * qz + cw * qw;
+  if (!Number.isFinite(dot) || Math.abs(dot) < 1e-6) return false;
+  const scale = 2 / dot;
+  pe[2] = cx * scale;
+  pe[6] = cy * scale;
+  pe[10] = cz * scale + 1;
+  pe[14] = cw * scale;
+  return true;
+}
+
 /** 渲染某一层水面的镜像 RT（每层每帧一次；在该层第一个水面 mesh 的 `onBeforeRender` 里调用）。 */
 export function renderMirrorPlane(
   renderer: THREE.WebGLRenderer,
@@ -140,6 +176,9 @@ export function renderMirrorPlane(
   vcam.projectionMatrix.copy((camera as THREE.PerspectiveCamera).projectionMatrix);
   // 纹理矩阵：**不含 modelMatrix**（各水面块的 modelMatrix 在顶点着色器里乘）
   plane.matrix.copy(BIAS).multiply(vcam.projectionMatrix).multiply(vcam.matrixWorldInverse);
+  if ((g as { __vbspWaterObliqueClip?: boolean }).__vbspWaterObliqueClip !== false) {
+    applyObliqueWaterClip(vcam, height, camera.position.y);
+  }
 
   const prevTarget = renderer.getRenderTarget();
   mirrorRendering = true;
