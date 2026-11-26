@@ -135,6 +135,13 @@ const { Beams } = await loadTsBundle('src/renderer-shared/scene/entity-extras/be
 const { prepareClusterIndex, applyClusterIndex } = await loadTsBundle('src/renderer-shared/scene/cluster-filter.ts', 'cluster-filter');
 const { PlaneInspector } = await loadTsBundle('apps/debug/src/renderer/plane-inspector.ts', 'plane-inspector');
 const { applyWaterShaders, renderWaterFramePasses, resetWaterShaders } = await loadTsBundle('src/renderer-shared/shader/water.ts', 'water');
+const {
+  parseVdxtBuffer,
+  createDxtTexture,
+  decodeDxtMip0ToRgba,
+  VDXT_HEADER_BYTES,
+} = await loadTsBundle('src/renderer-shared/scene/dxt-texture.ts', 'dxt-texture');
+const { applyTextureQuality } = await loadTsBundle('src/renderer-shared/scene/texture-quality.ts', 'texture-quality');
 
 // 旋转枢轴的「rest 零变化」不变量：组位置 = pivot、mesh 局部位置 = 原位置 - pivot 时，
 // 世界坐标在旋转 0 的情况下逐分量不变（pivot 加回本身的抵消）。
@@ -1654,5 +1661,113 @@ test('PlaneInspector.cast 无分配标量 rayAabbTmin / castTriggerAABB 保持�
   const miss = inspector.cast(new THREE.Vector3(100, 0, 0), new THREE.Vector3(0, 0, -1), null, [solid], [], [trigger], 1000);
   assert.equal(miss, null);
 });
+
+function buildSyntheticVdxt(width, height, format, mipCount) {
+  const blockBytes = format === 1 || format === 2 ? 8 : 16;
+  const mipSizes = [];
+  let total = VDXT_HEADER_BYTES;
+  for (let m = 0; m < mipCount; m++) {
+    const mw = Math.max(1, width >> m);
+    const mh = Math.max(1, height >> m);
+    const sz = ((mw + 3) >> 2) * ((mh + 3) >> 2) * blockBytes;
+    mipSizes.push(sz);
+    total += sz;
+  }
+  const buf = new ArrayBuffer(total);
+  const view = new DataView(buf);
+  view.setUint8(0, 0x56); // V
+  view.setUint8(1, 0x44); // D
+  view.setUint8(2, 0x58); // X
+  view.setUint8(3, 0x54); // T
+  view.setUint16(4, width, true);
+  view.setUint16(6, height, true);
+  view.setUint8(8, format);
+  view.setUint8(9, mipCount);
+  let cursor = VDXT_HEADER_BYTES;
+  const u8 = new Uint8Array(buf);
+  for (let m = 0; m < mipCount; m++) {
+    u8.fill((m + 1) & 0xff, cursor, cursor + mipSizes[m]);
+    cursor += mipSizes[m];
+  }
+  return buf;
+}
+
+test('dxt-texture: parseVdxtBuffer 校验头部、mip 切片与独立拷贝', () => {
+  const ab = buildSyntheticVdxt(8, 8, 5, 4);
+  const parsed = parseVdxtBuffer(ab);
+  assert.ok(parsed);
+  assert.equal(parsed.width, 8);
+  assert.equal(parsed.height, 8);
+  assert.equal(parsed.format, 5);
+  assert.equal(parsed.mipmaps.length, 4);
+  assert.equal(parsed.mipmaps[0].data.length, 4 * 16);
+  assert.equal(parsed.mipmaps[3].width, 1);
+  assert.equal(parsed.mipmaps[3].data.length, 16);
+  // 拷贝与原 ArrayBuffer 隔离，不钉住整份 GLB 内存
+  new Uint8Array(ab).fill(0);
+  assert.equal(parsed.mipmaps[0].data[0], 1);
+
+  assert.equal(parseVdxtBuffer(new ArrayBuffer(8)), null);
+});
+
+test('dxt-texture: createDxtTexture 支持 S3TC+SRGB 直通与缺扩展 CPU 回退', () => {
+  const abMulti = buildSyntheticVdxt(8, 8, 1, 4);
+  const parsedMulti = parseVdxtBuffer(abMulti);
+  const { texture: compMulti, isCompressed: c1 } = createDxtTexture(parsedMulti, { s3tc: true, s3tcSrgb: true });
+  assert.equal(c1, true);
+  assert.equal(compMulti.isCompressedTexture, true);
+  assert.equal(compMulti.format, THREE.RGB_S3TC_DXT1_Format);
+  assert.equal(compMulti.minFilter, THREE.LinearMipmapLinearFilter);
+  assert.equal(compMulti.wrapS, THREE.RepeatWrapping);
+  assert.equal(compMulti.flipY, false);
+  assert.equal(compMulti.generateMipmaps, false);
+
+  const abSingle = buildSyntheticVdxt(8, 8, 3, 1);
+  const parsedSingle = parseVdxtBuffer(abSingle);
+  const { texture: compSingle } = createDxtTexture(parsedSingle, { s3tc: true, s3tcSrgb: true });
+  assert.equal(compSingle.minFilter, THREE.LinearFilter, '单层 mip 必须关 mipmap 采样以免 WebGL2 黑纹理');
+
+  // 仅有 s3tc 但缺 s3tcSrgb 时必须回退 CPU 解码
+  const { texture: fbTex, isCompressed: cFb } = createDxtTexture(parsedMulti, { s3tc: true, s3tcSrgb: false });
+  assert.equal(cFb, false);
+  assert.equal(fbTex.isDataTexture, true);
+
+  // BC1 全白块 (c0=0xFFFF, c1=0x0000, sel=0) 与 BC3 alpha=0 检验
+  const bc1 = new Uint8Array(VDXT_HEADER_BYTES + 8);
+  bc1.set([0x56, 0x44, 0x58, 0x54, 4, 0, 4, 0, 1, 1, 0, 0, 0, 0, 0, 0]);
+  bc1[VDXT_HEADER_BYTES] = 0xff;
+  bc1[VDXT_HEADER_BYTES + 1] = 0xff;
+  const rgba = decodeDxtMip0ToRgba(parseVdxtBuffer(bc1.buffer));
+  assert.equal(rgba.length, 4 * 4 * 4);
+  assert.deepEqual(Array.from(rgba.slice(0, 4)), [255, 255, 255, 255]);
+});
+
+test('texture-quality: CompressedTexture 切换 mini 与还原 original 不破坏原纹理', async () => {
+  const ab = buildSyntheticVdxt(4, 4, 1, 1);
+  const { texture: origComp } = createDxtTexture(parseVdxtBuffer(ab), { s3tc: true, s3tcSrgb: true });
+  origComp.name = 'brick/wall01';
+  const mat = new THREE.MeshBasicMaterial({ map: origComp });
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mat);
+  const origImages = new Map();
+  const prevCreateBitmap = globalThis.createImageBitmap;
+  globalThis.createImageBitmap = async () => ({ width: 8, height: 8, close() {} });
+  try {
+    const manifest = { 'brick/wall01': 'M_TEST' };
+    const deps = { decode: () => new Uint8Array([137, 80, 78, 71]) };
+    const rMini = await applyTextureQuality(mesh, manifest, 'mini', origImages, deps);
+    assert.equal(rMini.matched, 1);
+    assert.notEqual(mat.map, origComp);
+    assert.equal(mat.map.isCompressedTexture, undefined);
+    assert.equal(origImages.get(mat.map), origComp);
+
+    const rOrig = await applyTextureQuality(mesh, manifest, 'original', origImages, deps);
+    assert.equal(rOrig.mapCount, 1);
+    assert.equal(mat.map, origComp);
+    assert.equal(origImages.size, 0);
+  } finally {
+    globalThis.createImageBitmap = prevCreateBitmap;
+  }
+});
+
 
 

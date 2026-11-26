@@ -823,14 +823,21 @@ impl ModelIntegrator {
         if let Some(&idx) = self.texture_cache.borrow().get(texture_name) {
             return Some(idx);
         }
-        // 推送纹理到缓冲区
+        // 4 字节对齐，确保后续 f32 bufferView 偏移始终满足对齐要求
+        while buffer.len() % 4 != 0 {
+            buffer.push(0);
+        }
         let start = buffer.len() as u64;
         buffer.extend_from_slice(texture_data);
+        let byte_length = (buffer.len() as u64) - start;
+        while buffer.len() % 4 != 0 {
+            buffer.push(0);
+        }
 
         // 创建缓冲区视图
         let view = json::buffer::View {
             buffer: Index::new(0),
-            byte_length: USize64((buffer.len() as u64) - start),
+            byte_length: USize64(byte_length),
             byte_offset: Some(USize64(start)),
             byte_stride: None,
             extensions: Default::default(),
@@ -841,11 +848,17 @@ impl ModelIntegrator {
         let view_index = gltf.buffer_views.len() as u32;
         gltf.buffer_views.push(view);
 
+        let mime = if texture_data.starts_with(crate::texture_utils::dxt::VDXT_MAGIC) {
+            crate::texture_utils::dxt::VDXT_MIME
+        } else {
+            "image/png"
+        };
+
         // 创建图像
         let image = json::Image {
             uri: None,
             buffer_view: Some(Index::new(view_index)),
-            mime_type: Some(gltf::json::image::MimeType("image/png".to_string())),
+            mime_type: Some(gltf::json::image::MimeType(mime.to_string())),
             name: Some(texture_name.to_string()),
             extensions: Default::default(),
             extras: Default::default(),

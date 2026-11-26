@@ -60,9 +60,13 @@ export interface SceneTextureQualityInput extends SceneTextureRoots {
   deps: MosaicDeps;
 }
 
-/** 收集若干根子树里材质 `map` 槽位上的去重贴图（收集口径的唯一实现）。 */
-function collectMaps(roots: readonly THREE.Object3D[]): Set<THREE.Texture> {
-  const maps = new Set<THREE.Texture>();
+interface CollectedMapEntry {
+  owners: Array<{ material: THREE.Material & { map?: THREE.Texture | null } }>;
+}
+
+/** 收集若干根子树里材质 `map` 槽位上的去重贴图及引用材质列表。 */
+function collectMaps(roots: readonly THREE.Object3D[]): Map<THREE.Texture, CollectedMapEntry> {
+  const maps = new Map<THREE.Texture, CollectedMapEntry>();
   for (const root of roots) {
     root.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
@@ -70,8 +74,15 @@ function collectMaps(roots: readonly THREE.Object3D[]): Set<THREE.Texture> {
       if (!mat) return;
       const list = Array.isArray(mat) ? mat : [mat];
       for (const m of list) {
-        const map = (m as unknown as { map?: THREE.Texture | null }).map;
-        if (map) maps.add(map);
+        const typedMat = m as THREE.Material & { map?: THREE.Texture | null };
+        const map = typedMat.map;
+        if (!map) continue;
+        let entry = maps.get(map);
+        if (!entry) {
+          entry = { owners: [] };
+          maps.set(map, entry);
+        }
+        entry.owners.push({ material: typedMat });
       }
     });
   }
@@ -80,7 +91,7 @@ function collectMaps(roots: readonly THREE.Object3D[]): Set<THREE.Texture> {
 
 /** 对给定贴图集合执行一次切换（切换语义的唯一实现）。 */
 async function switchMaps(
-  maps: Set<THREE.Texture>,
+  maps: Map<THREE.Texture, CollectedMapEntry>,
   manifest: Record<string, string>,
   quality: 'original' | 'mini',
   origTextureImages: Map<THREE.Texture, unknown>,
@@ -88,13 +99,23 @@ async function switchMaps(
 ): Promise<TextureQualityResult> {
   const result: TextureQualityResult = { mapCount: maps.size, matched: 0, noMatch: [] };
   const jobs: Promise<void>[] = [];
-  for (const map of maps) {
+  for (const [map, entry] of maps) {
     if (quality === 'original') {
       const orig = origTextureImages.get(map);
       if (orig !== undefined) {
-        map.dispose(); // 低清 512 与原始图幅不同 ⇒ 强制重建 GPU 纹理
-        map.image = orig;
-        map.needsUpdate = true;
+        if ((orig as THREE.Texture).isTexture) {
+          // CompressedTexture 切 mini 时换成了临时 Texture：切回原图只需还原引用并释放临时纹理。
+          const origTex = orig as THREE.Texture;
+          for (const owner of entry.owners) {
+            owner.material.map = origTex;
+            owner.material.needsUpdate = true;
+          }
+          map.dispose();
+        } else {
+          map.dispose(); // 低清 512 与原始图幅不同 ⇒ 强制重建 GPU 纹理
+          map.image = orig;
+          map.needsUpdate = true;
+        }
         origTextureImages.delete(map);
       }
       continue;
@@ -105,7 +126,19 @@ async function switchMaps(
       continue;
     }
     result.matched++;
-    if (!origTextureImages.has(map)) origTextureImages.set(map, map.image);
+    if ((map as THREE.CompressedTexture).isCompressedTexture) {
+      jobs.push(replaceCompressedMapWithMosaic(map, entry.owners, code, deps, origTextureImages));
+      continue;
+    }
+    if (origTextureImages.has(map)) {
+      const prev = origTextureImages.get(map);
+      if ((prev as THREE.Texture | undefined)?.isTexture) {
+        // 已经是 mini 替换出的临时纹理，不重复生成。
+        continue;
+      }
+    } else {
+      origTextureImages.set(map, map.image);
+    }
     jobs.push(replaceMapWithMosaic(map, code, deps));
   }
   await Promise.all(jobs);
@@ -140,6 +173,38 @@ export async function applyTextureQuality(
   deps: MosaicDeps,
 ): Promise<TextureQualityResult> {
   return switchMaps(collectMaps([sceneRoot]), manifest, quality, origTextureImages, deps);
+}
+
+/** 压缩纹理（不能原地改 `.image`）：生成独立低清 Texture 并替换材质槽位，原纹理留在 origTextureImages 中。 */
+async function replaceCompressedMapWithMosaic(
+  origMap: THREE.Texture,
+  owners: Array<{ material: THREE.Material & { map?: THREE.Texture | null } }>,
+  code: string,
+  deps: MosaicDeps,
+  origTextureImages: Map<THREE.Texture, unknown>,
+): Promise<void> {
+  try {
+    await deps.ensureWasm?.();
+    const png = deps.decode(code, 8);
+    const bitmap = await createImageBitmap(new Blob([png], { type: 'image/png' }));
+    const mosaicTex = new THREE.Texture(bitmap);
+    mosaicTex.name = origMap.name;
+    mosaicTex.wrapS = origMap.wrapS;
+    mosaicTex.wrapT = origMap.wrapT;
+    mosaicTex.flipY = origMap.flipY;
+    mosaicTex.colorSpace = origMap.colorSpace;
+    mosaicTex.anisotropy = origMap.anisotropy;
+    mosaicTex.magFilter = origMap.magFilter;
+    mosaicTex.minFilter = THREE.LinearMipmapLinearFilter;
+    mosaicTex.needsUpdate = true;
+    origTextureImages.set(mosaicTex, origMap);
+    for (const owner of owners) {
+      owner.material.map = mosaicTex;
+      owner.material.needsUpdate = true;
+    }
+  } catch (e) {
+    console.warn('[renderer] mosaic 压缩贴图替换失败:', e);
+  }
 }
 
 /** 单个贴图：mosaic 字节码 → 低清 PNG → ImageBitmap 替换 image。失败只告警，保留原贴图。 */

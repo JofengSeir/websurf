@@ -19,7 +19,6 @@
 
 use crate::bsp_to_gltf_core::materials::load_material_bsp;
 use crate::bsp_to_gltf_core::ConvertOptions;
-use crate::mosaic::encode::img_to_code_dyn;
 use crate::vbsp::Bsp;
 
 /// 遍历全部 model 的 face，收集**可见** face 的材质名（转小写）并按首次出现顺序去重。
@@ -109,8 +108,6 @@ fn texture_to_code(
     let texture = material
         .texture
         .ok_or_else(|| crate::bsp_to_gltf_core::Error::Other(format!("{material_name}: 无贴图")))?;
-    // 直接喂已解码的图：原先这里先 `write_to(Png)` 编一遍、`img_to_code` 再 `load_from_memory`
-    // 解回来，而本链路只要一张 ≤50 像素的缩略 —— 4096×4096 上这轮往返是秒级纯浪费。
-    let code = img_to_code_dyn(&texture.image, &texture.name);
+    let code = texture.to_mosaic_code();
     Ok((texture.name.to_ascii_lowercase(), code))
 }

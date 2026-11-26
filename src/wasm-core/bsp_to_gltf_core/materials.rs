@@ -247,14 +247,56 @@ impl Default for MaterialData {
     }
 }
 
-/// 一张已解码的贴图：名字 + 像素。
+/// 贴图载荷：优先直通 VTF 原生 DXT1/DXT3/DXT5 块数据，回退/缩放路径使用解码图像。
+pub enum TexturePayload {
+    Image(DynamicImage),
+    Dxt(crate::texture_utils::dxt::DxtTexture),
+}
+
+/// 一张已加载的贴图：名字 + 载荷。
 pub struct TextureData {
     /// 贴图名（取自被加载的 `$basetexture` 路径或材质名）。
     /// glTF 侧同时用作 `Texture::name`、`Image::name` 与**去重键**
     /// （`gltf_builder::get_texture_index` 按名比对）。
     pub name: String,
-    /// 解码并按 `ConvertOptions::texture_scale` 缩放后的图像。
-    pub image: DynamicImage,
+    /// 原始 DXT 压缩载荷或解码后的图像。
+    pub payload: TexturePayload,
+}
+
+impl TextureData {
+    pub fn from_image(name: String, image: DynamicImage) -> Self {
+        Self {
+            name,
+            payload: TexturePayload::Image(image),
+        }
+    }
+
+    pub fn from_dxt(name: String, dxt: crate::texture_utils::dxt::DxtTexture) -> Self {
+        Self {
+            name,
+            payload: TexturePayload::Dxt(dxt),
+        }
+    }
+
+    pub fn has_alpha_holes(&self) -> bool {
+        match &self.payload {
+            TexturePayload::Image(img) => crate::bsp_to_gltf_core::gltf_builder::texture_has_alpha_holes(img),
+            TexturePayload::Dxt(dxt) => dxt.has_alpha_holes(),
+        }
+    }
+
+    pub fn to_mosaic_code(&self) -> String {
+        match &self.payload {
+            TexturePayload::Image(img) => crate::mosaic::encode::img_to_code_dyn(img, &self.name),
+            TexturePayload::Dxt(dxt) => {
+                if let Some(mip_img) = dxt.decode_mip_for_mosaic() {
+                    crate::mosaic::encode::img_to_code_dyn(&mip_img, &self.name)
+                } else {
+                    String::new()
+                }
+            }
+        }
+    }
 }
 
 
@@ -863,10 +905,7 @@ pub fn load_material_fallback_bsp(
                     name: name.to_string(),
                     path: String::new(),
                     color: [255, 255, 255, 255],
-                    texture: Some(TextureData {
-                        name: name.to_string(),
-                        image,
-                    }),
+                    texture: Some(TextureData::from_image(name.to_string(), image)),
                     // 贴图自带 alpha 通道时混合系数保持 1（透明度交给贴图），只开混合档位。
                     translucent: tex_translucent,
                     ..MaterialData::default()
@@ -1083,7 +1122,7 @@ pub(crate) fn load_material_bsp(
             let refract_texture = if refract {
                 fallback_texture_png(&options.missing_fallback, &[name], 8)
                     .and_then(|png| image::load_from_memory(&png).ok())
-                    .map(|image| TextureData { name: name.to_string(), image })
+                    .map(|image| TextureData::from_image(name.to_string(), image))
             } else {
                 None
             };
@@ -1150,10 +1189,10 @@ pub(crate) fn load_material_bsp(
     let alpha01 = if vmt_alpha > 0.0 && vmt_alpha < 1.0 { vmt_alpha } else { 1.0 };
 
     // 尝试加载纹理，如果失败则使用默认材质数据
-    let texture_data = match load_texture_bsp(base_texture, bsp, options) {
-        Ok(texture) => Some(TextureData {
+    let texture_data = match load_texture_payload_bsp(base_texture, bsp, options) {
+        Ok(payload) => Some(TextureData {
             name: base_texture.to_string(),
-            image: texture,
+            payload,
         }),
         Err(e) => {
             // ① pakfile 内没有这张 VTF（stock 贴图未打包）时查回退表，键依次是
@@ -1164,10 +1203,7 @@ pub(crate) fn load_material_bsp(
             match fallback_texture_png(&options.missing_fallback, &[base_texture, name], 8)
                 .and_then(|png| image::load_from_memory(&png).ok())
             {
-                Some(image) => Some(TextureData {
-                    name: base_texture.to_string(),
-                    image,
-                }),
+                Some(image) => Some(TextureData::from_image(base_texture.to_string(), image)),
                 None => {
                     println!("Failed to load texture: {:?}, using default material", e);
                     None
@@ -1215,6 +1251,41 @@ pub(crate) fn load_material_bsp(
         // 有 `$basetexture` 的材质不是水面（`Water` 着色器走上面的无 basetexture 分支）。
         water: None,
     })
+}
+
+fn load_texture_payload_bsp(
+    name: &str,
+    bsp: &Bsp,
+    options: &ConvertOptions,
+) -> Result<TexturePayload, Error> {
+    let vtf_data = find_vtf_bytes(name, bsp)?;
+
+    if options.probe_only {
+        if !vtf_loadable(&vtf_data) {
+            return Err(Error::Other("探针：VTF 解不出来".into()));
+        }
+        return Ok(TexturePayload::Image(DynamicImage::new_rgba8(1, 1)));
+    }
+
+    if options.texture_scale == 1.0 {
+        if let Some(dxt) = crate::texture_utils::dxt::extract_vtf_dxt(&vtf_data) {
+            return Ok(TexturePayload::Dxt(dxt));
+        }
+    }
+
+    let crate_try = vtf::vtf::VTF::read(&vtf_data)
+        .and_then(|vtf| Ok(DynamicImage::ImageRgba8(vtf.highres_image.decode(0)?.into_rgba8())));
+    let image = crate_try.or_else(|e| decode_vtf_by_texture_utils(&vtf_data, e))?;
+
+    if options.texture_scale != 1.0 {
+        Ok(TexturePayload::Image(image.resize(
+            (image.width() as f32 * options.texture_scale) as u32,
+            (image.height() as f32 * options.texture_scale) as u32,
+            FilterType::CatmullRom,
+        )))
+    } else {
+        Ok(TexturePayload::Image(image))
+    }
 }
 
 /// 在 BSP 的 pakfile 内加载并解码一张 VTF，是 `load_material_bsp` 的贴图步骤。
@@ -1366,11 +1437,11 @@ fn parse_dollar_basetexture2(vdf: &str) -> Option<String> {
 /// 返回 `None`（只用第一贴图）——与「不处理第二贴图」的历史行为一致，不会更差。
 fn load_second_texture(bsp: &Bsp, options: &ConvertOptions, vdf: &str) -> Option<TextureData> {
     let name = parse_dollar_basetexture2(vdf)?;
-    match load_texture_bsp(&name, bsp, options) {
-        Ok(image) => Some(TextureData { name, image }),
+    match load_texture_payload_bsp(&name, bsp, options) {
+        Ok(payload) => Some(TextureData { name, payload }),
         Err(_) => fallback_texture_png(&options.missing_fallback, &[name.as_str()], 8)
             .and_then(|png| image::load_from_memory(&png).ok())
-            .map(|image| TextureData { name, image }),
+            .map(|image| TextureData::from_image(name, image)),
     }
 }
 

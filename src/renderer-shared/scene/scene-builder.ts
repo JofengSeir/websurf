@@ -14,21 +14,13 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { loadLightmapAtlas, applyLightmapToMeshes, getLightingMode } from '../shader/lightmap-shader.js';
 import { collectPunctualSpots } from './spot-beams.js';
 import { tagBrushEntityOwners } from './scene-optimizer.js';
+import { registerVbspDxtPlugin, type DxtCapabilities } from './dxt-texture.js';
 
-/** 复用的 GLTFLoader（buildMapScene 每次 loadAsync）。 */
-const gltfLoader = new GLTFLoader();
-
-/** GLB 字节 → GLTF：先把字节拷进新的 `Uint8Array` 再交给 Blob URL，`finally` 里注销该 URL。 */
-async function loadGlb(glbBytes: ArrayBuffer): Promise<GLTF> {
-  const buffer = new Uint8Array(glbBytes.byteLength);
-  buffer.set(new Uint8Array(glbBytes));
-  const blob = new Blob([buffer], { type: 'model/gltf-binary' });
-  const url = URL.createObjectURL(blob);
-  try {
-    return await gltfLoader.loadAsync(url);
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+/** GLB 字节 → GLTF：直接零拷贝交由 `parseAsync` 解析，避免 Blob / ObjectURL 的 3× 峰值拷贝。 */
+async function loadGlb(glbBytes: ArrayBuffer, dxtCaps?: DxtCapabilities): Promise<GLTF> {
+  const loader = new GLTFLoader();
+  registerVbspDxtPlugin(loader, dxtCaps ?? { s3tc: false, s3tcSrgb: false });
+  return await loader.parseAsync(glbBytes, '');
 }
 
 /** 清零 GLB 根子节点的 rotation（有非零分量才写并立即刷新该子树的矩阵），最后整体更新 matrixWorld。
@@ -61,13 +53,16 @@ function resetRootRotations(gltf: GLTF): void {
  *       场景树里被反复 traverse（后续的 traverse 与 optimizeScene 都会遍历到），
  *       且任何一处把 visible 置回 true 就会让受光材质的程序失效。
  */
-export async function buildMapScene(glb: ArrayBuffer): Promise<{
+export async function buildMapScene(
+  glb: ArrayBuffer,
+  opts?: { dxtCaps?: DxtCapabilities },
+): Promise<{
   gltf: GLTF;
   scene: THREE.Scene;
   bbox: THREE.Box3;
   maxDim: number;
 }> {
-  const gltf = await loadGlb(glb);
+  const gltf = await loadGlb(glb, opts?.dxtCaps);
   const scene = new THREE.Scene();
   scene.userData.isBspModel = true;
   resetRootRotations(gltf);

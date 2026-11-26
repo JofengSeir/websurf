@@ -31,6 +31,8 @@
 #![allow(dead_code)]
 /// VTF 图像：`ImageFormat` 的逐格式尺寸表与像素解码。
 pub mod image;
+/// VTF DXT1/DXT3/DXT5 压缩纹理直通（`VDXT` 载荷、alpha 镂空检测与 mosaic 缩略解码）。
+pub mod dxt;
 /// VTF 文件头、VTF 7.3 资源表与 mip 偏移计算。
 pub mod vtf;
 

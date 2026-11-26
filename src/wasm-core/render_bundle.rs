@@ -507,6 +507,12 @@ pub fn resolve_pakfile_materials(
 /// 差别只在失败一律折成 `None`——调用点都不区分失败原因，需要带上下文的错误文本时由各端
 /// 自己的导出函数给出。
 fn decode_vtf_assets(data: &[u8], name: &str) -> Option<(Vec<u8>, String)> {
+    if let Some(dxt) = texture_utils::dxt::extract_vtf_dxt(data) {
+        if let Some(mip_img) = dxt.decode_mip_for_mosaic() {
+            let mosaic = crate::mosaic::encode::img_to_code_dyn(&mip_img, name);
+            return Some((dxt.to_vdxt_bytes(), mosaic));
+        }
+    }
     let vtf = texture_utils::from_bytes(data).ok()?;
     let image = vtf.highres_image.decode(0).ok()?;
 

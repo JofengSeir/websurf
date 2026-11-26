@@ -23,6 +23,7 @@ import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createRenderer, precompileScene } from '../render/create-renderer.js';
 import { installRenderProbe } from '../render/render-probe.js';
 import { assembleScene } from './assemble-scene.js';
+import { detectDxtCapabilities, type VbspDxtStats } from './dxt-texture.js';
 import { mergeStatsOf, type MergeStats } from './scene-optimizer.js';
 import { disposeObject } from './dispose.js';
 import { resetWaterShaders, renderWaterFramePasses } from '../shader/water.js';
@@ -458,15 +459,23 @@ export class RenderSession {
     this.pvs = input.pvsJson ? new PvsManager(input.pvsJson) : null;
     this.translucentSplit = input.translucentSplit !== false;
 
+    const dxtCaps = detectDxtCapabilities(this.renderer);
     const asm = await assembleScene({
       glb: input.glb,
       logPrefix: this.app,
       pvs: this.pvs,
       skyCamera: input.skyCamera ?? null,
+      dxtCaps,
       meshInCluster: (m, c) => this.meshInCluster(m, c),
       onRootReady: input.onRootReady,
       mergeMain: input.merge === false ? undefined : (root) => this.mergeMain(root),
     });
+    const dxtStats = (globalThis as { __vbspDxtStats?: VbspDxtStats }).__vbspDxtStats;
+    if (dxtStats && (dxtStats.compressed > 0 || dxtStats.fallback > 0)) {
+      console.info(
+        `[${this.app}][dxt] 原生压缩贴图=${dxtStats.compressed} CPU回退=${dxtStats.fallback} mips=${dxtStats.mipCountTotal} 载荷=${(dxtStats.totalBytes / 1048576).toFixed(1)}MB`,
+      );
+    }
 
     this.root = asm.root;
     // T-N6（T-P1-5b 遗留）：`merge === false` 时装配阶段不走 `mergeMain`，动态实体因此既没打标

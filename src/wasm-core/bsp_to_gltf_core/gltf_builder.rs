@@ -189,8 +189,10 @@ pub fn push_or_get_material_bsp(
                     let key = tex.name.to_ascii_lowercase();
                     // 按**贴图**去重：本函数是逐材质走的，同一张贴图会被多个材质引用
                     if tc_mut.mosaic_seen.insert(key.clone()) {
-                        let code = crate::mosaic::encode::img_to_code_dyn(&tex.image, &tex.name);
-                        tc_mut.mosaic.push((key, code));
+                        let code = tex.to_mosaic_code();
+                        if !code.is_empty() {
+                            tc_mut.mosaic.push((key, code));
+                        }
                     }
                 }
                 let index = gltf.materials.len() as u32;
@@ -225,7 +227,7 @@ pub fn push_or_get_material_bsp(
 ///
 /// 无 alpha 通道的图像、以及像素数据不足一个 RGBA 像素（`raw.len() < 4`）的图像一律
 /// 返回 `false`。只读像素：不修改图像，也不看材质的任何声明。
-fn texture_has_alpha_holes(image: &image::DynamicImage) -> bool {
+pub(crate) fn texture_has_alpha_holes(image: &image::DynamicImage) -> bool {
     /// 算作「孔洞」的 alpha 上界：`alpha < 32` 计一个孔洞像素
     /// （`alphaCutoff 0.5` 的裁切线是 `alpha < 128`，这里严得多）。
     const HOLE_ALPHA: u8 = 32;
@@ -293,7 +295,7 @@ pub fn push_material(
     let texture_has_holes = material
         .texture
         .as_ref()
-        .map(|tex| texture_has_alpha_holes(&tex.image))
+        .map(|tex| tex.has_alpha_holes())
         .unwrap_or(false);
 
     let texture_index = material
@@ -489,31 +491,42 @@ fn push_or_get_texture(
 /// BIN 字节与三个 glTF 对象。
 /// PNG 编码失败走 `expect("failed to encode")`，直接 panic 而不返回错误。
 fn push_texture(buffer: &mut Vec<u8>, gltf: &mut Root, texture: TextureData) -> Texture {
-    let mut image = texture.image;
-    if image.color() != ColorType::Rgba8 && image.color() != ColorType::Rgb8 {
-        if image.color().has_alpha() {
-            image = DynamicImage::ImageRgba8(image.into_rgba8());
-        } else {
-            image = DynamicImage::ImageRgb8(image.into_rgb8());
-        }
-    }
     let buffer_start = buffer.len() as u64;
     let view_start = gltf.buffer_views.len() as u32;
     let image_start = gltf.images.len() as u32;
-    let image_buffer_size = (image.color().bits_per_pixel() / 8) as u32 * image.width() * image.height();
 
-    let mut png_buffer = Vec::new();
-    let encoder = PngEncoder::new(&mut png_buffer);
-    encoder
-        .write_image(
-            &image.as_bytes()[0..image_buffer_size as usize],
-            image.width(),
-            image.height(),
-            image.color().into(),
-        )
-        .expect("failed to encode");
+    let mime_type: &str = match texture.payload {
+        crate::bsp_to_gltf_core::materials::TexturePayload::Dxt(dxt) => {
+            let vdxt = dxt.to_vdxt_bytes();
+            buffer.extend_from_slice(&vdxt);
+            crate::texture_utils::dxt::VDXT_MIME
+        }
+        crate::bsp_to_gltf_core::materials::TexturePayload::Image(mut image) => {
+            if image.color() != ColorType::Rgba8 && image.color() != ColorType::Rgb8 {
+                if image.color().has_alpha() {
+                    image = DynamicImage::ImageRgba8(image.into_rgba8());
+                } else {
+                    image = DynamicImage::ImageRgb8(image.into_rgb8());
+                }
+            }
+            let image_buffer_size =
+                (image.color().bits_per_pixel() / 8) as u32 * image.width() * image.height();
 
-    buffer.extend_from_slice(&png_buffer);
+            let mut png_buffer = Vec::new();
+            let encoder = PngEncoder::new(&mut png_buffer);
+            encoder
+                .write_image(
+                    &image.as_bytes()[0..image_buffer_size as usize],
+                    image.width(),
+                    image.height(),
+                    image.color().into(),
+                )
+                .expect("failed to encode");
+
+            buffer.extend_from_slice(&png_buffer);
+            "image/png"
+        }
+    };
 
     let byte_length = buffer.len() as u64 - buffer_start;
     pad_byte_vector(buffer);
@@ -533,7 +546,7 @@ fn push_texture(buffer: &mut Vec<u8>, gltf: &mut Root, texture: TextureData) -> 
 
     let image = Image {
         buffer_view: Some(Index::new(view_start)),
-        mime_type: Some(MimeType("image/png".into())),
+        mime_type: Some(MimeType(mime_type.into())),
         name: Some(texture.name.clone()),
         uri: None,
         extensions: None,

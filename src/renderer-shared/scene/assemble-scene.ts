@@ -19,6 +19,7 @@
 import * as THREE from 'three';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { applyLightmap, buildMapScene } from './scene-builder.js';
+import type { DxtCapabilities } from './dxt-texture.js';
 import { buildSpotBeams, type PunctualSpot } from './spot-beams.js';
 import { mergeIntoChunks, padBoundingSpheres } from './scene-optimizer.js';
 import { markRotButtons } from './rot-buttons.js';
@@ -58,6 +59,8 @@ export interface AssembleSceneOptions {
   mergeMain?: (root: THREE.Scene, gltf: GLTF) => THREE.Object3D | void;
   /** 步骤 ② 之后、③ 之前的钩子（debug 用它收元数据——必须早于合并，合并会 dispose 原 mesh）。 */
   onRootReady?: (root: THREE.Scene, gltf: GLTF) => void;
+  /** WebGL 压缩纹理扩展能力（用于直通 VTF DXT1/DXT3/DXT5）。 */
+  dxtCaps?: DxtCapabilities;
 }
 
 export interface AssembleSceneResult {
@@ -301,7 +304,7 @@ export async function assembleScene(opts: AssembleSceneOptions): Promise<Assembl
   const __mark = (name: string): void => {
     __timings[name] = +(performance.now() - __t0).toFixed(1);
   };
-  const { gltf, scene: mapRoot, bbox, maxDim } = await buildMapScene(opts.glb);
+  const { gltf, scene: mapRoot, bbox, maxDim } = await buildMapScene(opts.glb, { dxtCaps: opts.dxtCaps });
   __mark('buildMapScene');
   const tintedEntities = applyEntityRenderColors(mapRoot);
   __mark('entityColors');

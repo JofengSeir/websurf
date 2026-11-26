@@ -66,11 +66,16 @@ impl<'a> VTFImage<'a> {
     /// 的字节短于自己头部声明的长度（同名文件在 CS:S 的包里更长且能解），而越界切片在 wasm
     /// 里会变成 `unreachable`，把调用方那条「先 crate、再本模块」的两路回退整条打断。
     pub fn get_frame(&self, frame: u32) -> Result<&[u8], Error> {
-        let frame_size = self
-            .format
-            .frame_size(self.width as u32, self.height as u32)? as usize;
+        self.get_mip_bytes(frame, 0)
+    }
+
+    /// 取第 `frame` 帧第 `mip_level` 层的**原始字节**（未解码）。
+    pub fn get_mip_bytes(&self, frame: u32, mip_level: u32) -> Result<&[u8], Error> {
+        let mw = (self.width as u32).checked_shr(mip_level).unwrap_or(0).max(1);
+        let mh = (self.height as u32).checked_shr(mip_level).unwrap_or(0).max(1);
+        let frame_size = self.format.frame_size(mw, mh)? as usize;
         let base: usize =
-            self.offset + get_offset(&self.header, &self.format, frame, 0, 0, 0)? as usize;
+            self.offset + get_offset(&self.header, &self.format, frame, 0, 0, mip_level as i32)? as usize;
         let end = base.checked_add(frame_size).ok_or(Error::InvalidImageData)?;
         self.bytes.get(base..end).ok_or(Error::InvalidImageData)
     }
@@ -309,7 +314,9 @@ impl ImageFormat {
             ImageFormat::A8 => Ok(width * height),
             ImageFormat::Argb8888 => Ok(width * height * 4),
             ImageFormat::Bgra8888 => Ok(width * height * 4),
-            ImageFormat::Dxt1 => Ok(((width + 3) / 4) * ((height + 3) / 4) * 8),
+            ImageFormat::Dxt1 | ImageFormat::Dxt1Onebitalpha => {
+                Ok(((width + 3) / 4) * ((height + 3) / 4) * 8)
+            }
             ImageFormat::Dxt3 => Ok(((width + 3) / 4) * ((height + 3) / 4) * 16),
             ImageFormat::Dxt5 => Ok(((width + 3) / 4) * ((height + 3) / 4) * 16),
             ImageFormat::Rgba16161616f => Ok(width * height * 8),
