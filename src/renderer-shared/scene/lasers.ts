@@ -355,6 +355,8 @@ export class LaserBeams {
         pa[off + 2] = start.z;
       }
     };
+    const uvAttr = this.geometry.getAttribute('uv') as THREE.BufferAttribute;
+    let visibleCount = 0;
     for (let i = 0; i < this.beams.length; i++) {
       const beam = this.beams[i];
       const base = i * 4;
@@ -379,6 +381,7 @@ export class LaserBeams {
         collapse(base, beam.start);
         continue;
       }
+      visibleCount++;
       // ComputeBeamPerpendicular: perp = normalize(Cross(viewForward, beamDir))
       perp.crossVectors(forward, dir);
       if (perp.lengthSq() < 1e-6) perp.copy(fallback);
@@ -420,23 +423,21 @@ export class LaserBeams {
         this.colors[off + 1] = cg;
         this.colors[off + 2] = cb;
       }
-    }
-    const uvAttr = this.geometry.getAttribute('uv') as THREE.BufferAttribute;
-    for (let i = 0; i < this.beams.length; i++) {
-      const beam = this.beams[i];
-      const length = beam.clippedEnd.distanceTo(beam.start);
       const v0 = beam.scrollRate * this.elapsed;
       const v1 = v0 + length / 100;
-      const uvBase = i * 4;
-      uvAttr.setXY(uvBase, 0, v0);
-      uvAttr.setXY(uvBase + 1, 1, v0);
-      uvAttr.setXY(uvBase + 2, 1, v1);
-      uvAttr.setXY(uvBase + 3, 0, v1);
+      uvAttr.setXY(base, 0, v0);
+      uvAttr.setXY(base + 1, 1, v0);
+      uvAttr.setXY(base + 2, 1, v1);
+      uvAttr.setXY(base + 3, 0, v1);
+    }
+    if (visibleCount === 0) {
+      this.mesh.visible = false;
+      return;
     }
     uvAttr.needsUpdate = true;
     (this.geometry.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true;
     (this.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
-    this.mesh.visible = this.beams.length > 0;
+    this.mesh.visible = true;
   }
 
   /** 诊断：可见梁数量与截断后的总长度（HU）。 */

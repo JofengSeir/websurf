@@ -347,10 +347,11 @@ export class SpotBeamRig {
 		for (let step = 0; step < len; step++) {
 			const idx = (this.cursor + step) % len;
 			const entry = this.entries[idx];
-			if (!entry.baseVisible) {
+			if (!entry.baseVisible || entry.spot.intensity <= 0) {
 				entry.beam.visible = false;
 				entry.glare.visible = false;
 				entry.visTarget = 0;
+				entry.visCurrent = 0;
 				continue;
 			}
 			const gp = entry.glare.position;
@@ -369,13 +370,20 @@ export class SpotBeamRig {
 					continue;
 				}
 			}
-			entry.beam.visible = true;
-			entry.glare.visible = true;
 			const dx = gp.x - this.tmpPos.x;
 			const dy = gp.y - this.tmpPos.y;
 			const dz = gp.z - this.tmpPos.z;
 			const distSq = dx * dx + dy * dy + dz * dz;
 			const fwd = dx * this.camForward.x + dy * this.camForward.y + dz * this.camForward.z;
+			const sd = entry.spot.direction;
+			const ex = gp.x + sd[0] * entry.length - this.tmpPos.x;
+			const ey = gp.y + sd[1] * entry.length - this.tmpPos.y;
+			const ez = gp.z + sd[2] * entry.length - this.tmpPos.z;
+			const fwdEnd = ex * this.camForward.x + ey * this.camForward.y + ez * this.camForward.z;
+			const maxBeamRange = 3000 + entry.length;
+			const beamDistSq = Math.min(distSq, ex * ex + ey * ey + ez * ez);
+			entry.beam.visible = !((fwd <= -32 && fwdEnd <= -32) || beamDistSq > maxBeamRange * maxBeamRange);
+			entry.glare.visible = true;
 			if (distSq > 3000 * 3000 || fwd <= 0) {
 				entry.visTarget = 0;
 				continue;
@@ -388,7 +396,6 @@ export class SpotBeamRig {
 				entry.lastCheckAt = nowMs;
 				checked = true;
 				this.cursor = (idx + 1) % len;
-				const sd = entry.spot.direction;
 				this.tmpTarget.set(gp.x + sd[0] * 4, gp.y + sd[1] * 4, gp.z + sd[2] * 4);
 				const frac = physTrace(this.tmpPos, this.tmpTarget);
 				entry.visTarget = frac < 0.96 ? 0 : 1;
@@ -397,7 +404,12 @@ export class SpotBeamRig {
 
 		const alpha = 1 - Math.exp(-dt * 18.0);
 		for (const entry of this.entries) {
+			if (!entry.glare.visible) continue;
 			entry.visCurrent += (entry.visTarget - entry.visCurrent) * alpha;
+			if (entry.visCurrent <= 0.002) {
+				entry.glare.visible = false;
+				continue;
+			}
 			const glareMat = entry.glare.material as THREE.ShaderMaterial;
 			if (glareMat.uniforms?.uVis) glareMat.uniforms.uVis.value = entry.visCurrent;
 			if (glareMat.uniforms?.uAspect) glareMat.uniforms.uAspect.value = aspect;

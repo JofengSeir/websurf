@@ -164,16 +164,31 @@ export class BillboardQuadBatch {
     this.live++;
   }
 
-  end(): void {
-    // position 由相机基变换后重写，必须每帧上传；color/uv 是静态量，
-    // 只在首帧或本帧 live 数量变化（换图/增删）时上传，静止相机下零重传。
+  /** 把槽位塌成零面积（不可见，不计入 live）。 */
+  collapseAt(slot: number): void {
+    if (slot < 0 || slot >= this.capacity) return;
+    const v = slot * 4;
+    this.writeVert(v, 0, 0, 0, 0, 0, 0, 0);
+    this.writeVert(v + 1, 0, 0, 0, 0, 0, 0, 0);
+    this.writeVert(v + 2, 0, 0, 0, 0, 0, 0, 0);
+    this.writeVert(v + 3, 0, 0, 0, 0, 0, 0, 0);
+  }
+
+  end(forceColorUpload = false): void {
+    if (this.live === 0) {
+      this.mesh.visible = false;
+      this.lastEndLive = 0;
+      return;
+    }
+    // position 由相机基变换后重写，必须上传；color/uv 是静态量，
+    // 只在首帧或本帧可见槽位变化时上传，静止/同可见集下零重传。
     (this.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
-    if (this.live !== this.lastEndLive) {
+    if (this.live !== this.lastEndLive || forceColorUpload) {
       (this.geometry.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true;
       (this.geometry.getAttribute('uv') as THREE.BufferAttribute).needsUpdate = true;
       this.lastEndLive = this.live;
     }
-    this.mesh.visible = this.live > 0;
+    this.mesh.visible = true;
   }
 
   dispose(): void {

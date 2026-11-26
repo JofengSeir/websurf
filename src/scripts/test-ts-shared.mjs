@@ -120,6 +120,8 @@ const { BloomPostFx } = await loadTsBundle('src/renderer-shared/environment/post
 const { VisibilityController } = await loadTsBundle('src/renderer-shared/scene/visibility-controller.ts', 'visibility-controller');
 const { applyObliqueWaterClip } = await loadTsBundle('src/renderer-shared/shader/water/planar-reflect.ts', 'planar-reflect');
 const { TransparentSorter } = await loadTsBundle('src/renderer-shared/scene/transparent-sorter.ts', 'transparent-sorter');
+const { SpriteGlows } = await loadTsBundle('src/renderer-shared/scene/entity-extras/sprites.ts', 'entity-sprites');
+const { Beams } = await loadTsBundle('src/renderer-shared/scene/entity-extras/beams.ts', 'entity-beams');
 
 // 旋转枢轴的「rest 零变化」不变量：组位置 = pivot、mesh 局部位置 = 原位置 - pivot 时，
 // 世界坐标在旋转 0 的情况下逐分量不变（pivot 加回本身的抵消）。
@@ -1298,6 +1300,108 @@ test('TransparentSorter 共面跳过排序且非共面走局部空间扁平重�
   sorter.update(cam, null, -1);
   assert.equal(flatGeom.index.version, flatVer0, '共面透明块移动相机不应重传 index');
   assert.deepEqual(Array.from(glassGeom.index.array), [0, 1, 2, 3, 4, 5]);
+});
+
+test('SpriteGlows 与 Beams 静止视角零重传且全隐时置 visible=false', () => {
+  const prevDoc = globalThis.document;
+  globalThis.document = {
+    createElement() {
+      return {
+        width: 64,
+        height: 64,
+        getContext() {
+          return {
+            fillStyle: '',
+            createRadialGradient() {
+              return { addColorStop() {} };
+            },
+            createImageData(w, h) {
+              return { data: new Uint8ClampedArray(w * h * 4) };
+            },
+            putImageData() {},
+            fillRect() {},
+          };
+        },
+      };
+    },
+  };
+  try {
+    const cam = new THREE.PerspectiveCamera(75, 1, 1, 1000);
+    cam.position.set(0, 0, 50);
+    cam.lookAt(0, 0, 0);
+    cam.updateMatrixWorld(true);
+
+    const sprites = new SpriteGlows([{
+      entityIndex: 1,
+      startVisible: true,
+      origin: [0, 0, 0],
+      size: 16,
+      color: new THREE.Color(1, 1, 1),
+      model: 'sprites/glow01.vmt',
+    }]);
+    const spriteMesh = sprites.root.children[0];
+    const spritePosAttr = spriteMesh.geometry.getAttribute('position');
+
+    sprites.update(cam, null);
+    assert.equal(spriteMesh.visible, true);
+    const sv1 = spritePosAttr.version;
+
+    // 相机纯平移不旋转：基向量不变，零顶点重写/零 GPU 上传
+    cam.position.set(10, 5, 50);
+    cam.updateMatrixWorld(true);
+    sprites.update(cam, null);
+    assert.equal(spritePosAttr.version, sv1, 'SpriteGlows 基向量未变时不应重传顶点');
+
+    // 相机旋转：基向量变化，更新顶点
+    cam.lookAt(0, 0, 0);
+    cam.updateMatrixWorld(true);
+    sprites.update(cam, null);
+    assert.ok(spritePosAttr.version > sv1, 'SpriteGlows 旋转后应更新顶点');
+
+    // 全部隐藏后：mesh.visible=false 且后续帧零上传
+    sprites.setEntityVisible(1, false);
+    sprites.update(cam, null);
+    assert.equal(spriteMesh.visible, false, '全隐后 SpriteGlows mesh 应置 visible=false');
+    const svHidden = spritePosAttr.version;
+    cam.rotation.y += 0.5;
+    cam.updateMatrixWorld(true);
+    sprites.update(cam, null);
+    assert.equal(spritePosAttr.version, svHidden, '全隐后旋转相机不应上传顶点');
+
+    // Beams：PVS 不可见时置 visible=false 且零上传；可见且视角未变时零上传
+    const beams = new Beams([{
+      start: new THREE.Vector3(0, 0, 0),
+      end: new THREE.Vector3(0, 100, 0),
+      width: 4,
+      color: new THREE.Color(1, 0.5, 0),
+    }]);
+    const beamMesh = beams.root.children[0];
+    const beamPosAttr = beamMesh.geometry.getAttribute('position');
+
+    let pvsVisible = true;
+    const pvs = {
+      getClusterAt: () => 1,
+      isVisible: () => pvsVisible,
+    };
+    beams.update(cam, pvs);
+    assert.equal(beamMesh.visible, true);
+    const bv1 = beamPosAttr.version;
+    beams.update(cam, pvs);
+    assert.equal(beamPosAttr.version, bv1, 'Beams 视角未变时不应重传顶点');
+
+    pvsVisible = false;
+    beams.update(cam, pvs);
+    assert.equal(beamMesh.visible, false, 'Beams 全被 PVS 剔除时应置 visible=false');
+    const bvHidden = beamPosAttr.version;
+    beams.update(cam, pvs);
+    assert.equal(beamPosAttr.version, bvHidden, 'Beams 全隐后不应重传顶点');
+
+    sprites.dispose();
+    beams.dispose();
+  } finally {
+    if (prevDoc === undefined) delete globalThis.document;
+    else globalThis.document = prevDoc;
+  }
 });
 
 

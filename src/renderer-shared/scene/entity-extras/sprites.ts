@@ -98,6 +98,9 @@ export class SpriteGlows {
   private readonly texture: THREE.Texture;
   private readonly batch: BillboardQuadBatch;
   private readonly basis: BillboardBasis = { rx: 1, ry: 0, rz: 0, ux: 0, uy: 1, uz: 0 };
+  private readonly lastBasis: BillboardBasis = { rx: Number.NaN, ry: Number.NaN, rz: Number.NaN, ux: Number.NaN, uy: Number.NaN, uz: Number.NaN };
+  private lastVisHash = -1;
+  private lastVisibleSprites = -1;
   private clusters: Int32Array | null = null;
 
   constructor(entities: SpriteEntity[]) {
@@ -152,14 +155,36 @@ export class SpriteGlows {
       }
     }
     billboardBasisOf(camera, this.basis);
+    let visHash = 0;
+    let visCount = 0;
+    for (let i = 0; i < this.entities.length; i++) {
+      const pvsCulled = pvs !== null && this.clusters !== null && this.clusters[i] >= 0 && !pvs.isVisible(this.clusters[i]);
+      if (this.visible[i] && !pvsCulled) {
+        visCount++;
+        visHash = (visHash * 31 + (i + 1)) | 0;
+      }
+    }
+    const b = this.basis;
+    const lb = this.lastBasis;
+    const basisSame =
+      Math.abs(b.rx - lb.rx) < 1e-6
+      && Math.abs(b.ry - lb.ry) < 1e-6
+      && Math.abs(b.rz - lb.rz) < 1e-6
+      && Math.abs(b.ux - lb.ux) < 1e-6
+      && Math.abs(b.uy - lb.uy) < 1e-6
+      && Math.abs(b.uz - lb.uz) < 1e-6;
+    if (visHash === this.lastVisHash && visCount === this.lastVisibleSprites && (visCount === 0 || basisSame)) {
+      return;
+    }
+
     this.batch.begin();
     for (let i = 0; i < this.entities.length; i++) {
       const entity = this.entities[i];
       const half = Math.max(0, entity.size) * 0.5;
       const pvsCulled = pvs !== null && this.clusters !== null && this.clusters[i] >= 0 && !pvs.isVisible(this.clusters[i]);
       if (!this.visible[i] || pvsCulled) {
-        // 显隐走「槽位塌零面积」：batch 的 drawRange 恒定，不写顶点的话上一帧还会画出来。
-        this.batch.billboardAt(i, 0, 0, 0, 0, 0, this.basis, 0, 0, 0, 0);
+        // 显隐走「槽位塌零面积」且不计入 live：全隐时 mesh.visible=false 且零上传。
+        this.batch.collapseAt(i);
         continue;
       }
       // alpha 恒 1：亮度已经乘进顶点色（renderamt/255）。
@@ -177,7 +202,11 @@ export class SpriteGlows {
         1,
       );
     }
-    this.batch.end();
+    this.batch.end(visHash !== this.lastVisHash);
+    this.lastVisHash = visHash;
+    this.lastVisibleSprites = visCount;
+    lb.rx = b.rx; lb.ry = b.ry; lb.rz = b.rz;
+    lb.ux = b.ux; lb.uy = b.uy; lb.uz = b.uz;
   }
 
   dispose(): void {

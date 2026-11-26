@@ -722,9 +722,13 @@ class AdditiveQuadBatch {
   }
 
   end(): void {
+    if (this.live === 0) {
+      this.mesh.visible = false;
+      return;
+    }
     (this.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
     (this.geometry.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true;
-    this.mesh.visible = this.live > 0;
+    this.mesh.visible = true;
   }
 
   private writeVert(vi: number, x: number, y: number, z: number, r: number, g: number, b: number, a: number): void {

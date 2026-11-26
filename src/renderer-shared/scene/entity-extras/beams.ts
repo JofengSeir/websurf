@@ -93,6 +93,10 @@ export class Beams {
   private readonly perp = new THREE.Vector3();
   private startClusters: Int32Array | null = null;
   private endClusters: Int32Array | null = null;
+  private mesh: THREE.Mesh | null = null;
+  private readonly lastViewDir = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);
+  private lastVisHash = -1;
+  private lastVisibleCount = -1;
 
   constructor(beams: BeamEntity[]) {
     this.beams = beams;
@@ -151,6 +155,7 @@ export class Beams {
     mesh.frustumCulled = false;
     mesh.renderOrder = BEAM_RENDER_ORDER;
     mesh.userData.vbspNoCull = true;
+    this.mesh = mesh;
     this.root.add(mesh);
   }
 
@@ -172,7 +177,38 @@ export class Beams {
         this.endClusters[i] = pvs.getClusterAt(this.beams[i].end);
       }
     }
+    let visHash = 0;
+    let visibleCount = 0;
+    for (let i = 0; i < this.beams.length; i++) {
+      const beam = this.beams[i];
+      const pvsCulled =
+        pvs !== null
+        && this.startClusters !== null
+        && this.endClusters !== null
+        && this.startClusters[i] >= 0
+        && this.endClusters[i] >= 0
+        && !pvs.isVisible(this.startClusters[i])
+        && !pvs.isVisible(this.endClusters[i]);
+      if (!pvsCulled && beam.start.distanceToSquared(beam.end) > 1e-6) {
+        visibleCount++;
+        visHash = (visHash * 31 + (i + 1)) | 0;
+      }
+    }
+    if (visibleCount === 0) {
+      if (this.mesh) this.mesh.visible = false;
+      this.lastVisHash = visHash;
+      this.lastVisibleCount = 0;
+      return;
+    }
     camera.getWorldDirection(this.viewDir);
+    if (
+      visHash === this.lastVisHash
+      && visibleCount === this.lastVisibleCount
+      && this.viewDir.dot(this.lastViewDir) > 0.999999
+    ) {
+      if (this.mesh) this.mesh.visible = true;
+      return;
+    }
     for (let i = 0; i < this.beams.length; i++) {
       const beam = this.beams[i];
       const pvsCulled =
@@ -220,6 +256,10 @@ export class Beams {
     if (this.geometry) {
       (this.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
     }
+    if (this.mesh) this.mesh.visible = true;
+    this.lastViewDir.copy(this.viewDir);
+    this.lastVisHash = visHash;
+    this.lastVisibleCount = visibleCount;
   }
 
   dispose(): void {
