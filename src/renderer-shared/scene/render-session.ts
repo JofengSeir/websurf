@@ -1212,6 +1212,9 @@ export class RenderSession {
     // Source `TextureScroll` / `momentary_rot_button` / 激光 UV / 粒子：按真实时间推进。
     // 放在可见性之前：这些动画不影响剔除，但它们要吃到本帧的 dt，越早算越准；
     // 后面 6~9 趟 `renderer.render` 复用同一份矩阵与顶点。
+    // 先刷新相机世界矩阵：保证后续 entityExtras、spotBeams、可见性与排序读到本帧最新位姿
+    // （`scene.matrixWorldAutoUpdate` 在构造函数里已关闭）。
+    this.camera.updateMatrixWorld();
     const extrasAnimating =
       this.laserBeams !== null || this.particleSystems !== null || this.entityExtras !== null;
     if (this.textureScrolls.length > 0 || this.rotButtons.length > 0 || extrasAnimating) {
@@ -1224,10 +1227,7 @@ export class RenderSession {
       if (this.laserBeams) this.laserBeams.update(animDt, this.camera);
       if (this.particleSystems) this.particleSystems.update(animDt, this.camera);
       // 资产实体图元（sprite/文字/beam）是屏幕朝向的：相机一动就要重写四边形顶点。
-      // 这里手动刷新相机矩阵：本帧此前没有别的 updateMatrixWorld，否则会用到上一帧的
-      // matrixWorld，转视角时 quad 会晚一帧摆正（贴图游动）。
       if (this.entityExtras) {
-        this.camera.updateMatrixWorld();
         this.entityExtras.update(this.camera, activePvs);
       }
     }

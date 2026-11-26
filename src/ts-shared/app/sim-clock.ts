@@ -258,6 +258,8 @@ export interface SimClock {
   stop(): void;
   /** 自动泵是否在跑（renderer 用它判断「本时钟驱动」还是「rAF 变步长兜底」）。 */
   readonly running: boolean;
+  /** 尚未攒够一个步长的累计余量（ms，取值 `[0, 1000/rateHz)`），供渲染插值计算精确仿真相位。 */
+  readonly pendingMs: number;
   /**
    * 手动推进一拍（测试/回放/单步）。
    * @param nowMs 毫秒时间戳；缺省取 `performance.now()`。非法值/回拨按「本拍经过 0」处理。
@@ -528,6 +530,9 @@ export function createSimClock(options: SimClockOptions): SimClock {
     stop,
     get running(): boolean {
       return running;
+    },
+    get pendingMs(): number {
+      return accMs;
     },
     pump(nowMsArg?: number): number {
       return pumpInternal(nowMsArg);

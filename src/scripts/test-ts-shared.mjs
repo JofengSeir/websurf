@@ -113,6 +113,8 @@ const { buildWorldBundle } = await loadTsBundle('src/ts-shared/phys/world-builde
 const { EntityGameplay } = await loadTsBundle('src/ts-shared/gameplay/entity-gameplay.ts', 'entity-gameplay');
 // 权威校准器：验证跳离梯子后 270 HU/s 推离速度不被滞后权威帧覆盖。
 const { AuthorityCalibrator } = await loadTsBundle('src/ts-shared/phys/authority-calibrator.ts', 'authority-calibrator');
+// 近平面控制器：验证纯转视角不触发球距离重扫、ratio=0 命中短路。
+const { NearPlaneController } = await loadTsBundle('src/renderer-shared/camera/near-plane.ts', 'near-plane');
 
 // 旋转枢轴的「rest 零变化」不变量：组位置 = pivot、mesh 局部位置 = 原位置 - pivot 时，
 // 世界坐标在旋转 0 的情况下逐分量不变（pivot 加回本身的抵消）。
@@ -956,6 +958,97 @@ test('AuthorityCalibrator preserves ladder jump-off 270 HU/s velocity and syncs 
   // 豁免窗口结束后恢复正常耦合
   cal.calibrateVelocity(1130);
   assert.equal(setVelCalls.length, 1, '豁免窗口结束后应恢复速度耦合');
+});
+
+test('simClock.pendingMs 与 64tick 固定步长插值在 144Hz/320Hz 下无重复帧与锯齿回跳', () => {
+  for (const [label, frameMs] of [['144Hz', 1000 / 144], ['320Hz', 1000 / 320]]) {
+    const physHz = 64;
+    const physStepSec = 1 / physHz;
+    const speed = 250; // HU/s
+    let physAcc = 0;
+    let physX = 0;
+    let prevX = 0;
+    let curX = 0;
+
+    const clock = createSimClock({
+      getTargetHz: () => 1000,
+      getCapHz: () => 1000,
+      step: (dt) => {
+        physAcc += dt;
+        while (physAcc + 1e-9 >= physStepSec) {
+          prevX = curX;
+          physX += speed * physStepSec;
+          curX = physX;
+          physAcc -= physStepSec;
+        }
+      },
+    });
+
+    clock.pump(0); // 建立时基
+    // 模拟真实浏览器：单调时间下 4ms 粗唤醒不均 + 每次 rAF 渲染前补 pump(now)
+    let tCursor = 0;
+    const deltas = [];
+    let lastCamX = 0;
+    for (let f = 1; f <= 120; f++) {
+      const now = f * frameMs;
+      // 模拟在本次 rAF 之前最多有一次 4ms 定时器先醒
+      if (now - tCursor >= 4) {
+        tCursor += 4;
+        clock.pump(tCursor);
+      }
+      tCursor = now;
+      // 渲染前补 pump 到当前 rAF 时刻（修复后的 RendererMain.tick 行为）
+      clock.pump(now);
+      assert.ok(clock.pendingMs >= 0 && clock.pendingMs < 1.0 + 1e-9, `${label} pendingMs 越界: ${clock.pendingMs}`);
+      const alpha = Math.max(0, Math.min(1, (physAcc + clock.pendingMs / 1000) / physStepSec));
+      const camX = prevX + (curX - prevX) * alpha;
+      deltas.push(camX - lastCamX);
+      lastCamX = camX;
+    }
+
+    // 跳过第 1 个 64Hz 物理步建立前后双快照之前的启动帧，后续每一帧位移必须严格相等且无零帧/回跳
+    const startIdx = Math.ceil((2 * 1000 / physHz) / frameMs) + 1;
+    const expected = speed * (frameMs / 1000);
+    for (let i = startIdx; i < deltas.length; i++) {
+      assert.ok(
+        Math.abs(deltas[i] - expected) < 1e-6,
+        `${label} frame ${i} 位移抖动: got=${deltas[i].toFixed(6)}, expected=${expected.toFixed(6)}`,
+      );
+    }
+  }
+});
+
+test('NearPlaneController 纯旋转不重扫球距离且 ratio=0 命中即短路', () => {
+  const THREE = createRequire(import.meta.url)('three');
+  const ctrl = new NearPlaneController();
+  ctrl.setDefaultNear(20);
+  const geom = new THREE.BoxGeometry(10, 10, 10);
+  const mesh = new THREE.Mesh(geom, new THREE.MeshBasicMaterial());
+  mesh.position.set(0, 0, -50);
+  mesh.updateMatrixWorld(true);
+  const root = new THREE.Group();
+  root.userData.isBspModel = true;
+  root.add(mesh);
+  const scene = new THREE.Scene();
+  scene.add(root);
+  const cam = new THREE.PerspectiveCamera(75, 1, 20, 10000);
+
+  // 首次探测：50 HU 处有盒子，ratio=0 应将 near 收缩到 0.05
+  ctrl.update(cam, scene, 0, 0, 0, { roots: [root] });
+  assert.ok(Math.abs(cam.near - 0.05) < 1e-6, `ratio=0 命中应收缩到 0.05，实际 ${cam.near}`);
+
+  // 纯转视角 90°（位置不变）：不应触发重扫（把盒子移走验证结果被滞回复用）
+  mesh.position.set(0, 0, -5000);
+  mesh.updateMatrixWorld(true);
+  mesh.userData.__nearBox = undefined;
+  cam.rotation.y = Math.PI / 2;
+  cam.updateMatrixWorld(true);
+  ctrl.update(cam, scene, 0, 0, 0, { roots: [root] });
+  assert.ok(Math.abs(cam.near - 0.05) < 1e-6, '纯旋转不应重扫近平面，应复用滞回结果');
+
+  // 位置移动超过滞回阈值（2 HU）后才重扫并恢复 defaultNear=20
+  ctrl.update(cam, scene, 5, 0, 0, { roots: [root] });
+  assert.ok(Math.abs(cam.near - 20) < 1e-6, `移开后应恢复 defaultNear=20，实际 ${cam.near}`);
 });
 
 

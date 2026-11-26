@@ -121,8 +121,6 @@ export class NearPlaneController {
   private readonly _nearDirF = new THREE.Vector3();
   private readonly _nearDirR = new THREE.Vector3();
   private readonly _nearRaycaster = new THREE.Raycaster();
-  /** 三角形粗筛缓冲（每 9 个 float 一个三角形，网格局部空间），复用避免每次探测分配。 */
-  private readonly _nearTris: number[] = [];
   private readonly _nearInv = new THREE.Matrix4();
   private readonly _nearOriginL = new THREE.Vector3();
   /** 上一次探测时的相机位置/朝向/探测距离（用于「几乎没动就复用」的滞回，见 update 第 0 步）。 */
@@ -130,6 +128,10 @@ export class NearPlaneController {
   private readonly _nearLastDir = new THREE.Vector3();
   private _nearHaveLast = false;
   private _nearLastProbe = NaN;
+  /** 上一次探测是否退回六向射线（只有射线路径才受相机朝向影响；球距离路径与朝向无关）。 */
+  private _nearUsedRayFallback = false;
+  /** 最近一次 `probeChunk` 实际测试的三角形计数（诊断用）。 */
+  private _nearTestedTris = 0;
 
   /**
    * 块级世界 AABB 缓存（挂在 `mesh.userData.__nearBox`，按 geometry.uuid 失效）。
@@ -245,7 +247,7 @@ export class NearPlaneController {
    * 数万面量级，而相机又经常落在块的 AABB 内部（块级粗筛失效）⇒ 4 条射线 × 数块，实测在
    * 「人一动」的帧上出现 10~15 ms 尖峰（静止帧每帧只有 3 ms，看到的就是掉帧）。
    */
-  private probeChunk(mesh: THREE.Mesh, probe: number): number {
+  private probeChunk(mesh: THREE.Mesh, probe: number, earlyExitOnHit: boolean): number {
     const geom = mesh.geometry as THREE.BufferGeometry;
     const pos = geom.getAttribute('position') as THREE.BufferAttribute | undefined;
     if (!pos) return Infinity;
@@ -265,17 +267,17 @@ export class NearPlaneController {
     const idx = geom.index?.array as ArrayLike<number> | undefined;
     const triCount = idx ? idx.length / 3 : pos.count / 3;
     const arr = pos.array as ArrayLike<number>;
-    const tris = this._nearTris;
-    tris.length = 0;
-    const reach = localProbe * localProbe;
-    const pushTri = (t: number): void => {
+    let bestSq = Infinity;
+    let reach = localProbe * localProbe;
+    let tested = 0;
+    const testTri = (t: number): boolean => {
       const i0 = idx ? idx[t * 3] : t * 3;
       const i1 = idx ? idx[t * 3 + 1] : t * 3 + 1;
       const i2 = idx ? idx[t * 3 + 2] : t * 3 + 2;
       const ax = arr[i0 * 3], ay = arr[i0 * 3 + 1], az = arr[i0 * 3 + 2];
       const bx = arr[i1 * 3], by = arr[i1 * 3 + 1], bz = arr[i1 * 3 + 2];
       const cx = arr[i2 * 3], cy = arr[i2 * 3 + 1], cz = arr[i2 * 3 + 2];
-      // 三角形 AABB 到球心的平方距离（分量钳制）——球外 ⇒ 最近表面距离必然 > probe，丢掉
+      // 三角形 AABB 到球心的平方距离（分量钳制）——球外 ⇒ 最近表面距离必然 > current reach，丢掉
       const loX = ax < bx ? (ax < cx ? ax : cx) : bx < cx ? bx : cx;
       const hiX = ax > bx ? (ax > cx ? ax : cx) : bx > cx ? bx : cx;
       const loY = ay < by ? (ay < cy ? ay : cy) : by < cy ? by : cy;
@@ -285,8 +287,15 @@ export class NearPlaneController {
       const dx = ox < loX ? loX - ox : ox > hiX ? ox - hiX : 0;
       const dy = oy < loY ? loY - oy : oy > hiY ? oy - hiY : 0;
       const dz = oz < loZ ? loZ - oz : oz > hiZ ? oz - hiZ : 0;
-      if (dx * dx + dy * dy + dz * dz > reach) return;
-      tris.push(ax, ay, az, bx, by, bz, cx, cy, cz);
+      if (dx * dx + dy * dy + dz * dz > reach) return false;
+      tested++;
+      const d2 = pointTriangleDist2(ox, oy, oz, ax, ay, az, bx, by, bz, cx, cy, cz);
+      if (d2 < bestSq) {
+        bestSq = d2;
+        if (d2 < reach) reach = d2;
+        if (earlyExitOnHit && d2 <= localProbe * localProbe) return true;
+      }
+      return false;
     };
     const grid = this.triGridOf(mesh, geom, pos, idx, triCount);
     if (grid) {
@@ -298,33 +307,29 @@ export class NearPlaneController {
       const gz0 = Math.max(0, Math.floor((oz - localProbe - grid.minZ) / grid.csz) - 1);
       const gz1 = Math.min(grid.nz - 1, Math.floor((oz + localProbe - grid.minZ) / grid.csz) + 1);
       if (gx0 <= gx1 && gy0 <= gy1 && gz0 <= gz1) {
-        for (let z = gz0; z <= gz1; z++) {
+        outer: for (let z = gz0; z <= gz1; z++) {
           for (let y = gy0; y <= gy1; y++) {
             const row = (z * grid.ny + y) * grid.nx;
             const from = grid.start[row + gx0];
             const to = grid.start[row + gx1 + 1];
-            for (let k = from; k < to; k++) pushTri(grid.items[k]);
+            for (let k = from; k < to; k++) {
+              if (testTri(grid.items[k])) break outer;
+            }
           }
         }
       }
-      const big = grid.big;
-      for (let k = 0; k < big.length; k++) pushTri(big[k]);
+      if (!(earlyExitOnHit && bestSq <= localProbe * localProbe)) {
+        const big = grid.big;
+        for (let k = 0; k < big.length; k++) {
+          if (testTri(big[k])) break;
+        }
+      }
     } else {
-      for (let t = 0; t < triCount; t++) pushTri(t);
+      for (let t = 0; t < triCount; t++) {
+        if (testTri(t)) break;
+      }
     }
-    if (tris.length === 0) return Infinity;
-    let bestSq = Infinity;
-    const n = tris.length / 9;
-    for (let k = 0; k < n; k++) {
-      const o = k * 9;
-      const d2 = pointTriangleDist2(
-        ox, oy, oz,
-        tris[o], tris[o + 1], tris[o + 2],
-        tris[o + 3], tris[o + 4], tris[o + 5],
-        tris[o + 6], tris[o + 7], tris[o + 8],
-      );
-      if (d2 < bestSq) bestSq = d2;
-    }
+    this._nearTestedTris += tested;
     return bestSq === Infinity ? Infinity : Math.sqrt(bestSq) * s;
   }
 
@@ -402,15 +407,14 @@ export class NearPlaneController {
     const probe = this.nearProbeDist;
     this._nearOrigin.set(px, py, pz);
 
-    // 0. 滞回：位置/朝向/探测距离几乎没变就复用上一次的 near。
-    //    逐三角形探测对合并块很贵（每块数万面），而 near 是缓变量；16 HU / 1.8° 的阈值
-    //    在走动时大约每 3~7 帧才真正探一次，站立时完全不探。
+    // 0. 滞回：位置/探测距离几乎没变就复用上一次的 near。
+    //    最近表面距离是纯球语义、与视角朝向无关；只有上次退回射线路径时才额外校验朝向。
     const dirNow = this._nearDirF.set(0, 0, -1).applyQuaternion(camera.quaternion);
     if (
       this._nearHaveLast &&
       this._nearLastProbe === probe &&
       this._nearOrigin.distanceToSquared(this._nearLastOrigin) < NEAR_STICKY_DIST * NEAR_STICKY_DIST &&
-      dirNow.dot(this._nearLastDir) > NEAR_STICKY_DOT
+      (!this._nearUsedRayFallback || dirNow.dot(this._nearLastDir) > NEAR_STICKY_DOT)
     ) {
       return;
     }
@@ -418,6 +422,8 @@ export class NearPlaneController {
     this._nearLastDir.copy(dirNow);
     this._nearHaveLast = true;
     this._nearLastProbe = probe;
+    this._nearUsedRayFallback = false;
+    this._nearTestedTris = 0;
 
     // 1. 块级 AABB 粗筛：盒子到起点的距离 > 探测距离 ⇒ 该块不可能有 ≤probe 的命中，直接跳过。
     const candidates: THREE.Mesh[] = [];
@@ -437,11 +443,14 @@ export class NearPlaneController {
     // 2. 逐块求「最近表面距离」：near 是球语义（比 near 近的东西都会被裁掉，跟方向无关），
     //    所以探测的是距离而不是射线。贴墙斜站（墙与视线 45°）时四向射线要走 141 HU 才碰到，
     //    探不到就会让 near 停在默认 32.65，眼前 20 HU 的墙被裁开——「视角穿透面」的成因。
+    //    `nearRatio === 0` 时只要在 probe 球内命中任意一面结果恒为 CAMERA_NEAR_MIN，可提前短路。
+    const earlyExit = this.nearRatio === 0;
     let minD = Infinity;
     if (candidates.length > 0) {
       for (const mesh of candidates) {
-        const d = this.probeChunk(mesh, probe);
+        const d = this.probeChunk(mesh, probe, earlyExit);
         if (Number.isNaN(d)) {
+          this._nearUsedRayFallback = true;
           // 非等比缩放的块（极少）：退回 three 的 Raycaster，用六向射线兜底
           const q = camera.quaternion;
           const fwd = this._nearDirF.set(0, 0, -1).applyQuaternion(q);
@@ -458,6 +467,7 @@ export class NearPlaneController {
         } else if (d < minD) {
           minD = d;
         }
+        if (earlyExit && minD <= probe) break;
       }
     }
 
@@ -475,7 +485,7 @@ export class NearPlaneController {
     (globalThis as unknown as { __vbspNearStats?: unknown }).__vbspNearStats = {
       minD: isFinite(minD) ? +minD.toFixed(2) : null,
       candidates: candidates.length,
-      tris: this._nearTris.length / 9,
+      tris: this._nearTestedTris,
       near: +camera.near.toFixed(3),
       probe,
     };

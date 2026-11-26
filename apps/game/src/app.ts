@@ -552,14 +552,13 @@ function reportLowFps(fps: number, now: number): void {
   }
 }
 
-/** 主线程 rAF 循环：按键 → SAB 输入槽 + 预测实例；渲染已在 RendererMain。 */
+/** 主线程渲染前采样：按键 → SAB/预测输入槽（与渲染同帧同拍，消除独立 rAF 顺序错位带来的 1 帧延迟）。 */
 function startInputLoop(): void {
   let fpsFrames = 0;
   let fpsTime = 0;
   let lastQeMs = 0;
   let lastFrameAt = 0;
-  const tick = (now: number): void => {
-    requestAnimationFrame(tick);
+  const sampleFrame = (now: number): void => {
     // FPS 显示（左上角，每秒刷新；不依赖场景就绪）
     fpsFrames++;
     if (lastFrameAt !== 0) {
@@ -580,7 +579,7 @@ function startInputLoop(): void {
     const keyState = keyboard.getState();
     const mask = pointerLock.isLocked() ? keysToMask(keyState) : 0;
     updateKeyHud(keyState); // 左下角按键簇高亮（仅状态变化时写 DOM）
-    // 滚轮跳：仅锁定时并入本帧输入（消费一次即清）
+    // 滚轮跳：仅锁定时并入本帧输入（消费一次即清；renderer.feedInput 内对 wheelJump 做锁存，防被高刷覆盖）
     const maskWithWheel = pointerLock.isLocked() && wheelJumpPending ? mask | KEY_MASK.wheelJump : mask;
     wheelJumpPending = false;
     // Q/E 转向 → 等效鼠标增量（用户定调：按住时作用到鼠标的量上，但**独立增量**）：
@@ -598,10 +597,19 @@ function startInputLoop(): void {
       updateSpeedHud();
     }
   };
-  requestAnimationFrame(tick);
+  if (renderer) {
+    renderer.onBeforeRender = sampleFrame;
+  } else {
+    const tick = (now: number): void => {
+      requestAnimationFrame(tick);
+      sampleFrame(now);
+    };
+    requestAnimationFrame(tick);
+  }
 }
 
-/** 速度面板：从主线程唯一物理线采样，8Hz 低频。纯数字无文字。 */
+let lastSpeedHtml = '';
+/** 速度面板：从主线程唯一物理线采样，8Hz 低频。纯数字无文字；文本未变时不触碰 DOM。 */
 function updateSpeedHud(): void {
   if (!renderer || !dom.statsEl) return;
   const v = renderer.getCurrentVel();
@@ -615,7 +623,10 @@ function updateSpeedHud(): void {
       : mode === 'lateral-vertical'
         ? `${lateral.toFixed(0)}<span class="vsep">｜</span>${vertical.toFixed(0)}<span class="unit"> u/s</span>`
         : `${total.toFixed(0)}<span class="unit"> u/s</span>`;
-  dom.statsEl.innerHTML = text;
+  if (text !== lastSpeedHtml) {
+    lastSpeedHtml = text;
+    dom.statsEl.innerHTML = text;
+  }
 }
 
 // ── 左下角按键簇（#keys）：标签取自当前键位、高亮取实时输入 ─────────────

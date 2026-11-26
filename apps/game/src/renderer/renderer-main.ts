@@ -33,7 +33,7 @@ import * as THREE from 'three';
 import { PhysWorld, mosaic_decode, initSync } from '../../pkg/websurf_wasm.js';
 import { LOCKED_TICK_RATE, type RuntimeConfig } from '../config.js';
 import type { SceneDataMessage } from '../worker/worker-types.js';
-import type { ShmState, MsgState } from '../../../../src/ts-shared/auth/shared-state.js';
+import { KEY_MASK, type ShmState, type MsgState } from '../../../../src/ts-shared/auth/shared-state.js';
 import { AuthorityCalibrator } from '../../../../src/ts-shared/phys/authority-calibrator.js';
 import { base64ToBytes } from '../../../../src/ts-shared/wasm/loader.js';
 import { EYE_STAND } from '../../../../src/ts-shared/phys/constants.js';
@@ -252,9 +252,10 @@ export class RendererMain {
       gameplay: () => this.gameplay,
       input: () => ({ keys: this.pendingKeys, dx: this.pendingDx, dy: this.pendingDy }),
       clearInputDeltas: () => {
-        // 鼠标增量是一次性的；键位掩码保留为按住状态（由下一次 feedInput 覆盖）。
+        // 鼠标增量与滚轮跳是一次性的；常规键位掩码保留为按住状态（由下一次 feedInput 覆盖）。
         this.pendingDx = 0;
         this.pendingDy = 0;
+        this.pendingKeys &= ~KEY_MASK.wheelJump;
       },
       nextRenderSampleIndex: () => this.renderSampleIndex++,
       hooks: {
@@ -276,6 +277,13 @@ export class RendererMain {
             this.predPhys?.set_state(h.x, h.y, h.z, h.yaw, h.pitch, 0, 0, 0, h.onGround);
           }
         },
+        onPhysEvent: (event) => {
+          const ev = event as { kind?: string } | null;
+          if (ev && (ev.kind === 'teleport' || ev.kind === 'death')) {
+            this.snapCamera();
+            this.bumpSampleEpoch();
+          }
+        },
         applyCamera: (st) => {
           // 固定步长物理（main=tickRate 64tick；worker=预测线 computeRateCap）每步只记录一份
           // 眼位，由 rAF 在前后两份之间插值，避免把 64Hz 的离散位置直接贴到每帧相机上。
@@ -290,18 +298,21 @@ export class RendererMain {
           };
           const now = performance.now();
           const prev = this.cameraCur;
-          if (!prev || this.shouldSnapCamera(prev, next, now)) {
+          const snapped = !prev || this.shouldSnapCamera(prev, next, now);
+          if (snapped) {
             this.cameraPrev = next;
           } else {
             this.cameraPrev = prev;
           }
           this.cameraCur = next;
           this.cameraCurAtMs = now;
-          // 物理已消费完本次输入，用权威 state 对齐视觉视角；正常玩时与 stepVisual 的
-          // 累加值一致，只在传送/冻结/校准修正时纠偏。
-          this.viewYaw = next.yaw;
-          this.viewPitch = next.pitch;
-          this.viewInitialized = true;
+          // 仅在首次初始化、定身冻结或位姿突变（传送/重生/读点）时从物理 state 对齐视角，
+          // 正常转动不拿 64tick 物理步的旧角度覆盖高频 stepVisual 视角（防止顶角回弹）。
+          if (!this.viewInitialized || this.holdPoint !== null || snapped) {
+            this.viewYaw = next.yaw;
+            this.viewPitch = next.pitch;
+            this.viewInitialized = true;
+          }
         },
       },
     });
@@ -411,10 +422,13 @@ export class RendererMain {
       this.physicsAccumulator -= step;
       steps++;
     }
-    // 物理步刚更新了 cameraCur；立刻刷新一次相机，避免 rAF 恰好落在两个计算步之间时
-    // 还拿着物理步前的旧位置。输入队列已在 stepVisual 里清空，这里只做位置/角度插值。
-    if (steps > 0) this.updateCamera(performance.now());
+    // 无论本拍是否跨过物理步边界，physicsAccumulator 都已推进 ⇒ 刷新一次位置插值，
+    // 保证每计算步输出连续相位。
+    this.updateCamera(now);
   }
+
+  /** 渲染前钩子：由 app.ts 注入按键、Q/E 转向与滚轮跳采样，确保在同帧渲染前入队。 */
+  onBeforeRender: ((now: number) => void) | null = null;
 
   /** 场景装载完成回调（`loadScene` 用场景包围盒最小 Y 调用一次）；`apps/game/src/app.ts` 注册它
    *  并转成 `setDeathY`。 */
@@ -768,13 +782,15 @@ export class RendererMain {
 
   /** 物理/视觉输入入队（app 事件回调喂入；dx/dy 为角度增量、keysMask 为键位掩码）。
    *  这里**只入队**：视觉增量交给 `stepVisual` 在计算步消费，物理增量交给 64tick 物理消费；
-   *  输入回调不直接改相机/视角，避免视觉更新跟事件抖动或退化成事件驱动。 */
+   *  输入回调不直接改相机/视角，避免视觉更新跟事件抖动或退化成事件驱动。
+   *  `KEY_MASK.wheelJump` 采用锁存合并：防止高频输入回调在两次 64tick 物理步之间把滚轮跳冲掉。 */
   feedInput(dx: number, dy: number, keysMask: number): void {
     this.viewDx += dx;
     this.viewDy += dy;
     this.pendingDx += dx;
     this.pendingDy += dy;
-    this.pendingKeys = keysMask;
+    const wheelBit = (this.pendingKeys | keysMask) & KEY_MASK.wheelJump;
+    this.pendingKeys = (keysMask & ~KEY_MASK.wheelJump) | wheelBit;
   }
 
   /** 清空待喂输入（退锁/重锁、读点、noclip 切换与校准器兜底同步时调用，防残留增量污染新状态）。 */
@@ -982,32 +998,37 @@ export class RendererMain {
     this.viewDy = 0;
   }
 
-  /** 位置突变（传送/重生）或角度大跳时不做插值，避免相机穿过地图。 */
+  /** 位置突变（传送/重生）或长时间停摆后不做插值，避免相机穿过地图（正常快速甩鼠标不打断插值）。 */
   private shouldSnapCamera(prev: CameraState, next: CameraState, now: number): boolean {
     const dx = next.x - prev.x;
     const dy = next.y - prev.y;
     const dz = next.z - prev.z;
     if (dx * dx + dy * dy + dz * dz > 256 * 256) return true;
-    let dyaw = Math.abs(next.yaw - prev.yaw) % 360;
-    if (dyaw > 180) dyaw = 360 - dyaw;
-    if (dyaw > 90) return true;
-    if (Math.abs(next.pitch - prev.pitch) > 60) return true;
     // 时钟停摆/页面隐藏后不要拿很旧的一步插值；直接贴当前。
-    return now - this.cameraCurAtMs > (1000 / this.physicsTickHz()) * 2;
+    return now - this.cameraCurAtMs > 200;
   }
 
-  /** 把当前/上一步相机位姿插值到 rAF 时刻（固定步长渲染的标准做法）。 */
-  private updateCamera(now: number): void {
+  /** 把当前/上一步相机位姿插值到当前精确仿真相位（`physicsAccumulator + simClock.pendingMs`）。 */
+  private updateCamera(_now: number): void {
     const cur = this.cameraCur;
     const cam = this.camera;
     if (!cur || !cam) return;
     const prev = this.cameraPrev;
-    const stepMs = 1000 / this.physicsTickHz();
-    let alpha = prev ? (now - this.cameraCurAtMs) / stepMs : 1;
-    if (!Number.isFinite(alpha)) alpha = 1;
-    alpha = Math.max(0, Math.min(1, alpha));
+    let alpha = 1;
+    if (prev && this.simClock?.running) {
+      if (this.authorityMode === 'worker') {
+        const stepMs = 1000 / this.physicsTickHz();
+        alpha = this.simClock.pendingMs / stepMs;
+      } else {
+        const stepSec = 1 / this.physicsTickHz();
+        const clockRemSec = this.simClock.pendingMs / 1000;
+        alpha = (this.physicsAccumulator + clockRemSec) / stepSec;
+      }
+      if (!Number.isFinite(alpha)) alpha = 1;
+      alpha = Math.max(0, Math.min(1, alpha));
+    }
     // 角度不吃物理插值：`viewYaw/viewPitch` 由 stepVisual 按计算步累加，
-    // 直接摆相机才是零物理 tick 延迟；位置仍按 64tick 前后两份 state 插值。
+    // 直接摆相机才是零物理 tick 延迟；位置按精确仿真相位在前后两份 state 间插值。
     const yaw = this.viewInitialized ? this.viewYaw : cur.yaw;
     const pitch = this.viewInitialized ? this.viewPitch : cur.pitch;
     if (!prev || alpha >= 1) {
@@ -1024,22 +1045,21 @@ export class RendererMain {
   }
 
   /**
-   * rAF 渲染回调：视觉线已由 `simClock` 的计算步推进（见 `stepVisual` / `stepFixedSimulation`），
-   * 这里只走共享会话的可见性/近平面/天空与主世界绘制；时钟未启动（物理/场景未就绪）时
-   * 才在这里兜底跑视觉线 + `presentation.update(now)` 的 rAF 变步长。
-   * 副作用：改 mesh 可见性、首帧后跑一次注入统计。
+   * rAF 渲染回调：先采样本帧键位/Q-E，再立即 pump 一次模拟时钟并刷新视觉线，
+   * 消除 `setTimeout` 4ms 量化与 rAF 节拍错位导致的重复冻结帧与相位锯齿。
    */
   private tick(now: number): void {
     if (!this.running) return;
     this.rafId = requestAnimationFrame(this.boundTick);
+    this.onBeforeRender?.(now);
     if (!this.renderer || !this.scene || !this.camera) return;
 
-    // 1. 主线程物理/呈现同意循环（共享 `player-presentation`）：输入 → 共享槽 → 权威校准 →
-    //    推进物理 → 冻结分支 → 渲染采样 → 相机；序列与 debug 共用一份，game 特色走构造期 hooks。
-    //    正常游玩由固定步长时钟 `simClock` 驱动（见 `stepFixedSimulation`），视觉线每个计算步
-    //    更新、rAF 只负责渲染；时钟未启动时才在这里兜底，保证首帧即可推进。
-    if (!this.simClock?.running) {
-      this.stepVisual(now);
+    const frameNow = performance.now();
+    if (this.simClock?.running) {
+      this.simClock.pump(frameNow);
+      this.stepVisual(frameNow);
+    } else {
+      this.stepVisual(frameNow);
       if (this.presentation?.update(now)) this.updateCamera(performance.now());
     }
 

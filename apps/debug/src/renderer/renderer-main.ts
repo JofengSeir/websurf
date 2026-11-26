@@ -1068,8 +1068,10 @@ export class RendererMain {
     //    debug 特色（回放步长、单步闸门、replayMode 跳过权威、路径记录、速度诊断、poseHold
     //    相机、传送事件使采样世代失效）全部在构造时登记的 hooks 里，逐帧序列本身与 game 共用。
     //    默认（正常游玩）由固定步长时钟 `simClock` 驱动，见 `stepFixedSimulation`；
+    //    渲染前补 pump 一次消除 setTimeout 4ms 量化与 rAF 节拍错位导致的重复冻结帧；
     //    回放/单步闸门这类需要 rAF 变步长的模式仍走这里的 `update(now)`。
     if (this.replayMode || this.stepGated) this.presentation?.update(now);
+    else if (this.simClock?.running) this.simClock.pump(performance.now());
 
     // ⓪-2 飞行轨迹录制：记**相机**位姿（不是脚底），所以放在相机摆放之后、渲染之前；
     //      复播中也照记（可以把一条轨迹的某一段再录成新轨迹）。
