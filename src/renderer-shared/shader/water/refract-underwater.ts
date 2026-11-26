@@ -598,6 +598,7 @@ export function updateRefrUniforms(camera: THREE.Camera, renderer: THREE.WebGLRe
 
 const _waterFrustum = new THREE.Frustum();
 const _waterProjScreen = new THREE.Matrix4();
+const _visibleHeights = new Set<number>();
 
 /**
  * 视锥里出现了哪些水面高度（镜面网格的世界包围球 vs 相机视锥）。
@@ -615,7 +616,7 @@ export function visibleWaterHeights(camera: THREE.Camera): Set<number> | null {
   cam.updateMatrixWorld();
   _waterProjScreen.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
   _waterFrustum.setFromProjectionMatrix(_waterProjScreen);
-  const out = new Set<number>();
+  _visibleHeights.clear();
   for (const [mesh, h] of mirrorMeshes) {
     if (!mesh.visible) continue;
     let box = waterBoxes.get(mesh);
@@ -626,9 +627,9 @@ export function visibleWaterHeights(camera: THREE.Camera): Set<number> | null {
       if (!geo.boundingBox) return null;
       box = _waterBox.copy(geo.boundingBox).applyMatrix4(mesh.matrixWorld);
     }
-    if (_waterFrustum.intersectsBox(box)) out.add(Math.round(h * 100) / 100);
+    if (_waterFrustum.intersectsBox(box)) _visibleHeights.add(Math.round(h * 100) / 100);
   }
-  return out;
+  return _visibleHeights;
 }
 
 /**

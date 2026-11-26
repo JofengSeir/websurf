@@ -237,6 +237,8 @@ export class RenderSession {
   private pvsIndexActive = false;
   /** 高速擦过固体 leaf 接缝的去抖计数（≥2 帧才触发全量 restoreClusterIndex）。 */
   private solidSeamFrames = 0;
+  /** debug 在 frame() 外单独调用 updateVisibility() 时的耗时（ms），用于填充 __vbspFrameLog.vis。 */
+  private lastVisMs = 0;
   /** 主模型根（`mergeIntoNewRoot` 的产物；未合并时是 `assembleScene` 的 mapRoot）。 */
   private root: THREE.Object3D | null = null;
   /** 声明了 Source `TextureScroll` 的共享贴图（装配后收集一次，见 `frame()`）。 */
@@ -841,6 +843,7 @@ export class RenderSession {
     this.pvsOverlay.reset();
     this.lastVisibility = null;
     this.solidSeamFrames = 0;
+    this.lastVisMs = 0;
     // 深度代理是主根的合并副本，换图后必须释放（几何可能几十 MB）。
     this.applyGlowDepthProxy(null);
     // 场景扩展（激光 / 粒子）也属于旧图，换图时一起释放。
@@ -1038,6 +1041,8 @@ export class RenderSession {
 
   /** 只做可见性判定（debug 的按需渲染需要在决定是否出帧前先知道有无变化）。 */
   updateVisibility(): VisibilityUpdateResult {
+    const dbgVis = !!(globalThis as { __vbspDrawDebug?: { on?: boolean } }).__vbspDrawDebug?.on;
+    const tVis = dbgVis ? performance.now() : 0;
     const cullAll = (globalThis as { __vbspPvsCullAll?: boolean }).__vbspPvsCullAll === true;
     // 档即开关：面板/深链改 `culling.pvs` 后下一帧生效。
     // 区域着色开启时强制关掉 PVS 剔除——否则「不可见的区域」根本不会被画出来，就看不到对照。
@@ -1077,10 +1082,12 @@ export class RenderSession {
     if (this.visibility.enablePvs && this.clusterIndex && this.clusterIndex.prepared > 0 && this.pvs) {
       if (cullAll) {
         this.solidSeamFrames = 0;
+    this.lastVisMs = 0;
         applyClusterIndex(this.visibility.items, this.pvs, -999);
         this.pvsIndexActive = true;
       } else if (camClusterValid && camCluster >= 0 && !camInSolid) {
         this.solidSeamFrames = 0;
+    this.lastVisMs = 0;
         applyClusterIndex(this.visibility.items, this.pvs, camCluster);
         this.pvsIndexActive = true;
       } else if (this.pvsIndexActive) {
@@ -1103,6 +1110,7 @@ export class RenderSession {
       this.pvsIndexActive = false;
     }
     this.spots.update(this.spotBeams, this.camera);
+    if (dbgVis) this.lastVisMs = +(performance.now() - tVis).toFixed(2);
     return this.lastVisibility;
   }
 
@@ -1256,8 +1264,14 @@ export class RenderSession {
     // `renderer.render` 直接复用（`scene.matrixWorldAutoUpdate` 在构造函数里关掉了）。
     this.scene.updateMatrixWorld();
     mark('mat');
-    if (opts.updateVisibility !== false) this.updateVisibility();
-    mark('vis');
+    if (opts.updateVisibility !== false) {
+      this.updateVisibility();
+      mark('vis');
+    } else if (dbgOn) {
+      times.vis = this.lastVisMs;
+      this.lastVisMs = 0;
+      tLast = performance.now();
+    }
     if (this.pvsOverlay.enabled) this.pvsOverlay.update(this.root, this.pvs, this.camera.position);
     if (opts.updateNearPlane !== false && this.root) {
       shrinkNearPlane(

@@ -13,7 +13,7 @@
  * 与 SDK 的全局量语义一致：`g_Runtime` 是模块级单例，同一时刻只应有一个活跃系统；
  * 每个公开入口都先 `bindGlobals()`，避免多实例互相踩。
  */
-import { Entity, type EntityRuntime } from './base-entity.js';
+import { Entity, TICK_NEVER_THINK, type EntityRuntime } from './base-entity.js';
 import { EventQueue, DEFAULT_MAX_EVENTS_PER_SERVICE } from './event-queue.js';
 import { EntityList } from './entity-list.js';
 import { g_Runtime, resetRuntime } from './runtime.js';
@@ -127,6 +127,11 @@ function hasTouchBehaviour(entity: Entity): boolean {
   return entity.classChain.some((c) => !!(c.touch || c.startTouch || c.endTouch));
 }
 
+/** 实体是否声明了 +use 交互（决定它是否进入 pickUseFromView 与高亮遍历）。 */
+function hasUseBehaviour(entity: Entity): boolean {
+  return entity.classChain.some((c) => typeof c.use === 'function');
+}
+
 /**
  * 地图实体运行期。零 `three` / 零 DOM 依赖，可直接在 Node 里跑地图 I/O 夹具。
  */
@@ -149,6 +154,12 @@ export class EntitySystem implements EntityRuntime {
   private readonly deletion = new Set<Entity>();
   private playerEntity: Entity;
   private touchCandidates: Entity[] = [];
+  private useCandidates: Entity[] = [];
+  private readonly activeThinkers = new Set<Entity>();
+  private readonly dueThinkers: Entity[] = [];
+  private readonly entityByIndex = new Map<number, Entity>();
+  private readonly _touchMins: Vec3 = [0, 0, 0];
+  private readonly _touchMaxs: Vec3 = [0, 0, 0];
   private touchStamp = 0;
   private dynamicOutputCount = 0;
 
@@ -161,7 +172,13 @@ export class EntitySystem implements EntityRuntime {
     // SDK 里玩家是全局实体表的一员，但没有地图实体块；用 -1 作为伪序号。
     this.playerEntity = new Entity(-1, 'player', [], resolveClassChain('player'), this);
     this.entList.add(this.playerEntity);
+    this.entityByIndex.set(this.playerEntity.index, this.playerEntity);
     g_Runtime.player = this.playerEntity;
+  }
+
+  onThinkChanged(entity: Entity, active: boolean): void {
+    if (active) this.activeThinkers.add(entity);
+    else this.activeThinkers.delete(entity);
   }
 
   // ── EntityRuntime 实现 ──
@@ -245,6 +262,7 @@ export class EntitySystem implements EntityRuntime {
       }
       entity.parseMapData(pairs);
       this.entList.add(entity);
+      this.entityByIndex.set(entity.index, entity);
     }
 
     // SDK：全部实体 Spawn 完，再全部 Activate（filter_multi 要在 Activate 里找齐子 filter）。
@@ -265,6 +283,7 @@ export class EntitySystem implements EntityRuntime {
     }
 
     this.touchCandidates = all.filter((e) => e.volumes.length > 0 && hasTouchBehaviour(e));
+    this.useCandidates = all.filter((e) => hasUseBehaviour(e));
     this.touchStamp = 0;
   }
 
@@ -276,10 +295,15 @@ export class EntitySystem implements EntityRuntime {
     for (const entity of this.entList.entities) entity.touchLinks.clear();
     this.entList.clear();
     this.entList.add(this.playerEntity);
+    this.entityByIndex.clear();
+    this.entityByIndex.set(this.playerEntity.index, this.playerEntity);
     this.playerEntity.touchLinks.clear();
     this.deletion.clear();
     this.eventQueue.clear();
+    this.activeThinkers.clear();
+    this.dueThinkers.length = 0;
     this.touchCandidates = [];
+    this.useCandidates = [];
     this.touchStamp = 0;
     this.events.length = 0;
     this.dynamicOutputCount = 0;
@@ -304,8 +328,26 @@ export class EntitySystem implements EntityRuntime {
     const now = g_Runtime.time;
 
     this.cleanupDeleteList();
-    // Physics_RunThinkFunctions：快照遍历，think 里可以安全地删自己 / 生成新实体输入。
-    for (const entity of [...this.entList.entities]) entity.serviceThink(now);
+    // Physics_RunThinkFunctions：只扫描有待执行 think 的活跃集合并按实体序号快照执行，
+    // 避免 1000Hz 下每步复制并遍历全图数千实体。
+    if (this.activeThinkers.size > 0) {
+      this.dueThinkers.length = 0;
+      for (const entity of this.activeThinkers) {
+        if (entity.thinkFn !== null && entity.nextThink !== TICK_NEVER_THINK && entity.nextThink <= now) {
+          this.dueThinkers.push(entity);
+        }
+      }
+      if (this.dueThinkers.length > 0) {
+        if (this.dueThinkers.length > 1) {
+          this.dueThinkers.sort((a, b) => a.index - b.index);
+        }
+        const due = this.dueThinkers.slice();
+        this.dueThinkers.length = 0;
+        for (let i = 0; i < due.length; i++) {
+          due[i].serviceThink(now);
+        }
+      }
+    }
     this.serviceTouch();
     const processed = this.eventQueue.serviceEvents(now, this.options.maxEventsPerService ?? DEFAULT_MAX_EVENTS_PER_SERVICE);
     this.cleanupDeleteList();
@@ -327,8 +369,13 @@ export class EntitySystem implements EntityRuntime {
         entity.touchLinks.delete(other);
       }
       for (const alive of this.entList.entities) alive.touchLinks.delete(entity);
+      this.activeThinkers.delete(entity);
+      this.entityByIndex.delete(entity.index);
       this.entList.remove(entity);
       this.touchCandidates = this.touchCandidates.filter((e) => e !== entity);
+      if (this.useCandidates.length > 0) {
+        this.useCandidates = this.useCandidates.filter((e) => e !== entity);
+      }
     }
     this.deletion.clear();
   }
@@ -339,17 +386,17 @@ export class EntitySystem implements EntityRuntime {
    */
   private serviceTouch(): void {
     const state = this.host.getPlayerState();
-    this.playerEntity.origin = [...state.origin] as Vec3;
-    const mins: Vec3 = [
-      state.origin[0] + state.hullMins[0],
-      state.origin[1] + state.hullMins[1],
-      state.origin[2] + state.hullMins[2],
-    ];
-    const maxs: Vec3 = [
-      state.origin[0] + state.hullMaxs[0],
-      state.origin[1] + state.hullMaxs[1],
-      state.origin[2] + state.hullMaxs[2],
-    ];
+    this.playerEntity.origin[0] = state.origin[0];
+    this.playerEntity.origin[1] = state.origin[1];
+    this.playerEntity.origin[2] = state.origin[2];
+    const mins = this._touchMins;
+    mins[0] = state.origin[0] + state.hullMins[0];
+    mins[1] = state.origin[1] + state.hullMins[1];
+    mins[2] = state.origin[2] + state.hullMins[2];
+    const maxs = this._touchMaxs;
+    maxs[0] = state.origin[0] + state.hullMaxs[0];
+    maxs[1] = state.origin[1] + state.hullMaxs[1];
+    maxs[2] = state.origin[2] + state.hullMaxs[2];
     this.touchStamp++;
 
     for (const entity of this.touchCandidates) {
@@ -423,18 +470,24 @@ export class EntitySystem implements EntityRuntime {
    *
    * @returns 命中的实体；视线里没有可交互物时 null。
    */
+  /** 所有实现了 `+use` 的实体子集（预建索引，供 pickUseFromView / debug 可视化只读遍历）。 */
+  get useEntities(): readonly Entity[] {
+    return this.useCandidates;
+  }
+
   pickUseFromView(eye: Vec3, dir: Vec3, reach = 80): Entity | null {
     this.bindGlobals();
+    if (this.useCandidates.length === 0) return null;
     const len = Math.hypot(dir[0], dir[1], dir[2]);
     if (!Number.isFinite(len) || len < 1e-6) return null;
     const d: Vec3 = [dir[0] / len, dir[1] / len, dir[2] / len];
     let best: Entity | null = null;
     let bestDist = Number.POSITIVE_INFINITY;
-    for (const entity of this.entList.entities) {
-      if (entity === this.playerEntity || entity.disabled) continue;
-      // 只有真的实现了 Use 的类才值得选靶（否则会“点到空气”把最近的实体吞掉）。
-      if (!entity.classChain.some((cls) => typeof cls.use === 'function')) continue;
-      for (const brush of entity.volumes) {
+    for (let i = 0; i < this.useCandidates.length; i++) {
+      const entity = this.useCandidates[i];
+      if (entity === this.playerEntity || entity.disabled || entity.volumes.length === 0) continue;
+      for (let j = 0; j < entity.volumes.length; j++) {
+        const brush = entity.volumes[j];
         const hit = rayAabbHit(eye, d, brush.mins, brush.maxs, reach);
         if (hit !== null && hit < bestDist) {
           bestDist = hit;
@@ -483,7 +536,7 @@ export class EntitySystem implements EntityRuntime {
   }
 
   getEntity(index: number): Entity | undefined {
-    return this.entList.entities.find((e) => e.index === index);
+    return this.entityByIndex.get(index);
   }
   get player(): Entity {
     return this.playerEntity;

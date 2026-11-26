@@ -120,6 +120,7 @@ const {
 const { buildWorldBundle } = await loadTsBundle('src/ts-shared/phys/world-builder.ts', 'phys-world-builder');
 // 实体运行期宿主：验证 load() 保留出生期 func_door 镜像并在 update() 重放到 predPhys。
 const { EntityGameplay } = await loadTsBundle('src/ts-shared/gameplay/entity-gameplay.ts', 'entity-gameplay');
+const { EntitySystem, createRecordingHost } = await loadTsBundle('src/ts-shared/entity/entity-system.ts', 'entity-system');
 // 权威校准器：验证跳离梯子后 270 HU/s 推离速度不被滞后权威帧覆盖。
 const { AuthorityCalibrator } = await loadTsBundle('src/ts-shared/phys/authority-calibrator.ts', 'authority-calibrator');
 // 近平面控制器：验证纯转视角不触发球距离重扫、ratio=0 命中短路。
@@ -133,6 +134,7 @@ const { SpriteGlows } = await loadTsBundle('src/renderer-shared/scene/entity-ext
 const { Beams } = await loadTsBundle('src/renderer-shared/scene/entity-extras/beams.ts', 'entity-beams');
 const { prepareClusterIndex, applyClusterIndex } = await loadTsBundle('src/renderer-shared/scene/cluster-filter.ts', 'cluster-filter');
 const { PlaneInspector } = await loadTsBundle('apps/debug/src/renderer/plane-inspector.ts', 'plane-inspector');
+const { applyWaterShaders, renderWaterFramePasses, resetWaterShaders } = await loadTsBundle('src/renderer-shared/shader/water.ts', 'water');
 
 // 旋转枢轴的「rest 零变化」不变量：组位置 = pivot、mesh 局部位置 = 原位置 - pivot 时，
 // 世界坐标在旋转 0 的情况下逐分量不变（pivot 加回本身的抵消）。
@@ -1494,6 +1496,163 @@ test('PlaneInspector 仅对可见网格做射线包围盒前向排序，跳过�
   const hit = inspector.cast(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1), root, [], [], [], 1000);
   assert.ok(hit !== null, '应命中后方可见块');
   assert.equal(hit.meshName, 'visible-back', `应跳过隐藏前块并命中 visible-back，实际 ${hit.meshName}`);
+});
+
+test('EntitySystem 活跃 think 集合按序号触发且支持 useEntities / O(1) getEntity', () => {
+  const { host } = createRecordingHost();
+  const sys = new EntitySystem({ host });
+  sys.load({
+    entities_text: [
+      '{\n"classname" "func_button"\n"targetname" "btn_a"\n}',
+      '{\n"classname" "info_target"\n"targetname" "tgt_b"\n}',
+      '{\n"classname" "info_target"\n"targetname" "tgt_c"\n}',
+    ].join('\n'),
+    volumes: [
+      { index: 0, origin: [0, 0, 0], brushes: [{ mins: [-10, -10, -10], maxs: [10, 10, 10], planes: [] }] },
+    ],
+  });
+
+  assert.equal(sys.useEntities.length, 1);
+  assert.equal(sys.useEntities[0].index, 0);
+  assert.equal(sys.getEntity(0)?.targetname, 'btn_a');
+  assert.equal(sys.getEntity(2)?.targetname, 'tgt_c');
+  assert.equal(sys.getEntity(999), undefined);
+
+  const picked = sys.pickUseFromView([0, 0, 30], [0, 0, -1], 80);
+  assert.equal(picked?.index, 0);
+
+  const order = [];
+  const e2 = sys.getEntity(2);
+  const e1 = sys.getEntity(1);
+  e2.setThink((ent) => order.push(ent.index), 0.05);
+  e1.setThink((ent) => order.push(ent.index), 0.05);
+  sys.frame(0.02);
+  assert.deepEqual(order, [], '未到 nextThink 不应触发');
+  e2.clearThink();
+  sys.frame(0.04);
+  assert.deepEqual(order, [1], 'clearThink 后不应再触发 e2，仅触发 e1');
+
+  e2.setThink((ent) => order.push(ent.index), 0.01);
+  e1.setThink((ent) => order.push(ent.index), 0.01);
+  sys.frame(0.02);
+  assert.deepEqual(order, [1, 1, 2], '同 tick 多个活跃 think 必须按 entity.index 升序执行');
+  sys.dispose();
+});
+
+test('EntityGameplay update 复用传入 state 且预索引同步 trigger_teleport', () => {
+  let stateReads = 0;
+  const teleportCalls = [];
+  const phys = {
+    set_teleport_enabled: (idx, enabled) => teleportCalls.push([idx, enabled]),
+  };
+  const gp = new EntityGameplay({
+    getPlayerState: () => {
+      stateReads++;
+      return { posX: 0, posY: 0, posZ: 0, onGround: true };
+    },
+    getPhys: () => phys,
+  });
+
+  gp.load(JSON.stringify({
+    entities_text: '{\n"classname" "trigger_teleport"\n"targetname" "tp1"\n"StartDisabled" "1"\n}\n{\n"classname" "info_target"\n"targetname" "dummy"\n}',
+    volumes: [],
+  }));
+
+  const readsAfterLoad = stateReads;
+  gp.update(1 / 1000, { posX: 10, posY: 20, posZ: 30, velX: 0, velY: 0, velZ: 0, onGround: true });
+  assert.equal(stateReads, readsAfterLoad, '传入 rawState 时不应重复回调 getPlayerState()');
+  assert.deepEqual(teleportCalls, [[0, false]], 'StartDisabled=1 的 trigger_teleport 应同步为 false');
+
+  gp.system.getEntity(0).disabled = false;
+  gp.update(1 / 1000, { posX: 10, posY: 20, posZ: 30, velX: 0, velY: 0, velZ: 0, onGround: true });
+  assert.deepEqual(teleportCalls, [[0, false], [0, true]], 'Enable 后应同步为 true');
+  gp.dispose();
+});
+
+test('water.ts 帧间冷却门控避免折射与多层镜面连续三帧扎堆', () => {
+  resetWaterShaders();
+  const scene = new THREE.Scene();
+  for (const y of [0, 50]) {
+    const mat = new THREE.MeshBasicMaterial({ name: `water_${y}` });
+    mat.userData.vbsp_water = { fog: [0.1, 0.2, 0.3], aboveWater: true };
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(200, 2, 200), mat);
+    mesh.position.set(0, y, -200);
+    mesh.updateMatrixWorld(true);
+    scene.add(mesh);
+  }
+  const injected = applyWaterShaders(scene);
+  assert.equal(injected, 2);
+
+  const camera = new THREE.PerspectiveCamera(75, 16 / 9, 1, 5000);
+  camera.position.set(0, 120, 100);
+  camera.lookAt(0, 25, -200);
+  camera.updateMatrixWorld(true);
+
+  let renderCallsThisFrame = 0;
+  const mockRenderer = {
+    getDrawingBufferSize: (v) => v.set(640, 360),
+    getRenderTarget: () => null,
+    setRenderTarget: () => {},
+    getClearColor: (c) => c.set(0x000000),
+    getClearAlpha: () => 1,
+    setClearColor: () => {},
+    clear: () => {},
+    render: () => { renderCallsThisFrame++; },
+  };
+
+  const perFrameRenders = [];
+  for (let f = 0; f < 6; f++) {
+    camera.position.x = f * 10;
+    camera.updateMatrixWorld(true);
+    renderCallsThisFrame = 0;
+    renderWaterFramePasses(mockRenderer, scene, camera);
+    perFrameRenders.push(renderCallsThisFrame);
+  }
+
+  for (let f = 1; f < perFrameRenders.length; f++) {
+    assert.ok(
+      !(perFrameRenders[f - 1] > 0 && perFrameRenders[f] > 0),
+      `不应连续两帧都触发整场景水面 RT 渲染，实际序列: ${JSON.stringify(perFrameRenders)}`,
+    );
+  }
+  resetWaterShaders();
+});
+
+test('PlaneInspector.cast 无分配标量 rayAabbTmin / castTriggerAABB 保持精确命中与未命中', () => {
+  const inspector = new PlaneInspector();
+  const solid = {
+    min: { x: -10, y: -10, z: -60 },
+    max: { x: 10, y: 10, z: -40 },
+    planes: [
+      { normal: { x: 0, y: 0, z: 1 }, dist: -40 },
+      { normal: { x: 0, y: 0, z: -1 }, dist: 60 },
+      { normal: { x: 1, y: 0, z: 0 }, dist: 10 },
+      { normal: { x: -1, y: 0, z: 0 }, dist: 10 },
+      { normal: { x: 0, y: 1, z: 0 }, dist: 10 },
+      { normal: { x: 0, y: -1, z: 0 }, dist: 10 },
+    ],
+  };
+  const trigger = {
+    mins: { x: -5, y: -5, z: -30 },
+    maxs: { x: 5, y: 5, z: -20 },
+    target: 'dest1',
+    destIndex: 3,
+    classname: 'trigger_teleport',
+    spawnflags: 0,
+    startDisabled: false,
+  };
+
+  const hitTrig = inspector.cast(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1), null, [solid], [], [trigger], 1000);
+  assert.equal(hitTrig?.type, 'trigger');
+  assert.equal(hitTrig?.distance, 20);
+  assert.deepEqual(hitTrig?.normal, [0, 0, 1]);
+
+  const hitSolid = inspector.cast(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1), null, [solid], [], [], 1000);
+  assert.equal(hitSolid?.type, 'solid');
+  assert.equal(hitSolid?.distance, 40);
+
+  const miss = inspector.cast(new THREE.Vector3(100, 0, 0), new THREE.Vector3(0, 0, -1), null, [solid], [], [trigger], 1000);
+  assert.equal(miss, null);
 });
 
 

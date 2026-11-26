@@ -265,9 +265,8 @@ export class PlaneInspector {
 		dir: THREE.Vector3,
 		maxDist: number,
 	): PlaneInfo | null {
-		// 粗筛：AABB 未命中，或入口参数已越过当前距离上界
-		const aabbHit = rayAABB(origin, dir, brush.min, brush.max);
-		if (!aabbHit || aabbHit.tmin > maxDist) return null;
+		// 粗筛：AABB 未命中，或入口参数已越过当前距离上界（标量无分配）
+		if (Number.isNaN(rayAabbTmin(origin, dir, brush.min, brush.max, maxDist))) return null;
 
 		// 精交：两个参数 + 进入面信息各自跟踪（法线/距离留给返回的 PlaneInfo）
 		let tEnter = -Infinity;
@@ -356,25 +355,23 @@ export class PlaneInspector {
 		const mins = trigger.mins!;
 		const maxs = trigger.maxs!;
 
-		// slab 法求交，同时记录取到 tmin 的轴与符号（拼入口面法线用）
+		// slab 法求交，同时记录取到 tmin 的轴与符号（拼入口面法线用）；标量展开避免每帧分配数组
 		let tmin = -Infinity;
 		let tmax = +Infinity;
 		let enterAxis = -1; // 0=x, 1=y, 2=z；三轴全平行时保持 -1
 		let enterSign = 0; // 与 enterAxis 配套：+1 朝 +轴，-1 朝 -轴
 
-		const o = [origin.x, origin.y, origin.z];
-		const d = [dir.x, dir.y, dir.z];
-		const mn = [mins.x, mins.y, mins.z];
-		const mx = [maxs.x, maxs.y, maxs.z];
-
 		for (let i = 0; i < 3; i++) {
-			const di = d[i];
+			const oi = i === 0 ? origin.x : i === 1 ? origin.y : origin.z;
+			const di = i === 0 ? dir.x : i === 1 ? dir.y : dir.z;
+			const mni = i === 0 ? mins.x : i === 1 ? mins.y : mins.z;
+			const mxi = i === 0 ? maxs.x : i === 1 ? maxs.y : maxs.z;
 			if (Math.abs(di) < 1e-8) {
 				// 该轴平行：origin 必须落在这一对 slab 之间
-				if (o[i] < mn[i] || o[i] > mx[i]) return null;
+				if (oi < mni || oi > mxi) return null;
 			} else {
-				let t1 = (mn[i] - o[i]) / di;
-				let t2 = (mx[i] - o[i]) / di;
+				let t1 = (mni - oi) / di;
+				let t2 = (mxi - oi) / di;
 				let sign1 = -1; // 与 t1（mins 面）配套：法线朝 -轴
 				let sign2 = +1; // 与 t2（maxs 面）配套：法线朝 +轴
 				if (t1 > t2) {
@@ -438,58 +435,60 @@ export class PlaneInspector {
 }
 
 // ---------------------------------------------------------------------------
-// 射线求交辅助（与类实例无关的纯函数与类型）
+// 射线求交辅助（与类实例无关的纯函数）
 // ---------------------------------------------------------------------------
 
-/** `rayAABB` 的返回：两个射线参数。 */
-interface AabbHit {
-	/** 进入盒子的参数（三轴进入参数取最大）。 */
-	tmin: number;
-	/** 离开盒子的参数（三轴离开参数取最小）。 */
-	tmax: number;
-}
-
 /**
- * ray-AABB 求交（slab 法），只算参数、不做可见性判定。
- *
- * 某轴方向分量为 0（`|d| < 1e-8`）时要求 `origin` 落在该轴区间内，否则返回 `null`；
- * 任一轴算完若 `tmin > tmax` 立即返回 `null`（盒子被射线错过）。
- * 两个参数初值为 `-Infinity` / `+Infinity`：三个轴全部平行时原样返回这一对值，
- * 由调用方（`castBrush` 的 `tmin > maxDist`、`castTriggerAABB` 的 `t` 判断）自行收敛。
+ * ray-AABB 求交（slab 法，无堆分配），返回 `tmin`（命中且 `tmin <= maxDist`）或 `NaN`（未命中/超距）。
  */
-function rayAABB(
+function rayAabbTmin(
 	origin: THREE.Vector3,
 	dir: THREE.Vector3,
 	min: { x: number; y: number; z: number },
 	max: { x: number; y: number; z: number },
-): AabbHit | null {
+	maxDist: number,
+): number {
 	let tmin = -Infinity;
 	let tmax = +Infinity;
 
-	const o = [origin.x, origin.y, origin.z];
-	const d = [dir.x, dir.y, dir.z];
-	const mn = [min.x, min.y, min.z];
-	const mx = [max.x, max.y, max.z];
-
-	for (let i = 0; i < 3; i++) {
-		const di = d[i];
-		if (Math.abs(di) < 1e-8) {
-			// 该轴平行：origin 越界即判无交
-			if (o[i] < mn[i] || o[i] > mx[i]) return null;
-		} else {
-			let t1 = (mn[i] - o[i]) / di;
-			let t2 = (mx[i] - o[i]) / di;
-			if (t1 > t2) {
-				// 统一成 t1 = 进入、t2 = 离开，便于与累计区间求交
-				const tmp = t1;
-				t1 = t2;
-				t2 = tmp;
-			}
-			if (t1 > tmin) tmin = t1;
-			if (t2 < tmax) tmax = t2;
-			if (tmin > tmax) return null;
-		}
+	// X 轴
+	if (Math.abs(dir.x) < 1e-8) {
+		if (origin.x < min.x || origin.x > max.x) return Number.NaN;
+	} else {
+		const inv = 1 / dir.x;
+		let t1 = (min.x - origin.x) * inv;
+		let t2 = (max.x - origin.x) * inv;
+		if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+		if (t1 > tmin) tmin = t1;
+		if (t2 < tmax) tmax = t2;
+		if (tmin > tmax) return Number.NaN;
 	}
 
-	return { tmin, tmax };
+	// Y 轴
+	if (Math.abs(dir.y) < 1e-8) {
+		if (origin.y < min.y || origin.y > max.y) return Number.NaN;
+	} else {
+		const inv = 1 / dir.y;
+		let t1 = (min.y - origin.y) * inv;
+		let t2 = (max.y - origin.y) * inv;
+		if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+		if (t1 > tmin) tmin = t1;
+		if (t2 < tmax) tmax = t2;
+		if (tmin > tmax) return Number.NaN;
+	}
+
+	// Z 轴
+	if (Math.abs(dir.z) < 1e-8) {
+		if (origin.z < min.z || origin.z > max.z) return Number.NaN;
+	} else {
+		const inv = 1 / dir.z;
+		let t1 = (min.z - origin.z) * inv;
+		let t2 = (max.z - origin.z) * inv;
+		if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+		if (t1 > tmin) tmin = t1;
+		if (t2 < tmax) tmax = t2;
+		if (tmin > tmax) return Number.NaN;
+	}
+
+	return tmin <= maxDist ? tmin : Number.NaN;
 }

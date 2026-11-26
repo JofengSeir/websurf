@@ -23,10 +23,11 @@
  * 需先做「同图同回放」A/B 基线再切。
  */
 import { attachEntitySystem } from '../entity/attach.js';
+import type { Entity } from '../entity/base-entity.js';
 import { entityStartsNonSolid } from '../entity/start-solid.js';
 import { DEFAULT_HULL_MAXS, DEFAULT_HULL_MINS, playerStateFromRaw, type RawPlayerState } from '../entity/host.js';
 import type { EntitySystem, EntitySystemStats } from '../entity/entity-system.js';
-import type { EntityEvent } from '../entity/types.js';
+import type { EntityEvent, PlayerState } from '../entity/types.js';
 import { mapCvarsToPhysicsParams } from '../phys/map-cvars.js';
 import { PANEL_TO_RUST } from '../phys/param-names.js';
 
@@ -302,6 +303,35 @@ export class EntityGameplay {
    * （物理线 + 渲染线都收；后代若还有自己的位移源时以后到的为准，与 Source 一致）。
    */
   private childrenByParent = new Map<number, number[]>();
+  /** 预索引 `trigger_teleport*` 实体列表，避免每步遍历全图数千实体。 */
+  private teleportTriggerEntities: Entity[] = [];
+  /** 当前模拟步复用的玩家状态（由 `update(dt, rawState)` 注入，避免同拍多次跨 WASM 调 `phys.state()`）。 */
+  private stepPlayerState: RawPlayerState | null = null;
+  private readonly playerStateBuf: PlayerState = {
+    origin: [0, 0, 0],
+    velocity: [0, 0, 0],
+    angles: [0, 0, 0],
+    hullMins: [...DEFAULT_HULL_MINS],
+    hullMaxs: [...DEFAULT_HULL_MAXS],
+    onGround: false,
+    alive: true,
+  };
+
+  private readPlayerStateIntoBuf(raw: RawPlayerState): PlayerState {
+    const b = this.playerStateBuf;
+    b.origin[0] = raw.posX;
+    b.origin[1] = raw.posY;
+    b.origin[2] = raw.posZ;
+    b.velocity[0] = raw.velX ?? 0;
+    b.velocity[1] = raw.velY ?? 0;
+    b.velocity[2] = raw.velZ ?? 0;
+    b.angles[0] = raw.pitch ?? 0;
+    b.angles[1] = raw.yaw ?? 0;
+    b.angles[2] = 0;
+    b.onGround = raw.onGround ?? false;
+    b.alive = raw.alive ?? true;
+    return b;
+  }
 
   constructor(options: EntityGameplayOptions) {
     this.options = options;
@@ -420,9 +450,14 @@ export class EntityGameplay {
     this.brushRotation.clear();
     this.teleportEnabled.clear();
     this.childrenByParent.clear();
+    this.teleportTriggerEntities = [];
+    this.stepPlayerState = null;
     this.entitySystem = attachEntitySystem({
       entityIoJson: entityIoJson ?? undefined,
-      getPlayerState: () => playerStateFromRaw(this.options.getPlayerState()),
+      getPlayerState: () =>
+        this.stepPlayerState
+          ? this.readPlayerStateIntoBuf(this.stepPlayerState)
+          : playerStateFromRaw(this.options.getPlayerState()),
       onEvent: (event) => this.onEntityEvent(event),
     });
     this.collectTriggerVolumes();
@@ -480,6 +515,11 @@ export class EntityGameplay {
           this.propagateBrushOffsetToDescendants(entity, offset);
         }
       }
+      for (const entity of attached.entList.entities) {
+        if (entity.classname.startsWith('trigger_teleport')) {
+          this.teleportTriggerEntities.push(entity);
+        }
+      }
     }
     // 立即按「地图值 ∩ 用户值」重放一次生效限速（地图值若在实体装配期已由
     // `servercommand sv_maxvelocity` 写入，则这里直接取两者较小者）。不能只存不发：
@@ -489,42 +529,47 @@ export class EntityGameplay {
   }
 
   /** 每帧推进：实体 I/O → 跳跃增幅区 → 玩家名门控。物理未就绪时只跑实体。 */
-  update(dt: number): void {
+  update(dt: number, rawState?: RawPlayerState): void {
     if (!this.entitySystem) return;
-    this.entitySystem.frame(dt);
-    const phys = this.options.getPhys();
-    if (phys !== this.physRef) {
-      this.physRef = phys;
-      if (phys) {
-        // 换图后主线程是全新 `PhysWorld` 实例（`load()` 时它还不存在，见 loadScene →
-        // buildPredictionWorld 的顺序）：按实例镜像的状态整体重放一次。跳高置 null 让
-        // `updateAutohopZoneJump()` 用当前基线重发；玩家名/filter 也要重新推。
-        this.jumpHeight = null;
-        this.pushSpeedCapToPhys();
-        this.playerNamePushed = null;
-        this.teleportFilterPushed = null;
-        // brush 开关镜像重放：`load()` 时物理实例还不存在（见 loadScene →
-        // buildPredictionWorld 顺序），期间发生的 `func_wall_toggle` / 门事件要补到新世界。
-        for (const [entity, solid] of this.brushSolid) {
-          phys.set_brush_solid?.(entity, solid);
-        }
-        // 移动 brush 位移镜像重放：电梯/移动平台在 `load()` 后、物理实例建立前就已被
-        // 地图 I/O 设过位置（例如出生即开启的门；movelinear 的初相位也走同一镜像）。
-        for (const [entity, offset] of this.brushOffset) {
-          phys.set_brush_offset?.(entity, offset[0], offset[1], offset[2]);
-        }
-        // 传送区开关镜像重放：同上，`load()` 之后、物理实例建立之前发生的阶段推进
-        // （`tp_stage01/02` 的 Enable）要补到新世界。
-        for (const [entity, enabled] of this.teleportEnabled) {
-          phys.set_teleport_enabled?.(entity, enabled);
+    this.stepPlayerState = rawState ?? null;
+    try {
+      this.entitySystem.frame(dt);
+      const phys = this.options.getPhys();
+      if (phys !== this.physRef) {
+        this.physRef = phys;
+        if (phys) {
+          // 换图后主线程是全新 `PhysWorld` 实例（`load()` 时它还不存在，见 loadScene →
+          // buildPredictionWorld 的顺序）：按实例镜像的状态整体重放一次。跳高置 null 让
+          // `updateAutohopZoneJump()` 用当前基线重发；玩家名/filter 也要重新推。
+          this.jumpHeight = null;
+          this.pushSpeedCapToPhys();
+          this.playerNamePushed = null;
+          this.teleportFilterPushed = null;
+          // brush 开关镜像重放：`load()` 时物理实例还不存在（见 loadScene →
+          // buildPredictionWorld 顺序），期间发生的 `func_wall_toggle` / 门事件要补到新世界。
+          for (const [entity, solid] of this.brushSolid) {
+            phys.set_brush_solid?.(entity, solid);
+          }
+          // 移动 brush 位移镜像重放：电梯/移动平台在 `load()` 后、物理实例建立前就已被
+          // 地图 I/O 设过位置（例如出生即开启的门；movelinear 的初相位也走同一镜像）。
+          for (const [entity, offset] of this.brushOffset) {
+            phys.set_brush_offset?.(entity, offset[0], offset[1], offset[2]);
+          }
+          // 传送区开关镜像重放：同上，`load()` 之后、物理实例建立之前发生的阶段推进
+          // （`tp_stage01/02` 的 Enable）要补到新世界。
+          for (const [entity, enabled] of this.teleportEnabled) {
+            phys.set_teleport_enabled?.(entity, enabled);
+          }
         }
       }
+      // 实体层 `trigger_teleport` 的 Enable/Disable → Rust 静态传送表（每帧只在状态变化时下发）。
+      this.syncTeleportTriggers(phys);
+      const st = rawState ?? this.options.getPlayerState();
+      this.updateAutohopZoneJump(st, phys);
+      this.syncPlayerName(phys);
+    } finally {
+      this.stepPlayerState = null;
     }
-    // 实体层 `trigger_teleport` 的 Enable/Disable → Rust 静态传送表（每帧只在状态变化时下发）。
-    this.syncTeleportTriggers(phys);
-    const st = this.options.getPlayerState();
-    this.updateAutohopZoneJump(st, phys);
-    this.syncPlayerName(phys);
   }
 
   /** 实体运行期统计（实体浏览器 / 诊断面板）。 */
@@ -573,10 +618,11 @@ export class EntityGameplay {
    * `update()` 的实例变更分支整体重放。
    */
   private syncTeleportTriggers(phys: GameplayPhysLike | null): void {
-    const system = this.entitySystem;
-    if (!system) return;
-    for (const entity of system.entList.entities) {
-      if (!entity.classname.startsWith('trigger_teleport')) continue;
+    const list = this.teleportTriggerEntities;
+    if (list.length === 0) return;
+    for (let i = 0; i < list.length; i++) {
+      const entity = list[i];
+      if (entity.markedForDeletion) continue;
       const enabled = !entity.disabled;
       if (this.teleportEnabled.get(entity.index) === enabled) continue;
       this.teleportEnabled.set(entity.index, enabled);
@@ -590,6 +636,8 @@ export class EntityGameplay {
     this.entitySystem = null;
     this.autohopZones = [];
     this.triggerBoxes = [];
+    this.teleportTriggerEntities = [];
+    this.stepPlayerState = null;
     this.jumpHeight = null;
     this.speedCap = null;
     this.mapSpeedCap = null;

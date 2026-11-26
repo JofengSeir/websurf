@@ -93,6 +93,8 @@ export interface EntityRuntime {
   getPlayer(): Entity | null;
   /** 未知 classname 的 `On*` 键是否动态注册为输出（默认 true，见文件尾说明）。 */
   allowDynamicOutputs: boolean;
+  /** think 状态变化通知（供 EntitySystem 维护活跃 think 集合，避免每帧全表扫描）。 */
+  onThinkChanged?(entity: Entity, active: boolean): void;
 }
 
 /** `TICK_NEVER_THINK`：没有待执行的 think。 */
@@ -412,10 +414,13 @@ export class Entity implements EntityLike {
   setThink(fn: (entity: Entity) => void, delay = 0): void {
     this.thinkFn = fn;
     this.nextThink = this.runtime.now() + delay;
+    this.runtime.onThinkChanged?.(this, true);
   }
   clearThink(): void {
+    const had = this.thinkFn !== null;
     this.thinkFn = null;
     this.nextThink = TICK_NEVER_THINK;
+    if (had) this.runtime.onThinkChanged?.(this, false);
   }
   /** `GetNextThink() > curtime` —— trigger_multiple 的冷却判据。 */
   hasPendingThink(): boolean {

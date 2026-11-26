@@ -77,6 +77,7 @@ const g = globalThis as {
   __vbspLastFrameMs?: number;
   __vbspWaterRtEps?: number;
   __vbspWaterRtCos?: number;
+  __vbspWaterPassGap?: number;
 };
 
 /**
@@ -117,6 +118,7 @@ function refrCadence(level: number): number {
  */
 let mirrorSinceRender = 0;
 let mirrorRenderSeq = 0;
+let framesSinceAnyPass = 999;
 
 /**
  * 当前镜面 RT 的重渲间隔（帧）。默认 2 = 隔帧。
@@ -250,6 +252,7 @@ export function renderWaterFramePasses(
   // 不会先给一帧旧 RT；只有真正渲过之后才清零。
   refrSinceRender++;
   mirrorSinceRender++;
+  framesSinceAnyPass++;
   // 静止时跳过：镜面/折射内容只随相机变，相机没动就没有任何可见差异。
   // 注意：这里只**判断**不动状态，标记位姿由下面真正重渲的分支做（见 rtCameraMoved 注释）。
   const refrMoved = refrCameraMoved(camera);
@@ -285,6 +288,19 @@ export function renderWaterFramePasses(
     mirrorNow = mirrorMoved;
   }
   if (!refrNow && !mirrorNow) return;
+  // 帧间冷却门控：防止折射（color+depth 2 趟）与多层镜面（layer1, layer2...）在连续帧扎堆执行
+  // （如连跑 3 帧水面 pass 导致 GPU/ANGLE 队列背压掉槽）。当 cadence >= 2 时，任意两趟整场景
+  // 水面 pass 之间至少间隔 minPassGap 帧（预热 forcedPass / 首帧建 RT / 强制 cadence=1 时放行）。
+  const forcedGap = (g as { __vbspWaterPassGap?: number }).__vbspWaterPassGap;
+  const minPassGap =
+    typeof forcedGap === 'number' && Number.isFinite(forcedGap) && forcedGap >= 1
+      ? Math.round(forcedGap)
+      : forcedPass !== undefined || !hasRefractionTarget() || refrEvery <= 1 || mirrorEvery <= 1
+        ? 1
+        : Math.min(refrEvery, mirrorEvery) >= 6
+          ? 3
+          : 2;
+  if (framesSinceAnyPass < minPassGap) return;
   // 预算兜底：这一帧的水面更新会不会把整帧推出 3.125ms 槽？会就跳过（复用上一帧 RT）。
   if (waterBudgetSaysSkip(refrSinceRender, refrEvery, mirrorSinceRender, mirrorEvery, lastDtMs)) return;
   // 优先级按「超期比例」= 距上次真渲的帧数 ÷ 自己的 cadence（都刚渲过则相等、折射优先）。
@@ -294,6 +310,7 @@ export function renderWaterFramePasses(
   const mirrorScore = mirrorSinceRender / mirrorEvery;
   if (refrNow && (!mirrorNow || refrScore >= mirrorScore)) {
     refrSinceRender = 0;
+    framesSinceAnyPass = 0;
     const tPass = performance.now();
     renderRefraction(renderer, scene, camera);
     recordWaterCost(performance.now() - tPass);
@@ -313,6 +330,7 @@ export function renderWaterFramePasses(
     if (!stalest || p.lastRenderedSeq < stalest.lastRenderedSeq) stalest = p;
   }
   if (!stalest) return;
+  framesSinceAnyPass = 0;
   const tMirror = performance.now();
   renderMirrorPlane(renderer, scene, camera, stalest, waterMaterials);
   stalest.lastRenderedSeq = ++mirrorRenderSeq;
@@ -402,6 +420,7 @@ export function resetWaterShaders(): void {
   refrSinceRender = 0;
   mirrorSinceRender = 0;
   mirrorRenderSeq = 0;
+  framesSinceAnyPass = 999;
   _rtLastPos.set(Number.NaN, Number.NaN, Number.NaN);
   _mirrorLastPos.set(Number.NaN, Number.NaN, Number.NaN);
 }

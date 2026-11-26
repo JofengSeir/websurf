@@ -1096,12 +1096,19 @@ export class RendererMain {
     // ③-2 可交互机关高亮 / 按钮连锁连线：只读实体数据，视线选靶与 F 键走同一规则。
     // 有内容显示时置 needsRender，物理未就绪的按需渲染路径也能看到高亮。
     if (this.interactVisualizer && this.gameplay) {
-      this._fwdDir.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
-      const picked = this.gameplay.pickUseFromView(
-        [this.camera.position.x, this.camera.position.y, this.camera.position.z],
-        [this._fwdDir.x, this._fwdDir.y, this._fwdDir.z],
-      );
-      if (this.interactVisualizer.update(this.camera, this.gameplay.system, picked, now)) {
+      const sys = this.gameplay.system;
+      let picked = -1;
+      if (sys && sys.useEntities.length > 0) {
+        this._fwdDir.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
+        this._useEye[0] = this.camera.position.x;
+        this._useEye[1] = this.camera.position.y;
+        this._useEye[2] = this.camera.position.z;
+        this._useDir[0] = this._fwdDir.x;
+        this._useDir[1] = this._fwdDir.y;
+        this._useDir[2] = this._fwdDir.z;
+        picked = this.gameplay.pickUseFromView(this._useEye, this._useDir);
+      }
+      if (this.interactVisualizer.update(this.camera, sys, picked, now)) {
         this.needsRender = true;
       }
       this.updateInteractAim(picked);
@@ -2132,6 +2139,8 @@ export class RendererMain {
 
   // 复用向量
   private readonly _fwdDir = new THREE.Vector3();
+  private readonly _useEye: [number, number, number] = [0, 0, 0];
+  private readonly _useDir: [number, number, number] = [0, 0, 0];
 }
 
 const DEG2RAD = Math.PI / 180;

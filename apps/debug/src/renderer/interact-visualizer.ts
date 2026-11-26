@@ -94,10 +94,6 @@ function pushBox(
   }
 }
 
-function isUseEntity(entity: Entity): boolean {
-  return entity.classChain.some((cls) => typeof cls.use === 'function');
-}
-
 export class InteractVisualizer {
   private root: THREE.Group | null = null;
   private boxLines: THREE.LineSegments | null = null;
@@ -107,6 +103,8 @@ export class InteractVisualizer {
   private chainUntil = 0;
   private lastUpdate = 0;
   private active = false;
+  private lastBoxLen = 0;
+  private lastChainLen = 0;
 
   /** 挂到场景根（`renderer-main.loadScene` 时调用；同一实例换图前先 `dispose()`）。 */
   attach(sceneRoot: THREE.Object3D): void {
@@ -138,6 +136,8 @@ export class InteractVisualizer {
     this.root = group;
     this.lastUpdate = 0;
     this.active = false;
+    this.lastBoxLen = 0;
+    this.lastChainLen = 0;
   }
 
   dispose(): void {
@@ -159,6 +159,8 @@ export class InteractVisualizer {
     this.chainEdges = [];
     this.chainUntil = 0;
     this.active = false;
+    this.lastBoxLen = 0;
+    this.lastChainLen = 0;
   }
 
   /** 按 G 打开关联浮层后调用：记录根实体并展开 outputs 连锁（2 层，常驻直到 `hideChain()`）。 */
@@ -187,8 +189,8 @@ export class InteractVisualizer {
   update(camera: THREE.PerspectiveCamera, system: EntitySystem | null, pickIndex: number, now: number): boolean {
     if (!this.root || !this.boxLines || !this.chainLines) return false;
     if (!system) {
-      this.setGeometry(this.boxLines, [], []);
-      this.setGeometry(this.chainLines, [], []);
+      this.setGeometry(this.boxLines, [], [], 'box');
+      this.setGeometry(this.chainLines, [], [], 'chain');
       this.active = false;
       return false;
     }
@@ -204,8 +206,10 @@ export class InteractVisualizer {
     const near: Array<{ entity: Entity; bounds: Bounds; distance: number }> = [];
     const chainTargets = new Set<number>();
     const byIndex = new Map<number, Entity>();
-    for (const entity of system.entList.entities) {
-      if (entity.disabled || !isUseEntity(entity)) continue;
+    const useList = system.useEntities;
+    for (let i = 0; i < useList.length; i++) {
+      const entity = useList[i];
+      if (entity.disabled) continue;
       byIndex.set(entity.index, entity);
       const bounds = entityBounds(entity);
       if (!bounds) continue;
@@ -240,7 +244,7 @@ export class InteractVisualizer {
       const bounds = entityBounds(target);
       if (bounds) pushBox(boxPos, boxColors, bounds, COLOR_CHAIN);
     }
-    this.setGeometry(this.boxLines, boxPos, boxColors);
+    this.setGeometry(this.boxLines, boxPos, boxColors, 'box');
 
     const linePos: number[] = [];
     const lineColors: number[] = [];
@@ -262,14 +266,23 @@ export class InteractVisualizer {
         lineColors.push(...color, ...color);
       }
     }
-    this.setGeometry(this.chainLines, linePos, lineColors);
+    this.setGeometry(this.chainLines, linePos, lineColors, 'chain');
 
     this.active = boxPos.length > 0 || linePos.length > 0;
     this.root.visible = this.active;
     return this.active;
   }
 
-  private setGeometry(lines: THREE.LineSegments, positions: number[], colors: number[]): void {
+  private setGeometry(
+    lines: THREE.LineSegments,
+    positions: number[],
+    colors: number[],
+    kind: 'box' | 'chain',
+  ): void {
+    const prevLen = kind === 'box' ? this.lastBoxLen : this.lastChainLen;
+    if (positions.length === 0 && prevLen === 0) return;
+    if (kind === 'box') this.lastBoxLen = positions.length;
+    else this.lastChainLen = positions.length;
     const geom = lines.geometry;
     geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
     geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));

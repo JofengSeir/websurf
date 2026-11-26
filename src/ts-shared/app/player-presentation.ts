@@ -87,7 +87,7 @@ export interface PredictionSampleSink {
 
 /** 实体运行期宿主的最小接口（`EntityGameplay` 满足）。 */
 export interface PredictionGameplayLike {
-  update(dt: number): void;
+  update(dt: number, state?: PredictionPhysState): void;
 }
 
 export interface CreatePlayerPresentationOptions {
@@ -179,8 +179,8 @@ export function createPlayerPresentation(options: CreatePlayerPresentationOption
     options.shared.writeRenderSample(now, state.posX, state.posY, state.posZ, options.nextRenderSampleIndex());
     hooks.applyCamera?.(state);
 
-    // 实体运行期与物理同帧推进（touch 用本帧 state，0 延迟输出当帧消费）。
-    options.gameplay()?.update(dt);
+    // 实体运行期与物理同帧推进（复用本拍已取出的 state，避免再跨 WASM 边界重读）。
+    options.gameplay()?.update(dt, state);
     return true;
   };
 
