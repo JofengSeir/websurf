@@ -8,23 +8,36 @@
  */
 import * as THREE from 'three';
 
-/** near 允许的最小值（收缩与默认值都不得低于它）。 */
-const CAMERA_NEAR_MIN = 0.05;
-/** 探测距离默认值（HU）：`update` 的射线长度上限与包围球粗筛半径都由它推出。 */
+/** near 允许的硬下限（仅在贴脸 < 1.5 HU 时才可能触底；保持 24-bit 深度精度）。 */
+const CAMERA_NEAR_MIN = 0.5;
+/** 场景默认 near 上限（与起源 DEFAULT_NEARZ=7 同量级，防大图 defaultNear 过大导致穿墙）。 */
+const CAMERA_DEFAULT_NEAR_MAX = 8;
+/** 探测距离默认值（HU）：`update` 探测半径上限与包围球粗筛半径都由它推出。 */
 const NEAR_PROBE_DIST_DEFAULT = 200;
-/** near 收缩系数默认值：命中几何时 near = 命中距离 × 本值（0 表示直接贴到 CAMERA_NEAR_MIN）。 */
+/** near 收缩系数默认值：0 = 按视锥角安全公式自适应收缩（防穿墙且保留最高深度精度）。 */
 const NEAR_RATIO_DEFAULT = 0;
 /**
  * 滞回：相机移动小于该距离（HU）且朝向变化小于阈值时复用上一次探测结果。
  *
- * **必须很小**：near 按探测时的距离 d 取 0.3d；之后相机再靠近 Δ 而没重探，墙就在 d−Δ 处，
- * 只要 `0.3d > d−Δ`（即 `d < 1.43Δ`）墙就会被近平面切掉——这正是「边走边贴墙时突然看到墙背面」。
- * 取 2 HU（两帧步行的量级）时该窗口只剩 d < 2.9 HU，玩家碰撞半径进不去；早期取 16 HU 时
- * 窗口是 d < 22.9 HU，贴墙走就穿。
+ * **必须很小**：near 按探测时的距离留出视锥安全余量；之后相机再靠近 Δ 而没重探，
+ * 若 Δ 超过余量墙就会被近平面切掉——因此余量与滞回半径联动钳制。
  */
 const NEAR_STICKY_DIST = 2;
 /** 滞回：朝向点积阈值（≈0.26°）。 */
 const NEAR_STICKY_DOT = 0.99999;
+
+/**
+ * 透视相机近平面四角点到相机原点的距离倍率 `k = ||corner|| / near`：
+ * 近平面是矩形而非球面，四角点距离相机 `near * sqrt(1 + tan²(fov/2) * (1 + aspect²))`
+ * （73.6° 16:9 约 1.83×，90° 约 2.27×，110° 约 3.08×）。必须按 `minD / k` 收缩才不会切角穿墙。
+ */
+function frustumCornerFactor(camera: THREE.PerspectiveCamera): number {
+  const fov = Number.isFinite(camera.fov) ? Math.min(Math.max(camera.fov, 1), 175) : 75;
+  const zoom = Number.isFinite(camera.zoom) && camera.zoom > 1e-4 ? camera.zoom : 1;
+  const aspect = Number.isFinite(camera.aspect) && camera.aspect > 0 ? camera.aspect : 1;
+  const tanHalfV = Math.tan((fov * Math.PI) / 360) / zoom;
+  return Math.sqrt(1 + tanHalfV * tanHalfV * (1 + aspect * aspect));
+}
 
 /**
  * 点到三角形最近距离的平方（Ericson《Real-Time Collision Detection》§5.1.5 的区域判据）。
@@ -128,18 +141,21 @@ export class NearPlaneController {
   private readonly _nearLastDir = new THREE.Vector3();
   private _nearHaveLast = false;
   private _nearLastProbe = NaN;
+  private _nearLastK = NaN;
+  private _nearLastStickyDist = NEAR_STICKY_DIST;
   /** 上一次探测是否退回六向射线（只有射线路径才受相机朝向影响；球距离路径与朝向无关）。 */
   private _nearUsedRayFallback = false;
   /** 最近一次 `probeChunk` 实际测试的三角形计数（诊断用）。 */
   private _nearTestedTris = 0;
 
   /**
-   * 块级世界 AABB 缓存（挂在 `mesh.userData.__nearBox`，按 geometry.uuid 失效）。
+   * 块级世界 AABB 缓存（挂在 `mesh.userData.__nearBox`，按 geometry.uuid 与 matrixWorld 失效）。
    *
    * 为什么：合并后每块覆盖半张图，包围球粗筛（`probe*2 + radius`，radius 已被 1.6× 垫过）
    * 几乎筛不掉任何块，于是每条射线都对整块合并几何做逐三角形求交——实测占全帧 16%~46%。
-   * AABB 到射起点的距离是几何距离的**下界**：距离 > probe 的块不可能有 ≤probe 的命中，
-   * 所以这层筛选**不改变结果**，只把三角形级工作限制到真正贴脸的块。
+   * AABB 到起点的距离是几何距离的**下界**：距离 > probe 的块不可能有 ≤probe 的命中，
+   * 所以这层筛选**不改变结果**，只把三角形级工作限制到真正贴脸的块；同时比对 `matrixWorld`，
+   * 避免移动/旋转实体（门/平台）一直命中出生点的旧 AABB。
    */
   private worldBoxOf(mesh: THREE.Mesh): THREE.Box3 | null {
     const geom = mesh.geometry as THREE.BufferGeometry | null;
@@ -147,10 +163,25 @@ export class NearPlaneController {
     if (!geom.boundingBox) geom.computeBoundingBox();
     const bb = geom.boundingBox;
     if (!bb) return null;
-    const cached = mesh.userData.__nearBox as { id: string; box: THREE.Box3 } | undefined;
-    if (cached && cached.id === geom.uuid) return cached.box;
+    const me = mesh.matrixWorld.elements;
+    const cached = mesh.userData.__nearBox as { id: string; box: THREE.Box3; mat: Float64Array } | undefined;
+    if (cached && cached.id === geom.uuid) {
+      const cm = cached.mat;
+      let same = true;
+      for (let i = 0; i < 16; i++) {
+        if (cm[i] !== me[i]) {
+          same = false;
+          break;
+        }
+      }
+      if (same) return cached.box;
+      for (let i = 0; i < 16; i++) cm[i] = me[i];
+      cached.box.copy(bb).applyMatrix4(mesh.matrixWorld);
+      return cached.box;
+    }
     const box = bb.clone().applyMatrix4(mesh.matrixWorld);
-    mesh.userData.__nearBox = { id: geom.uuid, box };
+    const mat = new Float64Array(me);
+    mesh.userData.__nearBox = { id: geom.uuid, box, mat };
     return box;
   }
 
@@ -247,20 +278,35 @@ export class NearPlaneController {
    * 数万面量级，而相机又经常落在块的 AABB 内部（块级粗筛失效）⇒ 4 条射线 × 数块，实测在
    * 「人一动」的帧上出现 10~15 ms 尖峰（静止帧每帧只有 3 ms，看到的就是掉帧）。
    */
-  private probeChunk(mesh: THREE.Mesh, probe: number, earlyExitOnHit: boolean): number {
+  private probeChunk(mesh: THREE.Mesh, probe: number, stopDist: number): number {
     const geom = mesh.geometry as THREE.BufferGeometry;
     const pos = geom.getAttribute('position') as THREE.BufferAttribute | undefined;
     if (!pos) return Infinity;
     const m = mesh.matrixWorld;
     const e = m.elements;
-    const s = Math.abs(e[0]);
-    // 非等比缩放时「局部空间球」不成立，退回 Raycaster（场景里没有这种块，只是兜底）
-    if (Math.abs(Math.abs(e[5]) - s) > 1e-3 || Math.abs(Math.abs(e[10]) - s) > 1e-3 || s < 1e-6) {
+    // 用 3 个基向量的长度平方与正交点积判定等比正交变换（支持任意旋转的实体/模型）
+    const sx2 = e[0] * e[0] + e[1] * e[1] + e[2] * e[2];
+    const sy2 = e[4] * e[4] + e[5] * e[5] + e[6] * e[6];
+    const sz2 = e[8] * e[8] + e[9] * e[9] + e[10] * e[10];
+    const tol = sx2 * 1e-3 + 1e-6;
+    const d01 = e[0] * e[4] + e[1] * e[5] + e[2] * e[6];
+    const d02 = e[0] * e[8] + e[1] * e[9] + e[2] * e[10];
+    const d12 = e[4] * e[8] + e[5] * e[9] + e[6] * e[10];
+    if (
+      sx2 < 1e-12 ||
+      Math.abs(sy2 - sx2) > tol ||
+      Math.abs(sz2 - sx2) > tol ||
+      Math.abs(d01) > tol ||
+      Math.abs(d02) > tol ||
+      Math.abs(d12) > tol
+    ) {
       return NaN;
     }
+    const s = Math.sqrt(sx2);
     const inv = this._nearInv.copy(m).invert();
     const oL = this._nearOriginL.copy(this._nearOrigin).applyMatrix4(inv);
     const localProbe = probe / s;
+    const localStopSq = stopDist > 0 ? (stopDist / s) * (stopDist / s) : -1;
     const ox = oL.x;
     const oy = oL.y;
     const oz = oL.z;
@@ -293,7 +339,7 @@ export class NearPlaneController {
       if (d2 < bestSq) {
         bestSq = d2;
         if (d2 < reach) reach = d2;
-        if (earlyExitOnHit && d2 <= localProbe * localProbe) return true;
+        if (localStopSq > 0 && d2 <= localStopSq) return true;
       }
       return false;
     };
@@ -318,7 +364,7 @@ export class NearPlaneController {
           }
         }
       }
-      if (!(earlyExitOnHit && bestSq <= localProbe * localProbe)) {
+      if (!(localStopSq > 0 && bestSq <= localStopSq)) {
         const big = grid.big;
         for (let k = 0; k < big.length; k++) {
           if (testTri(big[k])) break;
@@ -333,14 +379,20 @@ export class NearPlaneController {
     return bestSq === Infinity ? Infinity : Math.sqrt(bestSq) * s;
   }
 
-  /** 场景默认 near：maxDim/1000，下限 CAMERA_NEAR_MIN（loadScene 算 near/far 用）。 */
+  /** 场景默认 near：clamp(maxDim/1000, CAMERA_NEAR_MIN, CAMERA_DEFAULT_NEAR_MAX)。 */
   static defaultNearForScene(maxDim: number): number {
-    return Math.max(maxDim / 1000, CAMERA_NEAR_MIN);
+    return Math.min(Math.max(maxDim / 1000, CAMERA_NEAR_MIN), CAMERA_DEFAULT_NEAR_MAX);
   }
 
   /** 落账场景默认 near（探测无命中时 `update` 恢复到它）。 */
   setDefaultNear(v: number): void {
     this.defaultNear = v;
+    this._nearHaveLast = false;
+  }
+
+  /** 动态实体发生位移/旋转时清空滞回缓存，避免相机静止时被移动门/平台穿墙。 */
+  invalidateCache(): void {
+    this._nearHaveLast = false;
   }
 
   /**
@@ -394,26 +446,27 @@ export class NearPlaneController {
   }
 
   /**
-   * 近平面自适应：以 (px, py, pz) 为射线起点，沿相机局部系的前/后/左/右四个水平方向在
-   * `nearProbeDist` 内探测最近的 BSP mesh；命中则把 `camera.near` 收到
-   * max(命中距离 × nearRatio, CAMERA_NEAR_MIN)，无命中恢复 `defaultNear`。
-   * 粗筛：块级世界 AABB 到起点距离 > 探测距离的块直接跳过（合并块很大，旧的包围球粗筛筛不掉
-   * 任何块 ⇒ 每条射线都对整块几何逐三角形求交，实测占全帧 16%~46%）。
-   * 滞回：位置变动 < 16 HU 且朝向变化 < ~1.8° 时复用上一次结果（near 是缓变量）。
-   * 只写 `camera.near`（变化超过 0.001 才更新投影矩阵）；由 `tick` 每 2 帧调用一次。
+   * 近平面自适应：在有效探测球内求最近 BSP/实体表面距离 `minD`，
+   * 按视锥四角安全倍率 `k = ||corner|| / near` 收缩 `camera.near`，既防贴墙/斜角穿面，
+   * 又保留尽可能大的 `near` 以维持 24-bit 深度缓冲精度（避免远距 Z-Fighting）。
    */
   update(camera: THREE.PerspectiveCamera | null, scene: THREE.Object3D | null, px: number, py: number, pz: number, opts?: NearPlaneOptions): void {
     if (!camera || !scene) return;
-    const probe = this.nearProbeDist;
+    const k = frustumCornerFactor(camera);
+    // 数学上只有距离 <= needRadius 的面才可能使 target < defaultNear，收窄搜索半径可省大量三角测试
+    const safeNeed = this.defaultNear * k + NEAR_STICKY_DIST + 1;
+    const needRadius = this.nearRatio > 0 ? Math.max(safeNeed, this.defaultNear / this.nearRatio) : safeNeed;
+    const probe = Math.min(this.nearProbeDist, needRadius);
     this._nearOrigin.set(px, py, pz);
 
-    // 0. 滞回：位置/探测距离几乎没变就复用上一次的 near。
+    // 0. 滞回：位置/FOV/探测半径几乎没变就复用上一次的 near。
     //    最近表面距离是纯球语义、与视角朝向无关；只有上次退回射线路径时才额外校验朝向。
     const dirNow = this._nearDirF.set(0, 0, -1).applyQuaternion(camera.quaternion);
     if (
       this._nearHaveLast &&
       this._nearLastProbe === probe &&
-      this._nearOrigin.distanceToSquared(this._nearLastOrigin) < NEAR_STICKY_DIST * NEAR_STICKY_DIST &&
+      Math.abs(this._nearLastK - k) <= 1e-4 &&
+      this._nearOrigin.distanceToSquared(this._nearLastOrigin) < this._nearLastStickyDist * this._nearLastStickyDist &&
       (!this._nearUsedRayFallback || dirNow.dot(this._nearLastDir) > NEAR_STICKY_DOT)
     ) {
       return;
@@ -422,33 +475,41 @@ export class NearPlaneController {
     this._nearLastDir.copy(dirNow);
     this._nearHaveLast = true;
     this._nearLastProbe = probe;
+    this._nearLastK = k;
     this._nearUsedRayFallback = false;
     this._nearTestedTris = 0;
 
-    // 1. 块级 AABB 粗筛：盒子到起点的距离 > 探测距离 ⇒ 该块不可能有 ≤probe 的命中，直接跳过。
+    // 1. 块级 AABB 粗筛：跳过不可见子树（隐藏的动态实体组），并按块世界 AABB 过滤 > probe 的块。
     const candidates: THREE.Mesh[] = [];
     const collectRoots = opts?.roots ?? Array.from(scene.children).filter((r) => r.userData?.isBspModel);
-    for (const root of collectRoots) {
-      root.traverse((obj) => {
-        if (!(obj as THREE.Mesh).isMesh) return;
+    const visit = (obj: THREE.Object3D): void => {
+      if (!obj.visible) return;
+      if ((obj as THREE.Mesh).isMesh) {
         const mesh = obj as THREE.Mesh;
-        if (!mesh.visible) return; // 已被距离/PVS 剔除的块不参与探测
         const box = this.worldBoxOf(mesh);
-        if (!box) return;
-        if (box.distanceToPoint(this._nearOrigin) > probe) return;
-        candidates.push(mesh);
-      });
+        if (box && box.distanceToPoint(this._nearOrigin) <= probe) {
+          candidates.push(mesh);
+        }
+      }
+      const children = obj.children;
+      for (let i = 0; i < children.length; i++) {
+        visit(children[i]);
+      }
+    };
+    for (const root of collectRoots) {
+      visit(root);
     }
 
-    // 2. 逐块求「最近表面距离」：near 是球语义（比 near 近的东西都会被裁掉，跟方向无关），
-    //    所以探测的是距离而不是射线。贴墙斜站（墙与视线 45°）时四向射线要走 141 HU 才碰到，
-    //    探不到就会让 near 停在默认 32.65，眼前 20 HU 的墙被裁开——「视角穿透面」的成因。
-    //    `nearRatio === 0` 时只要在 probe 球内命中任意一面结果恒为 CAMERA_NEAR_MIN，可提前短路。
-    const earlyExit = this.nearRatio === 0;
+    // 2. 逐块求「最近表面距离」并单调收紧上界：一旦发现更近的面，后续块只需扫 minD 以内；
+    //    若已近到足以把 near 压到 CAMERA_NEAR_MIN，立即提前结束。
+    const floorStopDist = CAMERA_NEAR_MIN * k;
     let minD = Infinity;
     if (candidates.length > 0) {
       for (const mesh of candidates) {
-        const d = this.probeChunk(mesh, probe, earlyExit);
+        const limit = Math.min(probe, minD);
+        const box = this.worldBoxOf(mesh);
+        if (!box || box.distanceToPoint(this._nearOrigin) > limit) continue;
+        const d = this.probeChunk(mesh, limit, floorStopDist);
         if (Number.isNaN(d)) {
           this._nearUsedRayFallback = true;
           // 非等比缩放的块（极少）：退回 three 的 Raycaster，用六向射线兜底
@@ -460,34 +521,41 @@ export class NearPlaneController {
           for (const dir of dirs) {
             this._nearRaycaster.set(this._nearOrigin, dir);
             this._nearRaycaster.near = 0;
-            this._nearRaycaster.far = probe;
+            this._nearRaycaster.far = limit;
             const hits = this._nearRaycaster.intersectObject(mesh, false);
             if (hits.length > 0 && hits[0].distance < minD) minD = hits[0].distance;
           }
         } else if (d < minD) {
           minD = d;
         }
-        if (earlyExit && minD <= probe) break;
+        if (minD <= floorStopDist) break;
       }
     }
 
-    // 3. 设定 near（贴墙收缩，空旷恢复默认）
-    // 只允许**往下**收缩：最近表面距离可能远大于探测距离（大三角形的 AABB 擦到探测球、
-    // 面本身在几百 HU 外），此时 minD×ratio 会超过 defaultNear，把眼前的几何裁掉 ⇒ 视角穿面。
-    const target = isFinite(minD)
-      ? Math.min(Math.max(minD * this.nearRatio, CAMERA_NEAR_MIN), this.defaultNear)
-      : this.defaultNear;
+    // 3. 设定 near：按视锥角距离 `k` 留出滞回余量，既保证四角点不到墙面，又避免无谓压低 near。
+    let target: number;
+    if (isFinite(minD)) {
+      const margin = Math.min(NEAR_STICKY_DIST, minD * 0.25);
+      const geoSafe = (minD - margin) / k;
+      const rawTarget = this.nearRatio === 0 ? geoSafe : Math.min(minD * this.nearRatio, geoSafe);
+      target = Math.min(Math.max(rawTarget, CAMERA_NEAR_MIN), this.defaultNear);
+      this._nearLastStickyDist = Math.max(0.25, Math.min(NEAR_STICKY_DIST, margin));
+    } else {
+      target = this.defaultNear;
+      this._nearLastStickyDist = NEAR_STICKY_DIST;
+    }
     if (Math.abs(camera.near - target) > 0.001) {
       camera.near = target;
       camera.updateProjectionMatrix();
     }
-    // 诊断（临时）：最近命中距离 / 候选块数 / 本次 near，供「移动掉帧」与贴墙收缩核对
+    // 诊断：最近命中距离 / 候选块数 / 本次 near / 视锥角倍率
     (globalThis as unknown as { __vbspNearStats?: unknown }).__vbspNearStats = {
       minD: isFinite(minD) ? +minD.toFixed(2) : null,
       candidates: candidates.length,
       tris: this._nearTestedTris,
       near: +camera.near.toFixed(3),
-      probe,
+      probe: +probe.toFixed(1),
+      k: +k.toFixed(3),
     };
   }
 }

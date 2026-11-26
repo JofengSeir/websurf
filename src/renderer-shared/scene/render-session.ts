@@ -326,7 +326,6 @@ export class RenderSession {
 
   private translucentSplit = true;
   private readonly markBspModel: boolean;
-  private nearCheckToggle = false;
 
   constructor(opts: RenderSessionOptions) {
     this.app = opts.app;
@@ -835,7 +834,6 @@ export class RenderSession {
     this.visibility.clear();
     this.pvsOverlay.reset();
     this.lastVisibility = null;
-    this.nearCheckToggle = false;
     // 深度代理是主根的合并副本，换图后必须释放（几何可能几十 MB）。
     this.applyGlowDepthProxy(null);
     // 场景扩展（激光 / 粒子）也属于旧图，换图时一起释放。
@@ -976,12 +974,14 @@ export class RenderSession {
   setEntityOffset(entityIndex: number, offset: readonly [number, number, number]): void {
     (this.spotBeams?.userData.rig as SpotBeamRig | undefined)?.setEntityOffset(entityIndex, offset);
     this.dynamicAmbient.markMoved(entityIndex);
+    this.nearPlane.invalidateCache();
   }
 
   /** 更新实体旋转角度（Source pitch/yaw/roll）：同步随 parentname 挂载的 point_spotlight。 */
   setEntityRotation(entityIndex: number, angles: readonly [number, number, number]): void {
     (this.spotBeams?.userData.rig as SpotBeamRig | undefined)?.setEntityRotation(entityIndex, angles);
     this.dynamicAmbient.markMoved(entityIndex);
+    this.nearPlane.invalidateCache();
   }
 
   /** 释放场景扩展图元（激光束 / PCF 粒子 / 地图资产实体）及其根节点；幂等。 */
@@ -1240,8 +1240,7 @@ export class RenderSession {
     if (opts.updateVisibility !== false) this.updateVisibility();
     mark('vis');
     if (this.pvsOverlay.enabled) this.pvsOverlay.update(this.root, this.pvs, this.camera.position);
-    this.nearCheckToggle = !this.nearCheckToggle;
-    if (opts.updateNearPlane !== false && this.nearCheckToggle && this.root) {
+    if (opts.updateNearPlane !== false && this.root) {
       shrinkNearPlane(
         this.nearPlane,
         this.camera,

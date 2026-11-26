@@ -932,7 +932,7 @@
               <input type="range" id="nearProbeDist" min="100" max="300" step="1" value="200" />
               <div class="val"><input type="number" id="nearProbeDistNum" class="param-num" min="100" max="300" step="any" value="200" /></div>
 
-              <label title="贴墙时 near = 最近几何距离 × 此系数：越小越不易裁墙（更保守），远处深度精度略降">收缩系数</label>
+              <label title="0 = 自动视锥防穿墙（最高深度精度）；> 0 时按 最近几何距离 × 此系数 额外收缩">收缩系数</label>
               <input type="range" id="nearRatio" min="0" max="1" step="0.01" value="0" />
               <div class="val"><input type="number" id="nearRatioNum" class="param-num" min="0" max="1" step="any" value="0" /></div>
             </div>

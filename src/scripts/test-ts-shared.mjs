@@ -1018,37 +1018,92 @@ test('simClock.pendingMs 与 64tick 固定步长插值在 144Hz/320Hz 下无重�
   }
 });
 
-test('NearPlaneController 纯旋转不重扫球距离且 ratio=0 命中即短路', () => {
+test('NearPlaneController 视锥安全收缩、防 Z-Fighting、动态位移与旋转格网均成立', () => {
   const THREE = createRequire(import.meta.url)('three');
   const ctrl = new NearPlaneController();
-  ctrl.setDefaultNear(20);
-  const geom = new THREE.BoxGeometry(10, 10, 10);
-  const mesh = new THREE.Mesh(geom, new THREE.MeshBasicMaterial());
-  mesh.position.set(0, 0, -50);
-  mesh.updateMatrixWorld(true);
+
+  // 1. 大图默认 near 封顶 8 HU（不再取到 32.72 造成跳帧穿墙）
+  const surf666Default = NearPlaneController.defaultNearForScene(32720);
+  assert.equal(surf666Default, 8, `surf_666 默认 near 应封顶 8，实际 ${surf666Default}`);
+  ctrl.setDefaultNear(surf666Default);
+
   const root = new THREE.Group();
   root.userData.isBspModel = true;
-  root.add(mesh);
   const scene = new THREE.Scene();
   scene.add(root);
-  const cam = new THREE.PerspectiveCamera(75, 1, 20, 10000);
 
-  // 首次探测：50 HU 处有盒子，ratio=0 应将 near 收缩到 0.05
+  // 100x100x100 墙体：中心在 z=-114，正面在 z=-64（模拟脚下 64 HU 地面）
+  const wallGeom = new THREE.BoxGeometry(100, 100, 100);
+  const mesh = new THREE.Mesh(wallGeom, new THREE.MeshBasicMaterial());
+  mesh.position.set(0, 0, -114);
+  mesh.updateMatrixWorld(true);
+  root.add(mesh);
+
+  const cam = new THREE.PerspectiveCamera(75, 16 / 9, surf666Default, 3272000);
+  const k75 = Math.sqrt(1 + Math.tan((75 * Math.PI) / 360) ** 2 * (1 + (16 / 9) ** 2));
+
+  // 2. 站在地面 64 HU 上且 ratio=0：near 保持 8 HU（不降到 0.05，彻底消除远距 Z-Fighting）
   ctrl.update(cam, scene, 0, 0, 0, { roots: [root] });
-  assert.ok(Math.abs(cam.near - 0.05) < 1e-6, `ratio=0 命中应收缩到 0.05，实际 ${cam.near}`);
+  assert.ok(Math.abs(cam.near - 8) < 1e-6, `64 HU 地面不应把 near 压低，实际 ${cam.near}`);
+  assert.ok(cam.near * k75 < 64, '四角点距离必须小于 64 HU');
 
-  // 纯转视角 90°（位置不变）：不应触发重扫（把盒子移走验证结果被滞回复用）
+  // 3. 贴墙 16 HU（正前方墙面 z=-16，FOV=90° 16:9）：near 必须自动缩到 < 16 / k
+  mesh.position.set(0, 0, -66);
+  mesh.updateMatrixWorld(true);
+  cam.fov = 90;
+  cam.updateProjectionMatrix();
+  const k90 = Math.sqrt(1 + Math.tan((90 * Math.PI) / 360) ** 2 * (1 + (16 / 9) ** 2));
+  ctrl.update(cam, scene, 0, 0, 0, { roots: [root] });
+  assert.ok(cam.near * k90 < 16, `16 HU 贴墙四角点必须 < 16：near=${cam.near}, k=${k90}`);
+  assert.ok(cam.near > 5 && cam.near < 7, `16 HU 贴墙 near 应在 (5, 7) 高精度区间，实际 ${cam.near}`);
+
+  // 4. 贴顶/极近 8 HU（FOV=110° 16:9）：FOV 变大也必须打破滞回并继续收缩
+  mesh.position.set(0, 0, -58);
+  mesh.updateMatrixWorld(true);
+  cam.fov = 110;
+  cam.updateProjectionMatrix();
+  const k110 = Math.sqrt(1 + Math.tan((110 * Math.PI) / 360) ** 2 * (1 + (16 / 9) ** 2));
+  ctrl.update(cam, scene, 0, 0, 0, { roots: [root] });
+  assert.ok(cam.near * k110 < 8, `8 HU 贴顶 110° FOV 四角点必须 < 8：near=${cam.near}, k=${k110}`);
+
+  // 5. 纯旋转 90°（位置/FOV 不变）：复用滞回缓存，不触发重扫
+  const nearBeforeRot = cam.near;
   mesh.position.set(0, 0, -5000);
   mesh.updateMatrixWorld(true);
-  mesh.userData.__nearBox = undefined;
   cam.rotation.y = Math.PI / 2;
   cam.updateMatrixWorld(true);
   ctrl.update(cam, scene, 0, 0, 0, { roots: [root] });
-  assert.ok(Math.abs(cam.near - 0.05) < 1e-6, '纯旋转不应重扫近平面，应复用滞回结果');
+  assert.ok(Math.abs(cam.near - nearBeforeRot) < 1e-6, '纯旋转不应重扫近平面，应复用滞回结果');
 
-  // 位置移动超过滞回阈值（2 HU）后才重扫并恢复 defaultNear=20
+  // 6. 移开后恢复 defaultNear=8
   ctrl.update(cam, scene, 5, 0, 0, { roots: [root] });
-  assert.ok(Math.abs(cam.near - 20) < 1e-6, `移开后应恢复 defaultNear=20，实际 ${cam.near}`);
+  assert.ok(Math.abs(cam.near - 8) < 1e-6, `移开后应恢复 defaultNear=8，实际 ${cam.near}`);
+
+  // 7. 动态门/移动实体靠近（不换 geometry.uuid）+ invalidateCache()：__nearBox 必须跟随刷新
+  mesh.position.set(5, 0, -64); // 距 (5, 0, 0) 正面 14 HU
+  mesh.updateMatrixWorld(true);
+  ctrl.invalidateCache();
+  ctrl.update(cam, scene, 5, 0, 0, { roots: [root] });
+  assert.ok(cam.near * k110 < 14, `动态实体移动后应刷新 AABB 并收缩 near：实际 ${cam.near}`);
+
+  // 8. 旋转 45° 的实体斜墙：必须仍走精确球距离路径（不退回六向射线漏 45° 墙）
+  mesh.rotation.y = Math.PI / 4;
+  mesh.position.set(5, 0, -82); // 旋转后最近顶点/面约 82 - 50*sqrt(2) ≈ 11.29 HU
+  mesh.updateMatrixWorld(true);
+  ctrl.invalidateCache();
+  ctrl.update(cam, scene, 5, 0, 0, { roots: [root] });
+  assert.ok(cam.near * k110 < 12, `旋转 45° 斜墙应精确探测并收缩 near：实际 ${cam.near}`);
+  assert.equal(globalThis.__vbspNearStats?.tris > 0, true, '旋转 mesh 应走精确三角形距离而非射线回退');
+
+  // 9. 隐藏父组（parent.visible = false）：应跳过整棵子树，不误缩 near
+  const dynGroup = new THREE.Group();
+  dynGroup.visible = false;
+  root.remove(mesh);
+  dynGroup.add(mesh);
+  root.add(dynGroup);
+  ctrl.invalidateCache();
+  ctrl.update(cam, scene, 5, 0, 0, { roots: [root] });
+  assert.ok(Math.abs(cam.near - 8) < 1e-6, `隐藏父组不应参与探测，应恢复 8，实际 ${cam.near}`);
 });
 
 
