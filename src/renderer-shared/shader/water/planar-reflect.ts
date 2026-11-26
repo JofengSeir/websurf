@@ -40,6 +40,8 @@ export interface MirrorPlane {
   matrix: THREE.Matrix4;
   camera: THREE.PerspectiveCamera;
   done: boolean;
+  /** 最近一次重渲的全局序号（用于每帧最多渲 1 层镜面时轮流挑最陈旧的层）。 */
+  lastRenderedSeq: number;
 }
 export const mirrorPlanes = new Map<number, MirrorPlane>();
 export const textureMatrix = new THREE.Matrix4();
@@ -74,6 +76,7 @@ export function mirrorPlaneOf(height: number): MirrorPlane {
       matrix: new THREE.Matrix4(),
       camera: new THREE.PerspectiveCamera(),
       done: false,
+      lastRenderedSeq: 0,
     };
     mirrorPlanes.set(key, p);
   }

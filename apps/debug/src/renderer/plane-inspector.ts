@@ -56,6 +56,9 @@ export class PlaneInspector {
 	private readonly _hitPoint = new THREE.Vector3();
 	/** 复用 Raycaster：mesh 段每次重设 origin/dir/far，`near` 保持构造缺省。 */
 	private readonly _raycaster = new THREE.Raycaster();
+	private readonly _boxHit = new THREE.Vector3();
+	private readonly _worldBox = new THREE.Box3();
+	private readonly _candidates: Array<{ mesh: THREE.Mesh; tSq: number }> = [];
 
 	/**
 	 * 跑完四段候选取最近命中；四段全落空返回 `null`。
@@ -145,10 +148,51 @@ export class PlaneInspector {
 	): PlaneInfo | null {
 		this._raycaster.set(origin, dir);
 		this._raycaster.far = maxDist;
-		const hits = this._raycaster.intersectObject(scene, true);
-		if (hits.length === 0) return null;
+		const maxDistSq = maxDist * maxDist;
+		const candidates = this._candidates;
+		candidates.length = 0;
 
-		const hit = hits[0];
+		const collect = (obj: THREE.Object3D): void => {
+			if (!obj.visible) return;
+			if ((obj as THREE.Mesh).isMesh) {
+				const mesh = obj as THREE.Mesh;
+				const geom = mesh.geometry as THREE.BufferGeometry | undefined;
+				if (geom) {
+					if (!geom.boundingBox) geom.computeBoundingBox();
+					if (geom.boundingBox) {
+						this._worldBox.copy(geom.boundingBox).applyMatrix4(mesh.matrixWorld);
+						if (this._raycaster.ray.intersectBox(this._worldBox, this._boxHit)) {
+							const tSq = origin.distanceToSquared(this._boxHit);
+							if (tSq <= maxDistSq) candidates.push({ mesh, tSq });
+						}
+					} else {
+						candidates.push({ mesh, tSq: 0 });
+					}
+				}
+			}
+			const children = obj.children;
+			for (let i = 0; i < children.length; i++) collect(children[i]);
+		};
+		collect(scene);
+		if (candidates.length === 0) return null;
+
+		candidates.sort((a, b) => a.tSq - b.tSq);
+		let bestHit: THREE.Intersection | null = null;
+		let bestDist = maxDist;
+		for (let i = 0; i < candidates.length; i++) {
+			const cand = candidates[i];
+			if (cand.tSq >= bestDist * bestDist) break;
+			this._raycaster.far = bestDist;
+			const hits = this._raycaster.intersectObject(cand.mesh, false);
+			if (hits.length > 0 && hits[0].distance < bestDist) {
+				bestHit = hits[0];
+				bestDist = hits[0].distance;
+			}
+		}
+		candidates.length = 0;
+		if (!bestHit) return null;
+
+		const hit = bestHit;
 		const mesh = hit.object as THREE.Mesh;
 		// 元数据写在合并期：块 mesh 由 renderer-main 的 optimizeScene 新建、不带 name/userData，
 		// 真正被指到的来源几何（名 + collectMetadata 的分类元数据）按 `faceIndex` 存在几何上。

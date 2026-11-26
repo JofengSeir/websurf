@@ -58,6 +58,14 @@ process.on('exit', () => {
  * 用于「纯函数长在实体类文件里」的模块（如 `classes/brush.ts`）：单文件转译会留下未解析的
  * `../start-solid.js` 等 import。打包只引入共享层纯 TS，不碰 three/wasm。
  */
+const threeUrl = pathToFileURL(path.join(root, 'node_modules', 'three', 'build', 'three.module.js')).href;
+const externalThreePlugin = {
+  name: 'external-three',
+  setup(build) {
+    build.onResolve({ filter: /^three$/ }, () => ({ path: threeUrl, external: true }));
+  },
+};
+
 async function loadTsBundle(relPath, name) {
   const built = await esbuild.build({
     entryPoints: [path.join(root, relPath)],
@@ -65,6 +73,7 @@ async function loadTsBundle(relPath, name) {
     platform: 'node',
     format: 'esm',
     target: 'node20',
+    plugins: [externalThreePlugin],
     write: false,
     logLevel: 'silent',
   });
@@ -122,6 +131,8 @@ const { applyObliqueWaterClip } = await loadTsBundle('src/renderer-shared/shader
 const { TransparentSorter } = await loadTsBundle('src/renderer-shared/scene/transparent-sorter.ts', 'transparent-sorter');
 const { SpriteGlows } = await loadTsBundle('src/renderer-shared/scene/entity-extras/sprites.ts', 'entity-sprites');
 const { Beams } = await loadTsBundle('src/renderer-shared/scene/entity-extras/beams.ts', 'entity-beams');
+const { prepareClusterIndex, applyClusterIndex } = await loadTsBundle('src/renderer-shared/scene/cluster-filter.ts', 'cluster-filter');
+const { PlaneInspector } = await loadTsBundle('apps/debug/src/renderer/plane-inspector.ts', 'plane-inspector');
 
 // 旋转枢轴的「rest 零变化」不变量：组位置 = pivot、mesh 局部位置 = 原位置 - pivot 时，
 // 世界坐标在旋转 0 的情况下逐分量不变（pivot 加回本身的抵消）。
@@ -1402,6 +1413,87 @@ test('SpriteGlows 与 Beams 静止视角零重传且全隐时置 visible=false',
     if (prevDoc === undefined) delete globalThis.document;
     else globalThis.document = prevDoc;
   }
+});
+
+test('applyClusterIndex 无翻位跳过 GPU 上传、局部切片上传且跳过 LOD_FAR 块', () => {
+  // 2 个三角形分别在 cluster 10 与 cluster 20，同一单 group 合并块（增量路径）
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.Float32BufferAttribute([
+    0, 0, 0,   10, 0, 0,   0, 10, 0,
+    50, 0, 0,  60, 0, 0,   50, 10, 0,
+  ], 3));
+  geom.setAttribute('_vbsp_face', new THREE.Int32BufferAttribute([0, 0, 0, 1, 1, 1], 1));
+  geom.setIndex([0, 1, 2, 3, 4, 5]);
+  geom.addGroup(0, 6, 0);
+  const mesh = new THREE.Mesh(geom, [new THREE.MeshBasicMaterial()]);
+  mesh.userData.lodLevel = 0;
+  mesh.updateMatrixWorld(true);
+
+  const row = new Uint8Array(32);
+  row[10] = 1;
+  row[20] = 1;
+  const pvs = {
+    getFaceCluster: (f) => (f === 0 ? 10 : 20),
+    isVisible: (c) => row[c] === 1,
+    visibleRow: () => row,
+  };
+
+  const items = [{ mesh, clusterIds: [10, 20] }];
+  const prep = prepareClusterIndex(items, pvs, 2);
+  assert.equal(prep.prepared, 1, `prepareClusterIndex failed: ${JSON.stringify(prep)}`);
+
+  // 第 1 次（cluster 1）：全量建出，visTris=2
+  applyClusterIndex(items, pvs, 1);
+  const attr = mesh.geometry.getAttribute('index') || mesh.geometry.index;
+  const ver1 = attr.version;
+  assert.equal(mesh.geometry.drawRange.count, 6);
+
+  // 第 2 次（换到 cluster 2，但一个无关 cluster 30 翻位，本块 0 个三角翻位）：
+  // 必须跳过 GPU 上传（attr.version 不变）！
+  row[30] = 1;
+  applyClusterIndex(items, pvs, 2);
+  assert.equal(attr.version, ver1, '本块无三角翻位时不应触发 GPU index 上传');
+
+  // 第 3 次（换到 cluster 3，cluster 10 隐藏）：仅翻位 1 个三角，上传范围必须收窄而不是整块
+  row[10] = 0;
+  applyClusterIndex(items, pvs, 3);
+  assert.equal(mesh.geometry.drawRange.count, 3);
+  assert.ok(attr.version > ver1, '有置换翻位时应触发上传');
+  assert.ok(attr.updateRanges.length === 1 && attr.updateRanges[0].count === 3, `应只上传 3 索引切片，实际 ${JSON.stringify(attr.updateRanges)}`);
+
+  // 第 4 次：LOD_FAR（lodLevel=2）块直接跳过，不改 lastCluster 也不上传
+  mesh.userData.lodLevel = 2;
+  row[10] = 1;
+  const verBeforeFar = attr.version;
+  applyClusterIndex(items, pvs, 4);
+  assert.equal(attr.version, verBeforeFar, 'LOD_FAR 块不应在场外重建或上传');
+});
+
+test('PlaneInspector 仅对可见网格做射线包围盒前向排序，跳过隐藏块', () => {
+  const inspector = new PlaneInspector();
+  const root = new THREE.Group();
+
+  // 前方 z=-20 放一个隐藏组内的块（模拟 PVS 隐藏块）
+  const hiddenGroup = new THREE.Group();
+  hiddenGroup.visible = false;
+  const frontMesh = new THREE.Mesh(new THREE.BoxGeometry(10, 10, 2), new THREE.MeshBasicMaterial());
+  frontMesh.position.set(0, 0, -20);
+  frontMesh.name = 'hidden-front';
+  frontMesh.updateMatrixWorld(true);
+  hiddenGroup.add(frontMesh);
+
+  // 后方 z=-50 放一个可见块
+  const backMesh = new THREE.Mesh(new THREE.BoxGeometry(10, 10, 2), new THREE.MeshBasicMaterial());
+  backMesh.position.set(0, 0, -50);
+  backMesh.name = 'visible-back';
+  backMesh.updateMatrixWorld(true);
+
+  root.add(hiddenGroup, backMesh);
+  root.updateMatrixWorld(true);
+
+  const hit = inspector.cast(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1), root, [], [], [], 1000);
+  assert.ok(hit !== null, '应命中后方可见块');
+  assert.equal(hit.meshName, 'visible-back', `应跳过隐藏前块并命中 visible-back，实际 ${hit.meshName}`);
 });
 
 

@@ -18,7 +18,6 @@ import {
   MIRROR_SIZE,
   mirrorMeshes,
   mirrorPlaneOf,
-  mirrorPlanes,
   mirrorRendering,
   mirrorUniform,
   reflectOff,
@@ -315,7 +314,6 @@ const beneathFogCandidates: { y: number; fog: THREE.Color }[] = [];
 const timeUniform = { value: 0 };
 /** 换帧相位（秒）；片元里用 `vbspWaterFrameMix` 在 A/B 两帧间淡化。 */
 const frameUniform = { value: 0 };
-let animating = false;
 
 
 // ── 屏幕空间折射 RT（源 `_rt_WaterRefraction` 的对应实现） ──
@@ -392,6 +390,9 @@ const _refrPrevClear = new THREE.Color();
 const _refrHidden: THREE.Mesh[] = [];
 /** 装配期登记的「水面 mesh → 顶面 bbox.max.y」，供 `renderRefraction` 直接遍历，避免每帧 traverse 整场景。 */
 const waterMeshes = new Map<THREE.Mesh, number>();
+/** 装配期缓存的「水面 mesh → 世界 AABB」，供视锥门控精确测试（避免巨型包围球跨层误触发）。 */
+const waterBoxes = new Map<THREE.Mesh, THREE.Box3>();
+const _waterBox = new THREE.Box3();
 /** 装配期预筛的 `*_beneath` 水下底面材质 → 水位高度，避免每帧对全部水材质跑正则。 */
 const beneathMaterials = new Map<THREE.MeshBasicMaterial, number>();
 
@@ -597,7 +598,6 @@ export function updateRefrUniforms(camera: THREE.Camera, renderer: THREE.WebGLRe
 
 const _waterFrustum = new THREE.Frustum();
 const _waterProjScreen = new THREE.Matrix4();
-const _waterSphere = new THREE.Sphere();
 
 /**
  * 视锥里出现了哪些水面高度（镜面网格的世界包围球 vs 相机视锥）。
@@ -618,13 +618,15 @@ export function visibleWaterHeights(camera: THREE.Camera): Set<number> | null {
   const out = new Set<number>();
   for (const [mesh, h] of mirrorMeshes) {
     if (!mesh.visible) continue;
-    mesh.updateMatrixWorld();
-    const geo = mesh.geometry;
-    if (!geo.boundingSphere) geo.computeBoundingSphere();
-    const bs = geo.boundingSphere;
-    if (!bs) return null;
-    _waterSphere.copy(bs).applyMatrix4(mesh.matrixWorld);
-    if (_waterFrustum.intersectsSphere(_waterSphere)) out.add(Math.round(h * 100) / 100);
+    let box = waterBoxes.get(mesh);
+    if (!box) {
+      mesh.updateMatrixWorld();
+      const geo = mesh.geometry;
+      if (!geo.boundingBox) geo.computeBoundingBox();
+      if (!geo.boundingBox) return null;
+      box = _waterBox.copy(geo.boundingBox).applyMatrix4(mesh.matrixWorld);
+    }
+    if (_waterFrustum.intersectsBox(box)) out.add(Math.round(h * 100) / 100);
   }
   return out;
 }
@@ -760,24 +762,16 @@ const dbg = {
   frameIndex: 0,
 };
 
-/** 水面唯一的动态：按 `AnimatedTexture` 的帧率换帧（默认 30fps，源 VMT 就是这个值）。 */
-function tick(): void {
-  // 只读 pin（T-650 v2 V0）：`__vbspWaterTimePin` 数字 = 把水面时间钉在该值，但**不停 tick**——
-  // 镜像/折射 RT 每帧照常重渲（refrDone/p.done 照常复位）。v1 用的 `__vbspWaterTime` 冻结会停掉
-  // 重排队 ⇒ RT 停在首帧状态（W0 实测：冻结版 debug5 全黑、暗水），A/B 截图一律用 pin 不用 freeze。
-  // `true` 等价于钉在 0；优先级 pin > frozen > 实时。
+/** 水面唯一的动态：由渲染主循环每帧同步推进 `AnimatedTexture`（不再另起独立 rAF 循环抢时间片）。 */
+export function advanceWaterAnimation(): void {
   const pin = typeof g.__vbspWaterTimePin === 'number'
     ? (g.__vbspWaterTimePin as number)
     : g.__vbspWaterTimePin === true ? 0 : null;
   const frozen = typeof g.__vbspWaterTime === 'number' ? (g.__vbspWaterTime as number) : null;
-  const t = pin !== null ? pin : (frozen ?? performance.now() / 1000);
-  // 兜底自愈：镜像/折射 pass 若因异常（或嵌套）把水面材质留在 `visible=false`，水面就会整个消失。
-  // 每帧（不在任何 RT pass 内时）恢复一次，成本只有几个材质。
-  if (!refrRendering && !mirrorRendering) {
-    for (const m of waterMaterials) if (!m.visible) m.visible = true;
-  }
-  timeUniform.value = t; // 秒；滚动速率由 `$scroll1/$scroll2` 在着色器里乘上去
-  frameUniform.value = t;  // 换帧：A/B 两帧按帧内相位交叉淡化（等价 `$bumpframe` 的整数换帧 + 淡化去跳变）
+  if (frozen !== null) return;
+  const t = pin !== null ? pin : (typeof performance !== 'undefined' ? performance.now() / 1000 : 0);
+  timeUniform.value = t;
+  frameUniform.value = t;
   const n = dudvFrameCount;
   const rate = frameRateOf();
   if (n > 1 && rate > 0) {
@@ -787,7 +781,6 @@ function tick(): void {
     dudvFrameB.value = ((i + 1) % n) / n;
     dudvFrameMix.value = Math.min(1, Math.max(0, phase - Math.floor(phase)));
   } else {
-    // 不做帧动画：固定在第 0 帧（`$scroll1/$scroll2` 的 UV 滚动负责"动"）
     dudvFrameA.value = 0;
     dudvFrameB.value = 0;
     dudvFrameMix.value = 0;
@@ -796,18 +789,6 @@ function tick(): void {
   dbg.frames = n;
   dbg.frameIndex = n > 1 && rate > 0 ? Math.floor(t * rate) % n : 0;
   (globalThis as { __vbspWaterDebug?: unknown }).__vbspWaterDebug = dbg;
-  for (const p of mirrorPlanes.values()) p.done = false; // 新的一帧 ⇒ 每层允许渲一次镜像 RT
-  if (frozen !== null) return; // 旧冻结语义原样保留：不再排队（管线停摆，只作诊断用）
-  requestAnimationFrame(tick); // pin 不在此列：继续排队 ⇒ RT 每帧重渲，管线与非冻结一致
-}
-
-function startAnimation(): void {
-  if (animating) return;
-  // 装配若发生在无 rAF 的环境（worker / 测试），只跳过逐帧动画，不抛错。
-  if (typeof requestAnimationFrame !== 'function') return;
-  animating = true;
-  (globalThis as { __vbspWaterStats?: unknown }).__vbspWaterStats = waterStats;
-  requestAnimationFrame(tick);
 }
 
 /** 水面注入：涟漪（基色/不透明度）+ 菲涅尔反射 + 距离雾色。 */
@@ -1081,7 +1062,8 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
   };
   material.needsUpdate = true;
   waterMaterials.add(material);
-  startAnimation();
+  (globalThis as { __vbspWaterStats?: unknown }).__vbspWaterStats = waterStats;
+  advanceWaterAnimation();
 }
 
 
@@ -1145,7 +1127,11 @@ export function applyWaterShaders(root: THREE.Object3D): number {
       const geom = mesh.geometry;
       if (!geom.boundingSphere) geom.computeBoundingSphere();
       if (!geom.boundingBox) geom.computeBoundingBox();
-      if (geom.boundingBox) waterMeshes.set(mesh, geom.boundingBox.max.y);
+      if (geom.boundingBox) {
+        waterMeshes.set(mesh, geom.boundingBox.max.y);
+        mesh.updateMatrixWorld();
+        waterBoxes.set(mesh, geom.boundingBox.clone().applyMatrix4(mesh.matrixWorld));
+      }
       const h = (geom.boundingSphere?.center.y ?? 0) + mesh.position.y;
       if (planes.length < 12) {
         planes.push({
@@ -1349,6 +1335,7 @@ export function hasRefractionTarget(): boolean {
 export function resetRefractionState(): void {
   waterMaterials.clear();
   waterMeshes.clear();
+  waterBoxes.clear();
   beneathMaterials.clear();
   materialHeight.clear();
   materialDepth.clear();

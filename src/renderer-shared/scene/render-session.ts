@@ -235,6 +235,8 @@ export class RenderSession {
   private clusterIndex: ClusterIndexStats | null = null;
   /** 逐三角形 index 当前是否处于「按房间裁过」的状态（关 PVS 时要还原）。 */
   private pvsIndexActive = false;
+  /** 高速擦过固体 leaf 接缝的去抖计数（≥2 帧才触发全量 restoreClusterIndex）。 */
+  private solidSeamFrames = 0;
   /** 主模型根（`mergeIntoNewRoot` 的产物；未合并时是 `assembleScene` 的 mapRoot）。 */
   private root: THREE.Object3D | null = null;
   /** 声明了 Source `TextureScroll` 的共享贴图（装配后收集一次，见 `frame()`）。 */
@@ -838,6 +840,7 @@ export class RenderSession {
     this.visibility.clear();
     this.pvsOverlay.reset();
     this.lastVisibility = null;
+    this.solidSeamFrames = 0;
     // 深度代理是主根的合并副本，换图后必须释放（几何可能几十 MB）。
     this.applyGlowDepthProxy(null);
     // 场景扩展（激光 / 粒子）也属于旧图，换图时一起释放。
@@ -1073,16 +1076,24 @@ export class RenderSession {
     const camInSolid = this.lastVisibility?.cameraInSolid === true;
     if (this.visibility.enablePvs && this.clusterIndex && this.clusterIndex.prepared > 0 && this.pvs) {
       if (cullAll) {
+        this.solidSeamFrames = 0;
         applyClusterIndex(this.visibility.items, this.pvs, -999);
         this.pvsIndexActive = true;
       } else if (camClusterValid && camCluster >= 0 && !camInSolid) {
+        this.solidSeamFrames = 0;
         applyClusterIndex(this.visibility.items, this.pvs, camCluster);
         this.pvsIndexActive = true;
       } else if (this.pvsIndexActive) {
-        // 相机嵌在实体里（或根本定位不到房间）：这一帧不按任何 PVS 行裁三角形，先还原全量。
-        // 穿透视角下隔壁房间的 PVS 行不包含「隔墙可见」的面，按它裁就会切出一块块三角破洞。
-        restoreClusterIndex(this.visibility.items);
-        this.pvsIndexActive = false;
+        if (camInSolid) {
+          this.solidSeamFrames++;
+          if (this.solidSeamFrames >= 2) {
+            restoreClusterIndex(this.visibility.items);
+            this.pvsIndexActive = false;
+          }
+        } else {
+          restoreClusterIndex(this.visibility.items);
+          this.pvsIndexActive = false;
+        }
       }
     } else if (this.pvsIndexActive) {
       // 关 PVS（面板/深链/区域着色）后必须把裁过的 index 还原：`applyClusterIndex` 只认相机 cluster，

@@ -54,6 +54,7 @@ import {
   resetMirrorState,
 } from './water/planar-reflect.js';
 import {
+  advanceWaterAnimation,
   cullBeneathMaterials,
   hasRefractionTarget,
   renderRefraction,
@@ -115,6 +116,7 @@ function refrCadence(level: number): number {
  * 镜面 RT 的降频计数（task-33 C1 降级点②）。每帧推进，只在真正渲过镜面之后清零。
  */
 let mirrorSinceRender = 0;
+let mirrorRenderSeq = 0;
 
 /**
  * 当前镜面 RT 的重渲间隔（帧）。默认 2 = 隔帧。
@@ -227,7 +229,9 @@ export function renderWaterFramePasses(
   camera: THREE.Camera,
   frame?: RenderFrameContext,
 ): void {
-  if (waterMaterials.size === 0 || refrOnUniform.value <= 0.5) return;
+  if (waterMaterials.size === 0) return;
+  advanceWaterAnimation();
+  if (refrOnUniform.value <= 0.5) return;
   // 水下底面（`*_beneath`，源 `$bottommaterial`）的面朝下：相机在水面之上时它们被背面剔除，
   // 但每块仍各占一次 draw（boreas 水面 160 块 × 1 槽 = 160 draw，占全帧 412 的 39%）。
   // 这里按「材质高度 vs 相机 y」直接置 `visible`，像素层面等价于背面剔除。
@@ -298,22 +302,26 @@ export function renderWaterFramePasses(
     return; // 本帧只跑这一趟
   }
   if (!mirrorNow) return;
-  mirrorSinceRender = 0;
-  // 镜面 RT 同步去嵌套（T-650 v4：与折射同因——嵌套 render 污染主渲染状态且随视角排序变化）。
-  // 只渲「这一帧真的在画面里」的水面层：surf_666 有 5 层水，每层一趟整场景，
-  // 全渲是 3.4ms/帧（俯仰扫视掉到 230fps 的主因）；看不见的层保留上一帧 RT。
-  // 折射默认 cadence 2、镜面默认 cadence 2；预算升到 2 级时镜面降到 3（task-33 C1 降级点②，
-  // `__vbspWaterMirrorBudget=false` 关降级、`__vbspWaterMirrorCadence` 可强制数值）。
-  const tMirror = performance.now();
+  // 每帧最多只渲 1 层镜面 RT（轮流挑最陈旧的可见层），防止多层水体（如 surf_666 5 层水）
+  // 在同一帧扎堆执行 2~5 趟整场景渲染把单帧拉爆。若还有其它可见层待更新，保持 mirrorSinceRender
+  // 且暂不标 pose，下一帧立刻轮到下一层。
+  let stalest: (typeof mirrorPlanes extends Map<number, infer V> ? V : never) | null = null;
+  let visibleCount = 0;
   for (const p of mirrorPlanes.values()) {
-    if (p.done) continue;
     if (visibleHeights && !visibleHeights.has(Math.round(p.height * 100) / 100)) continue;
-    p.done = true;
-    renderMirrorPlane(renderer, scene, camera, p, waterMaterials);
+    visibleCount++;
+    if (!stalest || p.lastRenderedSeq < stalest.lastRenderedSeq) stalest = p;
   }
+  if (!stalest) return;
+  const tMirror = performance.now();
+  renderMirrorPlane(renderer, scene, camera, stalest, waterMaterials);
+  stalest.lastRenderedSeq = ++mirrorRenderSeq;
   recordWaterCost(performance.now() - tMirror);
   waterBudgetStats.passes++;
-  markMirrorPose(camera); // 同上：跳过的帧不标记，下一帧补渲
+  if (visibleCount <= 1 || mirrorRenderSeq % visibleCount === 0) {
+    mirrorSinceRender = 0;
+    markMirrorPose(camera);
+  }
 }
 
 
@@ -393,6 +401,7 @@ export function resetWaterShaders(): void {
   resetRefractionState();
   refrSinceRender = 0;
   mirrorSinceRender = 0;
+  mirrorRenderSeq = 0;
   _rtLastPos.set(Number.NaN, Number.NaN, Number.NaN);
   _mirrorLastPos.set(Number.NaN, Number.NaN, Number.NaN);
 }

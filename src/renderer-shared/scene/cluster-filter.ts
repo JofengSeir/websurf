@@ -309,18 +309,29 @@ function rebuildIncrementalFull(
   st.visTris = n;
 }
 
-/** 增量：只翻本帧变了的 cluster 名下的三角形。返回可见三角形数。 */
+interface FlipResult {
+  dirty: boolean;
+  minPos: number;
+  maxPos: number;
+  changedDrawRange: boolean;
+}
+
+/** 增量：只翻本帧变了的 cluster 名下的三角形，并记录 outIndex 实际被改写的最小/最大槽位。 */
 function flipChangedClusters(
   st: ClusterIndexState,
   row: Uint8Array | null,
   pvs: PvsFilterQuery,
   changed: readonly number[],
   epoch: number,
-): void {
+): FlipResult {
   const inc = st.incremental;
-  if (!inc) return;
+  if (!inc) return { dirty: false, minPos: 0, maxPos: -1, changedDrawRange: false };
   const { origIndex, outIndex } = st;
-  let visTris = st.visTris;
+  const prevVisTris = st.visTris;
+  let visTris = prevVisTris;
+  let dirty = false;
+  let minPos = Number.POSITIVE_INFINITY;
+  let maxPos = -1;
   for (let ci = 0; ci < changed.length; ci++) {
     const slot = locateCluster(inc.clusterKeys, changed[ci]);
     if (slot < 0) continue;
@@ -332,13 +343,27 @@ function flipChangedClusters(
       const on = triVisible(st, t, row, pvs);
       const pos = inc.posOfTri[t];
       if (on) {
-        if (pos < 0) visTris = insertTri(inc, outIndex, origIndex, t, visTris);
+        if (pos < 0) {
+          const writePos = visTris;
+          visTris = insertTri(inc, outIndex, origIndex, t, visTris);
+          dirty = true;
+          if (writePos < minPos) minPos = writePos;
+          if (writePos > maxPos) maxPos = writePos;
+        }
       } else if (pos >= 0) {
+        const last = visTris - 1;
         visTris = removeTri(inc, outIndex, t, visTris);
+        // 只有删除的不是末尾元素时才会把末尾元素搬到 pos 位置；末尾删除只需缩 drawRange。
+        if (pos !== last) {
+          dirty = true;
+          if (pos < minPos) minPos = pos;
+          if (pos > maxPos) maxPos = pos;
+        }
       }
     }
   }
   st.visTris = visTris;
+  return { dirty, minPos, maxPos, changedDrawRange: visTris !== prevVisTris };
 }
 
 /**
@@ -634,6 +659,11 @@ export function applyClusterIndex(
   for (const item of items) {
     const st = (item.mesh.userData as { clusterIndex?: ClusterIndexState }).clusterIndex;
     if (!st) continue;
+    // 距离场外的远景块暂不重建也不上传，等进入视距后再补齐。
+    if (item.mesh.userData.lodLevel === 2) {
+      skipped++;
+      continue;
+    }
     if (st.lastCluster === camCluster) continue;
     const geom = item.mesh.geometry;
     const inc = st.incremental;
@@ -649,17 +679,28 @@ export function applyClusterIndex(
       const canFlip =
         row !== null && !pendingFull && st.lastCluster !== -1 && st.rowVersion === rowVersion - 1;
       if (canFlip) {
-        flipChangedClusters(st, row, pvs, pendingChanged, epoch);
+        const res = flipChangedClusters(st, row, pvs, pendingChanged, epoch);
         flipped++;
+        if (res.dirty && st.visTris > 0) {
+          if (typeof st.attr.clearUpdateRanges === 'function') {
+            st.attr.clearUpdateRanges();
+            st.attr.addUpdateRange(res.minPos * 3, (res.maxPos - res.minPos + 1) * 3);
+          }
+          st.attr.needsUpdate = true;
+        }
       } else {
         rebuildIncrementalFull(st, row, pvs);
         rebuilt++;
+        if (st.visTris > 0) {
+          if (typeof st.attr.clearUpdateRanges === 'function') {
+            st.attr.clearUpdateRanges();
+            st.attr.addUpdateRange(0, st.visTris * 3);
+          }
+          st.attr.needsUpdate = true;
+        }
       }
       st.lastCluster = camCluster;
       st.rowVersion = rowVersion;
-      // 注：这里仍是整段 index 上传（three 侧按 attribute 粒度脏标记）；后续可用
-      // `attr.addUpdateRange` 收窄到 [0, visTris*3) 以减少换房间那一下的 GPU 上传量。
-      st.attr.needsUpdate = true;
       geom.setDrawRange(0, st.visTris * 3);
       // 距离场优先：`visibility-controller` 已把场外块标成 LOD_FAR，这里不能把它重新点亮。
       item.mesh.visible = st.visTris > 0 && item.mesh.userData.lodLevel === 0;
@@ -717,7 +758,13 @@ export function applyClusterIndex(
     st.visTris = n / 3;
     st.lastCluster = camCluster;
     st.rowVersion = rowVersion;
-    attr.needsUpdate = true;
+    if (n > 0) {
+      if (typeof attr.clearUpdateRanges === 'function') {
+        attr.clearUpdateRanges();
+        attr.addUpdateRange(0, n);
+      }
+      attr.needsUpdate = true;
+    }
     geom.setDrawRange(0, n);
     // 距离场优先：`visibility-controller` 已把场外块标成 LOD_FAR，这里不能把它重新点亮。
     item.mesh.visible = st.visTris > 0 && item.mesh.userData.lodLevel === 0;
@@ -749,6 +796,7 @@ export function restoreClusterIndex(items: readonly { mesh: THREE.Mesh }[]): num
     if (!st) continue;
     const geom = item.mesh.geometry;
     const total = st.origIndex.length;
+    if (st.lastCluster === -1 && st.visTris === total / 3) continue;
     st.outIndex.set(st.origIndex);
     if (st.incremental) {
       // 增量状态复位：identity 顺序 = 全部三角形都可见（与 outIndex 全量一致）。
@@ -767,6 +815,7 @@ export function restoreClusterIndex(items: readonly { mesh: THREE.Mesh }[]): num
       if (count > 0) geom.addGroup(start, count, g.materialIndex);
       start += count;
     }
+    if (typeof st.attr.clearUpdateRanges === 'function') st.attr.clearUpdateRanges();
     st.attr.needsUpdate = true;
     st.visTris = total / 3;
     st.lastCluster = -1;
