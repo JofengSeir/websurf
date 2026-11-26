@@ -115,6 +115,7 @@ function buildSteps(name) {
       args: ['src/scripts/check-entity-cycles.mjs'],
     },
     { kind: 'node', label: 'Render parity gate (check-render-parity.mjs)', args: ['src/scripts/check-render-parity.mjs'] },
+    { kind: 'node', label: 'Visual loop contract (check-visual-loop.mjs)', args: ['src/scripts/check-visual-loop.mjs'] },
     { kind: 'node', label: 'Shader anchors gate (check-shader-anchors.mjs)', args: ['src/scripts/check-shader-anchors.mjs'] },
     {
       kind: 'node',

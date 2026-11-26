@@ -43,7 +43,7 @@
 仓库根提供跨 Shell 验证器 `src/scripts/verify.mjs`（红灯即停，避免 PowerShell 5.1 无 `&&` 的误操作，并自动适配 `.wasm-pack-cache` 与 Rust `msvc` 工具链）：
 
 ```bash
-npm run verify:fast            # ~10s：三端 typecheck + test:ts + render-parity / shader-anchors / config-sync / entity-cycles
+npm run verify:fast            # ~10s：三端 typecheck + test:ts + render-parity / shader-anchors / config-sync / entity-cycles / visual-loop
 npm run verify:rust            # ~5s：websurf-phys + websurf-wasm-core 宿主机单测（Windows 自动切 msvc）
 npm run verify:ts              # ~20s：三端 build:ts（含 worker.js）+ verify:fast + 共享产物指纹
 npm run verify:full            # 全量：rust + 三端 build:wasm + check:api + ts + 锁/导出/GLB 门禁
@@ -88,10 +88,13 @@ cargo +stable-x86_64-pc-windows-msvc test -p websurf-wasm-core
 
 - 三端公共渲染装配全部在 `src/renderer-shared/scene/render-session.ts`，`apps/*/src` 不得复制渲染步骤或物理副作用。
 - 静态门禁：`node src/scripts/check-render-parity.mjs`（已包含在 `verify:fast`）。
+- 三端视觉线契约：`node src/scripts/check-visual-loop.mjs`（已包含在 `verify:fast` / `test:ts`）——
+  `feedInput` / `mousemove` 只准入队，视角增量必须由计算步（game `stepVisual`、debug
+  `presentation.step`）或渲染帧（viewer `FlyCam.update`）消费；输入回调直接写相机位姿/视角即红灯。
 
 ### 2.4 CI
 
-CI 跑 `.github/workflows/ci-gates.yml`：`cargo test -p websurf-phys`、`cargo test -p websurf-wasm-core`（宿主；缺夹具时相关测试自行跳过；D-134a 起带 `--features phys-debug` 再跑一遍，`verify.mjs rust` 同样两遍）、viewer `check-wasm-api --source-only` 源码契约、`check-render-parity.mjs`、`check-shader-anchors.mjs`（校验 `three@0.165.0` 的 `ShaderChunk`/`ShaderLib` 锚点 + 反空洞守卫）、三端 `typecheck`、`test-ts-shared.mjs`（`node:test`：`sim-clock` / `shared-state` / `config-sync` 纯逻辑单测）+ `check-entity-io.mjs`（合成自测 A1–A20；CI 无 `test/maps` 时地图组 SKIP 并 exit 0）+ `check-entity-start-solid.mjs`（Rust ↔ TS 的 `start-solid-cases.json` 跨端单源契约）+ `check-entity-cycles.mjs`（`src/ts-shared/entity` 的 import 有向图无环；反空洞守卫 文件 ≥ 10 / 边 ≥ 20）、三端 wasm 构建 + `check:api` + 共享产物指纹 / 锁、workspace 与导出一致性（`check-lock-consistency.mjs`：唯一根 `Cargo.lock`、三端 `apps/*/Cargo.{toml,lock}` 不得复生、根 workspace members 6 个、wasm-bindgen/serde/serde_json/js-sys 单源；该门禁的 `DEP_GRAPH_EXPORTS`——依赖图偶然带出的 wasm-bindgen 导出——采用**可选登记**：出现必须已登记、消失不报错，绑定 features 推导的差集仍逐名严格比对）/ GLB 一致性（GLB 无地图夹具时 SKIP）；wasm 构建前安装 Binaryen `version_133`（`ci-gates.yml`/`deploy-pages.yml` 用缓存 + 下载 tar 放到 `~/binaryen`，`wasm-opt -Os` 由 `Cargo.toml` 启用）；debug/game 各有一份 wasm+TS 构建冒烟。CI 只随 push `main` 与 PR 跑（推 `dev` 不触发、纯 `*.md` 改动不触发）。
+CI 跑 `.github/workflows/ci-gates.yml`：`cargo test -p websurf-phys`、`cargo test -p websurf-wasm-core`（宿主；缺夹具时相关测试自行跳过；D-134a 起带 `--features phys-debug` 再跑一遍，`verify.mjs rust` 同样两遍）、viewer `check-wasm-api --source-only` 源码契约、`check-render-parity.mjs`、`check-visual-loop.mjs`（三端视觉线契约：输入只入队、视角在计算/呈现循环消费）、`check-shader-anchors.mjs`（校验 `three@0.165.0` 的 `ShaderChunk`/`ShaderLib` 锚点 + 反空洞守卫）、三端 `typecheck`、`test-ts-shared.mjs`（`node:test`：`sim-clock` / `shared-state` / `config-sync` 纯逻辑单测）+ `check-entity-io.mjs`（合成自测 A1–A20；CI 无 `test/maps` 时地图组 SKIP 并 exit 0）+ `check-entity-start-solid.mjs`（Rust ↔ TS 的 `start-solid-cases.json` 跨端单源契约）+ `check-entity-cycles.mjs`（`src/ts-shared/entity` 的 import 有向图无环；反空洞守卫 文件 ≥ 10 / 边 ≥ 20）、三端 wasm 构建 + `check:api` + 共享产物指纹 / 锁、workspace 与导出一致性（`check-lock-consistency.mjs`：唯一根 `Cargo.lock`、三端 `apps/*/Cargo.{toml,lock}` 不得复生、根 workspace members 6 个、wasm-bindgen/serde/serde_json/js-sys 单源；该门禁的 `DEP_GRAPH_EXPORTS`——依赖图偶然带出的 wasm-bindgen 导出——采用**可选登记**：出现必须已登记、消失不报错，绑定 features 推导的差集仍逐名严格比对）/ GLB 一致性（GLB 无地图夹具时 SKIP）；wasm 构建前安装 Binaryen `version_133`（`ci-gates.yml`/`deploy-pages.yml` 用缓存 + 下载 tar 放到 `~/binaryen`，`wasm-opt -Os` 由 `Cargo.toml` 启用）；debug/game 各有一份 wasm+TS 构建冒烟。CI 只随 push `main` 与 PR 跑（推 `dev` 不触发、纯 `*.md` 改动不触发）。
 
 **提交前**至少跑与改动对应档位的 `npm run verify:*`；**没跑成功的项要在提交信息里写清楚**。
 

@@ -13,6 +13,9 @@
 #                     只读源码、不装 wasm 工具链、不建 pkg ⇒ 最便宜的一道，D-022 选项 (a)）
 #   render-parity   — `check-render-parity.mjs`：三端渲染入口必须走共享 RenderSession，
 #                     apps 内不得再出现渲染器/装配/天空/可见性/画质等步骤（2026-10-23）
+#   visual-loop     — `check-visual-loop.mjs`：三端视觉线契约——feedInput/mousemove 只准入队，
+#                     视角增量必须由计算步（game stepVisual / debug presentation.step）或
+#                     渲染帧（viewer FlyCam.update）消费（2026-11-26）
 #   shader-anchors  — `check-shader-anchors.mjs`：src/renderer-shared/shader 里的 `#include <chunk>`
 #                     锚点必须真实存在于 three 0.165.0 的 ShaderChunk 且被某个 ShaderLib 模板 include，
 #                     否则运行时字符串替换静默失效（不抛错、只是效果没了）；带反空洞守卫（2026-11-25）
@@ -136,6 +139,9 @@ jobs:
 
       - name: apps must not reimplement shared render steps
         run: node src/scripts/check-render-parity.mjs
+
+      - name: visual loop contract (input queues only; compute/render consumes)
+        run: node src/scripts/check-visual-loop.mjs
 
   # ── 三端 TS 类型检查（tsc；renderer-shared 依赖仓库根 three，必须先装根级再装工程级）──
   ts-typecheck:
