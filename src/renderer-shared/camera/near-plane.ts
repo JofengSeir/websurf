@@ -136,6 +136,9 @@ export class NearPlaneController {
   private readonly _nearRaycaster = new THREE.Raycaster();
   private readonly _nearInv = new THREE.Matrix4();
   private readonly _nearOriginL = new THREE.Vector3();
+  private readonly _nearInstMat = new THREE.Matrix4();
+  private readonly _nearInstWorld = new THREE.Matrix4();
+  private readonly _nearInstBox = new THREE.Box3();
   /** 上一次探测时的相机位置/朝向/探测距离（用于「几乎没动就复用」的滞回，见 update 第 0 步）。 */
   private readonly _nearLastOrigin = new THREE.Vector3(NaN, NaN, NaN);
   private readonly _nearLastDir = new THREE.Vector3();
@@ -160,8 +163,15 @@ export class NearPlaneController {
   private worldBoxOf(mesh: THREE.Mesh): THREE.Box3 | null {
     const geom = mesh.geometry as THREE.BufferGeometry | null;
     if (!geom) return null;
-    if (!geom.boundingBox) geom.computeBoundingBox();
-    const bb = geom.boundingBox;
+    let bb: THREE.Box3 | null;
+    if ((mesh as unknown as { isInstancedMesh?: boolean }).isInstancedMesh) {
+      const inst = mesh as THREE.InstancedMesh;
+      if (!inst.boundingBox) inst.computeBoundingBox();
+      bb = inst.boundingBox;
+    } else {
+      if (!geom.boundingBox) geom.computeBoundingBox();
+      bb = geom.boundingBox;
+    }
     if (!bb) return null;
     const me = mesh.matrixWorld.elements;
     const cached = mesh.userData.__nearBox as { id: string; box: THREE.Box3; mat: Float64Array } | undefined;
@@ -282,7 +292,46 @@ export class NearPlaneController {
     const geom = mesh.geometry as THREE.BufferGeometry;
     const pos = geom.getAttribute('position') as THREE.BufferAttribute | undefined;
     if (!pos) return Infinity;
-    const m = mesh.matrixWorld;
+    if ((mesh as unknown as { isInstancedMesh?: boolean }).isInstancedMesh) {
+      const inst = mesh as THREE.InstancedMesh;
+      if (!geom.boundingBox) geom.computeBoundingBox();
+      const lbb = geom.boundingBox;
+      const ox = this._nearOrigin.x;
+      const oy = this._nearOrigin.y;
+      const oz = this._nearOrigin.z;
+      const probeSq = probe * probe;
+      let best = Infinity;
+      for (let i = 0; i < inst.count; i++) {
+        inst.getMatrixAt(i, this._nearInstMat);
+        this._nearInstWorld.multiplyMatrices(mesh.matrixWorld, this._nearInstMat);
+        if (lbb) {
+          this._nearInstBox.copy(lbb).applyMatrix4(this._nearInstWorld);
+          const b = this._nearInstBox;
+          const dx = ox < b.min.x ? b.min.x - ox : ox > b.max.x ? ox - b.max.x : 0;
+          const dy = oy < b.min.y ? b.min.y - oy : oy > b.max.y ? oy - b.max.y : 0;
+          const dz = oz < b.min.z ? b.min.z - oz : oz > b.max.z ? oz - b.max.z : 0;
+          if (dx * dx + dy * dy + dz * dz > probeSq) continue;
+        }
+        const d = this.probeChunkWithMatrix(mesh, geom, pos, this._nearInstWorld, Math.min(probe, best), stopDist);
+        if (Number.isNaN(d)) return NaN;
+        if (d < best) {
+          best = d;
+          if (stopDist > 0 && best <= stopDist) return best;
+        }
+      }
+      return best;
+    }
+    return this.probeChunkWithMatrix(mesh, geom, pos, mesh.matrixWorld, probe, stopDist);
+  }
+
+  private probeChunkWithMatrix(
+    mesh: THREE.Mesh,
+    geom: THREE.BufferGeometry,
+    pos: THREE.BufferAttribute,
+    m: THREE.Matrix4,
+    probe: number,
+    stopDist: number,
+  ): number {
     const e = m.elements;
     // 用 3 个基向量的长度平方与正交点积判定等比正交变换（支持任意旋转的实体/模型）
     const sx2 = e[0] * e[0] + e[1] * e[1] + e[2] * e[2];

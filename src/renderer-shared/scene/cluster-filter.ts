@@ -448,6 +448,7 @@ export function prepareClusterIndex(
   };
   for (const item of items) {
     const mesh = item.mesh;
+    if ((mesh as unknown as { isInstancedMesh?: boolean }).isInstancedMesh) { why('instanced'); continue; }
     const geom = mesh.geometry as THREE.BufferGeometry | undefined;
     if (!geom) { why('geom'); continue; }
     if ((mesh.userData as { clusterIndex?: ClusterIndexState }).clusterIndex) continue;

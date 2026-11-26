@@ -269,7 +269,88 @@ impl ModelIntegrator {
                 let mesh_index = gltf.meshes.len() as u32;
                 gltf.meshes.push(mesh);
 
-                for (seq, &pi) in idxs.iter().enumerate() {
+                let mut static_idxs: Vec<usize> = Vec::new();
+                let mut regular_idxs: Vec<usize> = Vec::new();
+                for &pi in idxs {
+                    if vlight.is_none() && placements[pi].source.is_none() {
+                        static_idxs.push(pi);
+                    } else {
+                        regular_idxs.push(pi);
+                    }
+                }
+                if static_idxs.len() == 1 {
+                    regular_idxs.push(static_idxs.pop().unwrap());
+                }
+
+                if static_idxs.len() >= 2 {
+                    while buffer.len() % 4 != 0 {
+                        buffer.push(0);
+                    }
+                    let bv_start = buffer.len() as u64;
+                    let mut has_any_cube = false;
+                    for &pi in &static_idxs {
+                        let p = &placements[pi];
+                        for f in p.translation {
+                            buffer.extend_from_slice(&f.to_le_bytes());
+                        }
+                        let rot = p.rotation.unwrap_or([0.0, 0.0, 0.0, 1.0]);
+                        for f in rot {
+                            buffer.extend_from_slice(&f.to_le_bytes());
+                        }
+                        let scl = p.scale.unwrap_or([1.0, 1.0, 1.0]);
+                        for f in scl {
+                            buffer.extend_from_slice(&f.to_le_bytes());
+                        }
+                        if let Some(c) = p.ambient_cube {
+                            has_any_cube = true;
+                            buffer.extend_from_slice(&1.0f32.to_le_bytes());
+                            for f in c {
+                                buffer.extend_from_slice(&f.to_le_bytes());
+                            }
+                        } else {
+                            buffer.extend_from_slice(&0.0f32.to_le_bytes());
+                            for _ in 0..18 {
+                                buffer.extend_from_slice(&0.0f32.to_le_bytes());
+                            }
+                        }
+                    }
+                    let bv_len = buffer.len() as u64 - bv_start;
+                    let bv_index = gltf.buffer_views.len() as u32;
+                    gltf.buffer_views.push(json::buffer::View {
+                        buffer: Index::new(0),
+                        byte_length: USize64(bv_len),
+                        byte_offset: Some(USize64(bv_start)),
+                        byte_stride: None,
+                        extensions: Default::default(),
+                        extras: Default::default(),
+                        name: Some(format!("{model_filename}#instanced")),
+                        target: None,
+                    });
+                    let inst_extras = serde_json::json!({
+                        "vbsp_instanced_props": {
+                            "bufferView": bv_index,
+                            "count": static_idxs.len(),
+                            "strideFloats": 29,
+                            "hasAnyCube": has_any_cube,
+                        }
+                    });
+                    gltf.nodes.push(Node {
+                        camera: None,
+                        children: None,
+                        extensions: Default::default(),
+                        matrix: None,
+                        mesh: Some(Index::new(mesh_index)),
+                        extras: serde_json::value::RawValue::from_string(inst_extras.to_string()).ok(),
+                        name: Some(format!("{model_filename}#instanced")),
+                        rotation: None,
+                        scale: None,
+                        translation: None,
+                        skin: None,
+                        weights: None,
+                    });
+                }
+
+                for (seq, &pi) in regular_idxs.iter().enumerate() {
                     let p = &placements[pi];
                     let mut extras = serde_json::Map::new();
                     if let Some(c) = p.ambient_cube {
@@ -1846,6 +1927,68 @@ mod tests {
                 hmax.z
             );
         }
+    }
+
+    #[test]
+    fn instanced_static_prop_binary_stride_and_alignment() {
+        // 验证 29 个 f32（116 字节）紧凑二进制布局与 4 字节对齐契约
+        let p0 = Placement {
+            translation: [10.0, 20.0, 30.0],
+            rotation: Some([0.0, 0.0, 0.0, 1.0]),
+            scale: Some([1.0, 1.0, 1.0]),
+            solid: Some(0),
+            ambient_cube: Some([0.5; 18]),
+            vertex_lighting: None,
+            source: None,
+        };
+        let p1 = Placement {
+            translation: [40.0, 50.0, 60.0],
+            rotation: None,
+            scale: None,
+            solid: Some(0),
+            ambient_cube: None,
+            vertex_lighting: None,
+            source: None,
+        };
+        let mut buf: Vec<u8> = vec![1, 2, 3]; // 故意非 4 字节对齐
+        while buf.len() % 4 != 0 {
+            buf.push(0);
+        }
+        let start = buf.len();
+        assert_eq!(start % 4, 0);
+        for p in [&p0, &p1] {
+            for f in p.translation {
+                buf.extend_from_slice(&f.to_le_bytes());
+            }
+            for f in p.rotation.unwrap_or([0.0, 0.0, 0.0, 1.0]) {
+                buf.extend_from_slice(&f.to_le_bytes());
+            }
+            for f in p.scale.unwrap_or([1.0, 1.0, 1.0]) {
+                buf.extend_from_slice(&f.to_le_bytes());
+            }
+            if let Some(c) = p.ambient_cube {
+                buf.extend_from_slice(&1.0f32.to_le_bytes());
+                for f in c {
+                    buf.extend_from_slice(&f.to_le_bytes());
+                }
+            } else {
+                buf.extend_from_slice(&0.0f32.to_le_bytes());
+                for _ in 0..18 {
+                    buf.extend_from_slice(&0.0f32.to_le_bytes());
+                }
+            }
+        }
+        assert_eq!(buf.len() - start, 2 * 29 * 4);
+        let f32_at = |idx: usize| -> f32 {
+            let o = start + idx * 4;
+            f32::from_le_bytes([buf[o], buf[o + 1], buf[o + 2], buf[o + 3]])
+        };
+        assert_eq!(f32_at(0), 10.0);
+        assert_eq!(f32_at(6), 1.0);
+        assert_eq!(f32_at(10), 1.0);
+        assert_eq!(f32_at(11), 0.5);
+        assert_eq!(f32_at(29 + 0), 40.0);
+        assert_eq!(f32_at(29 + 10), 0.0);
     }
 }
 

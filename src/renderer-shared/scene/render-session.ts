@@ -1624,6 +1624,8 @@ export class RenderSession {
 
   /** 判某个 mesh 是否落在指定 BSP cluster（包围盒中心 + 6 个 ±r 轴点；全仓唯一实现）。 */
   private meshInCluster(mesh: THREE.Mesh, cluster: number): boolean {
+    if ((mesh.userData as { __vbspSkyInstanced?: boolean }).__vbspSkyInstanced === true) return true;
+    if ((mesh as unknown as { isInstancedMesh?: boolean }).isInstancedMesh) return false;
     if (!this.pvs) return false;
     if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
     const box = mesh.geometry.boundingBox;

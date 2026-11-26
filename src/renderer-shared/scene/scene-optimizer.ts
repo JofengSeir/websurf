@@ -531,6 +531,10 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
     const m = obj as THREE.Mesh;
     if (!m.isMesh) return;
     if (!m.geometry || !m.geometry.attributes.position) return;
+    if ((m as unknown as { isInstancedMesh?: boolean }).isInstancedMesh) {
+      keptMeshes.push(m);
+      return;
+    }
     // 需要保留模型身份的对象（旋钮/符文盘这类要单独做变换的实体）：烘焙到世界空间后
     // 原样保留，不进合并块。口径与下面的多材质保留一致（顶点已在世界空间、变换清单位阵），
     // 方便调用方之后按自身 pivot 重新挂载。
@@ -826,6 +830,12 @@ export function mergeStatsOf(root: THREE.Object3D | null | undefined): MergeStat
  */
 export function padBoundingSpheres(root: THREE.Object3D): void {
   for (const child of root.children) {
+    if ((child as unknown as { isInstancedMesh?: boolean }).isInstancedMesh) {
+      const inst = child as THREE.InstancedMesh;
+      if (!inst.boundingSphere) inst.computeBoundingSphere();
+      if (inst.boundingSphere) inst.boundingSphere.radius *= FRUSTUM_PAD;
+      continue;
+    }
     const g = (child as THREE.Mesh).geometry;
     if (!g) continue;
     g.computeBoundingSphere();

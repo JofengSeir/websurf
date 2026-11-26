@@ -18,9 +18,14 @@ export function disposeObject(obj: THREE.Object3D): void {
     const mesh = child as THREE.Mesh;
     if (!mesh.isMesh) return;
     mesh.geometry?.dispose();
+    if ((mesh as unknown as { isInstancedMesh?: boolean }).isInstancedMesh) {
+      (mesh as unknown as THREE.InstancedMesh).dispose?.();
+    }
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     for (const mat of materials) {
       if (!mat) continue;
+      const ambTex = (mat.userData as { __vbspAmbCubeTex?: THREE.Texture } | undefined)?.__vbspAmbCubeTex;
+      if (ambTex?.isTexture) ambTex.dispose();
       // 释放材质引用的各张贴图（列表覆盖 map/lightMap/emissive 等常用槽位；重复 dispose 幂等）
       for (const key of [
         'map',

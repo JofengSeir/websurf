@@ -250,6 +250,17 @@ export class VisibilityController {
       const mesh = obj as THREE.Mesh;
       if (!mesh.isMesh) return;
       if (mesh.layers.isEnabled(SKY_LAYER)) return; // 天空层由天空相机画，主相机不参与剔除
+      if ((mesh as unknown as { isInstancedMesh?: boolean }).isInstancedMesh) {
+        const inst = mesh as THREE.InstancedMesh;
+        if (!inst.boundingSphere) inst.computeBoundingSphere();
+        if (!inst.boundingBox) inst.computeBoundingBox();
+        const bs = inst.boundingSphere;
+        if (!bs) return;
+        mesh.userData.lodLevel = LOD_NEAR;
+        const center = bs.center.clone().applyMatrix4(mesh.matrixWorld);
+        this.items.push({ mesh, center, radius: bs.radius, clusterIds: [] });
+        return;
+      }
       const geom = mesh.geometry as THREE.BufferGeometry;
       if (!geom.boundingSphere) geom.computeBoundingSphere();
       const bs = geom.boundingSphere;
@@ -326,6 +337,31 @@ export class VisibilityController {
         continue;
       }
       const set = new Set<number>();
+      if ((item.mesh as unknown as { isInstancedMesh?: boolean }).isInstancedMesh) {
+        const inst = item.mesh as THREE.InstancedMesh;
+        const arr = inst.instanceMatrix.array as Float32Array;
+        const mw = inst.matrixWorld;
+        for (let k = 0; k < inst.count; k++) {
+          const base = k * 16;
+          this.tmpPoint.set(arr[base + 12], arr[base + 13], arr[base + 14]).applyMatrix4(mw);
+          let cl = pvs.getClusterAt({ x: this.tmpPoint.x, y: this.tmpPoint.y, z: this.tmpPoint.z });
+          if (cl < 0) {
+            for (const [ax, ay, az] of PROBE_OFFSETS) {
+              cl = pvs.getClusterAt({
+                x: this.tmpPoint.x + ax,
+                y: this.tmpPoint.y + ay,
+                z: this.tmpPoint.z + az,
+              });
+              if (cl >= 0) break;
+            }
+          }
+          if (cl >= 0) set.add(cl);
+        }
+        item.clusterIds = [...set];
+        item.clusterGeom = (inst.geometry as THREE.BufferGeometry | undefined)?.uuid ?? '';
+        if (item.clusterIds.length > 0) mapped++;
+        continue;
+      }
       const geom = (item.mesh.geometry as THREE.BufferGeometry | undefined);
       const pos = geom?.attributes.position as THREE.BufferAttribute | undefined;
       const nrm = geom?.attributes.normal as THREE.BufferAttribute | undefined;
@@ -578,16 +614,30 @@ export class VisibilityController {
           }
         }
         if (!boundsValid) {
-          if (!g.boundingSphere) g.computeBoundingSphere();
-          const bs = g.boundingSphere;
-          if (bs) {
-            item.center.copy(bs.center).applyMatrix4(item.mesh.matrixWorld);
-            item.radius = bs.radius;
-          }
-          if (!g.boundingBox) g.computeBoundingBox();
-          if (g.boundingBox) {
-            if (!item.box) item.box = new THREE.Box3();
-            item.box.copy(g.boundingBox).applyMatrix4(item.mesh.matrixWorld);
+          if ((item.mesh as unknown as { isInstancedMesh?: boolean }).isInstancedMesh) {
+            const inst = item.mesh as THREE.InstancedMesh;
+            if (!inst.boundingSphere) inst.computeBoundingSphere();
+            if (!inst.boundingBox) inst.computeBoundingBox();
+            if (inst.boundingSphere) {
+              item.center.copy(inst.boundingSphere.center).applyMatrix4(item.mesh.matrixWorld);
+              item.radius = inst.boundingSphere.radius;
+            }
+            if (inst.boundingBox) {
+              if (!item.box) item.box = new THREE.Box3();
+              item.box.copy(inst.boundingBox).applyMatrix4(item.mesh.matrixWorld);
+            }
+          } else {
+            if (!g.boundingSphere) g.computeBoundingSphere();
+            const bs = g.boundingSphere;
+            if (bs) {
+              item.center.copy(bs.center).applyMatrix4(item.mesh.matrixWorld);
+              item.radius = bs.radius;
+            }
+            if (!g.boundingBox) g.computeBoundingBox();
+            if (g.boundingBox) {
+              if (!item.box) item.box = new THREE.Box3();
+              item.box.copy(g.boundingBox).applyMatrix4(item.mesh.matrixWorld);
+            }
           }
           item.boundsGeom = g.uuid;
           if (!item.boundsMat) item.boundsMat = new Float64Array(16);

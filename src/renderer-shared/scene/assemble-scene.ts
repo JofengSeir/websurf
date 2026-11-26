@@ -20,6 +20,7 @@ import * as THREE from 'three';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { applyLightmap, buildMapScene } from './scene-builder.js';
 import type { DxtCapabilities } from './dxt-texture.js';
+import { expandInstancedProps } from './instanced-props.js';
 import { buildSpotBeams, type PunctualSpot } from './spot-beams.js';
 import { mergeIntoChunks, padBoundingSpheres } from './scene-optimizer.js';
 import { markRotButtons } from './rot-buttons.js';
@@ -304,8 +305,21 @@ export async function assembleScene(opts: AssembleSceneOptions): Promise<Assembl
   const __mark = (name: string): void => {
     __timings[name] = +(performance.now() - __t0).toFixed(1);
   };
-  const { gltf, scene: mapRoot, bbox, maxDim } = await buildMapScene(opts.glb, { dxtCaps: opts.dxtCaps });
+  const { gltf, scene: mapRoot, bbox: initialBbox, maxDim: initialMaxDim } = await buildMapScene(opts.glb, { dxtCaps: opts.dxtCaps });
   __mark('buildMapScene');
+  const skyCluster = opts.skyCamera && opts.pvs
+    ? opts.pvs.getClusterAt({ x: opts.skyCamera.origin[0], y: opts.skyCamera.origin[1], z: opts.skyCamera.origin[2] })
+    : -1;
+  const instStats = await expandInstancedProps(mapRoot, gltf, { pvs: opts.pvs, skyCluster });
+  let bbox = initialBbox;
+  let maxDim = initialMaxDim;
+  if (instStats.totalInstances > 0) {
+    mapRoot.updateMatrixWorld(true);
+    bbox = new THREE.Box3().setFromObject(mapRoot);
+    const sz = bbox.getSize(new THREE.Vector3());
+    maxDim = Math.max(sz.x, sz.y, sz.z);
+  }
+  __mark('instancedProps');
   const tintedEntities = applyEntityRenderColors(mapRoot);
   __mark('entityColors');
   if (tintedEntities > 0) {
@@ -325,9 +339,6 @@ export async function assembleScene(opts: AssembleSceneOptions): Promise<Assembl
     console.info('[' + opts.logPrefix + '][lightmap] 未施加静态光照（无 atlas 或施加失败），地图为贴图原色');
   }
 
-  const skyCluster = opts.skyCamera && opts.pvs
-    ? opts.pvs.getClusterAt({ x: opts.skyCamera.origin[0], y: opts.skyCamera.origin[1], z: opts.skyCamera.origin[2] })
-    : -1;
   const skyGroup = opts.skyCamera && skyCluster >= 0
     ? extractSkyArea(mapRoot, (m) => opts.meshInCluster(m, skyCluster))
     : null;

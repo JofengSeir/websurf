@@ -287,6 +287,14 @@ export function applyLightmapToMeshes(
 	 */
 	const routeFullbright = (mesh: THREE.Mesh): void => {
 		const unlit = isUnlit(mesh);
+		const instCubes = (mesh as unknown as { isInstancedMesh?: boolean }).isInstancedMesh
+			? (mesh.userData as { __vbspInstancedAmbCubes?: Float32Array }).__vbspInstancedAmbCubes
+			: undefined;
+		if (!unlit && instCubes instanceof Float32Array && instCubes.length >= 18) {
+			applyInstancedAmbientCube(mesh, instCubes);
+			fullbright++;
+			return;
+		}
 		if (!unlit && hasVertexLightingAttr(mesh) && !readVertexLightingOff()) {
 			// 第 1 级：逐顶点预烘焙（数据在几何上 ⇒ 材质全场景共享）。
 			// 必须**显式赋值**给 mesh：`acquire*` 只建/取缓存实例，不做赋值
@@ -1100,6 +1108,115 @@ function applyAmbientCubeIfAny(mesh: THREE.Mesh, mat: THREE.MeshBasicMaterial): 
 		if (!applied) {
 			// 不静默：three 版本漂移导致锚点失配时明确报出（fullbright 兜底仍可渲染）
 			console.error('[ambient-cube] 注入未生效：vs=' + vsChanged + ' fs=' + fsChanged);
+			return;
+		}
+		shader.vertexShader = vsB;
+		shader.fragmentShader = fogMaxDensityDefine() + fsA;
+	};
+	mat.needsUpdate = true;
+}
+
+/**
+ * 实例化静态道具的第 2 级 ambientCube 路径：
+ * 把本批 N 个实例的 6 面 RGB（18 float/实例）打进 `6 × N` 的 `RGBA32F` DataTexture，
+ * 在 vertex shader 用 `texelFetch(vbspAmbCubeTex, ivec2(face, gl_InstanceID), 0).rgb`
+ * 配合 `modelMatrix * instanceMatrix` 世界法线求值，使整批实例共用 **1 个材质与 1 次 Draw Call**。
+ */
+function applyInstancedAmbientCube(mesh: THREE.Mesh, rawCubes: Float32Array): void {
+	const count = Math.floor(rawCubes.length / 18);
+	if (count <= 0) {
+		applyFullbrightBasic(mesh);
+		return;
+	}
+	const gain = effectivePropCubeGain();
+	const texData = new Float32Array(6 * count * 4);
+	for (let i = 0; i < count; i++) {
+		const srcBase = i * 18;
+		const dstBase = i * 24;
+		for (let f = 0; f < 6; f++) {
+			texData[dstBase + f * 4] = rawCubes[srcBase + f * 3] * gain;
+			texData[dstBase + f * 4 + 1] = rawCubes[srcBase + f * 3 + 1] * gain;
+			texData[dstBase + f * 4 + 2] = rawCubes[srcBase + f * 3 + 2] * gain;
+			texData[dstBase + f * 4 + 3] = 1.0;
+		}
+	}
+	const cubeTex = new THREE.DataTexture(texData, 6, count, THREE.RGBAFormat, THREE.FloatType);
+	cubeTex.minFilter = THREE.NearestFilter;
+	cubeTex.magFilter = THREE.NearestFilter;
+	cubeTex.generateMipmaps = false;
+	cubeTex.needsUpdate = true;
+
+	const mat = applyFullbrightBasic(mesh);
+	(mat.userData as Record<string, unknown>).__vbspAmbCubeTex = cubeTex;
+	mat.customProgramCacheKey = () => 'vbsp-inst-ambcube-' + fogMaxDensity;
+	const cubeTexUniform = { value: cubeTex };
+
+	mat.onBeforeCompile = (shader) => {
+		shader.uniforms.vbspAmbCubeTex = cubeTexUniform;
+		shader.uniforms.vbspExposure = exposureUniform;
+		registerInjectedMaterial(mat);
+		registerInjection(mat, 'ambient-cube', String(fogMaxDensity));
+		shader.uniforms.vbspLightGamma = lightGammaUniform;
+		shader.uniforms.vbspLightFloor = lightFloorUniform;
+		shader.uniforms.vbspAmbientScale = ambientScaleUniform;
+		shader.uniforms.vbspBakedMix = bakedMixUniform;
+		shader.uniforms = Object.assign(shader.uniforms, spotUniforms);
+
+		const vs = shader.vertexShader;
+		const vsA = vs.replace(
+			'#include <common>',
+			SPOT_VERT_DECL + 'uniform sampler2D vbspAmbCubeTex;\nvarying vec3 vbspInstAmbRaw;\n#include <common>',
+		);
+		const vsB0 =
+			vsA !== vs
+				? vsA.replace(
+						'#include <begin_vertex>',
+						[
+							'#include <begin_vertex>',
+							'\tmat4 vbspInstMat = modelMatrix;',
+							'\t#ifdef USE_INSTANCING',
+							'\tvbspInstMat = modelMatrix * instanceMatrix;',
+							'\t#endif',
+							'\tvec3 vbspWN = normalize( mat3( vbspInstMat ) * normal );',
+							'\tvec3 vbspAmbC = vec3( 0.0 );',
+							'\tvbspAmbC += texelFetch( vbspAmbCubeTex, ivec2( vbspWN.z < 0.0 ? 1 : 0, gl_InstanceID ), 0 ).rgb * ( vbspWN.z * vbspWN.z );',
+							'\tvbspAmbC += texelFetch( vbspAmbCubeTex, ivec2( vbspWN.x < 0.0 ? 3 : 2, gl_InstanceID ), 0 ).rgb * ( vbspWN.x * vbspWN.x );',
+							'\tvbspAmbC += texelFetch( vbspAmbCubeTex, ivec2( vbspWN.y < 0.0 ? 5 : 4, gl_InstanceID ), 0 ).rgb * ( vbspWN.y * vbspWN.y );',
+							'\tvbspInstAmbRaw = max( vbspAmbC, vec3( 0.0 ) );',
+						].join('\n'),
+					)
+				: vsA;
+		const vsB =
+			vsB0 !== vsA
+				? vsB0.replace(
+						'#include <project_vertex>',
+						'#include <project_vertex>\n\tvbspSpotWPos = ( vbspInstMat * vec4( transformed, 1.0 ) ).xyz;',
+					)
+				: vsB0;
+		const vsChanged = vsB !== vs;
+
+		const fs = shader.fragmentShader;
+		const ambFn = [
+			...VBSP_LIGHTMAP_UNIFORM_DECLS,
+			'uniform float vbspAmbientScale;',
+			'varying vec3 vbspInstAmbRaw;',
+			'vec3 vbspAmbientWeight() {',
+			'\tif (vbspBakedMix < 0.5) { return vec3(1.0); }',
+			'\treturn pow( max(vbspInstAmbRaw, vec3(vbspLightFloor)), vec3(1.0 / max(vbspLightGamma, 0.001)) ) * vbspExposure * vbspAmbientScale;',
+			'}',
+		].join('\n');
+		const mulSrc = 'reflectedLight.indirectDiffuse *= diffuseColor.rgb;';
+		const fsA = fs
+			.replace('#include <common>', SPOT_FRAG_DECLS + '\n' + ambFn + '\n#include <common>')
+			.replace(
+				mulSrc,
+				mulSrc.slice(0, -1) +
+					' * vbspAmbientWeight();\n\treflectedLight.indirectDiffuse += vbspSpotLight(vbspSpotWPos) * (diffuseColor.rgb + vec3(0.12));',
+			)
+			.replace(ENVMAP_INCLUDE_SRC, ENVMAP_MODULATED('vbspAmbientWeight()'));
+		const fsChanged = fsA !== fs;
+		if (!vsChanged || !fsChanged) {
+			console.error('[instanced-ambient-cube] 注入未生效：vs=' + vsChanged + ' fs=' + fsChanged);
 			return;
 		}
 		shader.vertexShader = vsB;

@@ -142,6 +142,8 @@ const {
   VDXT_HEADER_BYTES,
 } = await loadTsBundle('src/renderer-shared/scene/dxt-texture.ts', 'dxt-texture');
 const { applyTextureQuality } = await loadTsBundle('src/renderer-shared/scene/texture-quality.ts', 'texture-quality');
+const { expandInstancedProps, INST_PROP_STRIDE_FLOATS } = await loadTsBundle('src/renderer-shared/scene/instanced-props.ts', 'instanced-props');
+const { disposeObject } = await loadTsBundle('src/renderer-shared/scene/dispose.ts', 'dispose');
 
 // 旋转枢轴的「rest 零变化」不变量：组位置 = pivot、mesh 局部位置 = 原位置 - pivot 时，
 // 世界坐标在旋转 0 的情况下逐分量不变（pivot 加回本身的抵消）。
@@ -1768,6 +1770,89 @@ test('texture-quality: CompressedTexture 切换 mini 与还原 original 不破�
     globalThis.createImageBitmap = prevCreateBitmap;
   }
 });
+
+test('instanced-props: 二进制 Float32Array 展开、天空/空间分桶、透明回退、可见性与近平面探测', async () => {
+  const root = new THREE.Group();
+  const geom = new THREE.BoxGeometry(10, 10, 10);
+  const opaqueMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const transMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.5 });
+
+  const tplOpaque = new THREE.Mesh(geom, opaqueMat);
+  tplOpaque.name = 'prop_pillar';
+  // 3 个实例：2 个在同一空间桶 (100,0,0) & (200,0,0)，1 个在天空桶 (9000,0,0)
+  const stride = INST_PROP_STRIDE_FLOATS;
+  const f32 = new Float32Array(3 * stride);
+  const writeInst = (idx, pos, hasCube, cubeVal) => {
+    const b = idx * stride;
+    f32[b] = pos[0]; f32[b + 1] = pos[1]; f32[b + 2] = pos[2];
+    f32[b + 3] = 0; f32[b + 4] = 0; f32[b + 5] = 0; f32[b + 6] = 1;
+    f32[b + 7] = 1; f32[b + 8] = 1; f32[b + 9] = 1;
+    f32[b + 10] = hasCube ? 1 : 0;
+    if (hasCube) f32.fill(cubeVal, b + 11, b + 29);
+  };
+  writeInst(0, [500, 0, 0], true, 0.4);
+  writeInst(1, [600, 0, 0], true, 0.8);
+  writeInst(2, [9000, 0, 0], false, 0);
+  tplOpaque.userData.vbsp_instanced_props = { bufferView: 0, count: 3, strideFloats: stride, hasAnyCube: true };
+  root.add(tplOpaque);
+
+  const tplTrans = new THREE.Mesh(geom, transMat);
+  tplTrans.userData.vbsp_instanced_props = { bufferView: 0, count: 3, strideFloats: stride, hasAnyCube: false };
+  root.add(tplTrans);
+
+  const mockGltf = {
+    parser: {
+      getDependency: async (_kind, idx) => (idx === 0 ? f32.buffer : null),
+    },
+  };
+  const mockPvs = {
+    enabled: true,
+    currentClusterId: 1,
+    update: () => {},
+    isVisible: (c) => c === 1,
+    getClusterAt: (p) => (p.x > 8000 ? 99 : 1),
+  };
+
+  const stats = await expandInstancedProps(root, mockGltf, { pvs: mockPvs, skyCluster: 99 });
+  assert.equal(stats.templates, 2);
+  assert.equal(stats.instancedMeshes, 1, '主世界 2 个不透明实例应合并为 1 个 InstancedMesh');
+  assert.equal(stats.singleMeshes, 1, '天空区 1 个实例应单独成 Mesh');
+  assert.equal(stats.uninstancedTranslucent, 3, '透明 prop 必须回退为独立 Mesh 保住排序');
+
+  const inst = root.children.find((c) => c.isInstancedMesh);
+  assert.ok(inst);
+  assert.equal(inst.count, 2);
+  assert.ok(inst.userData.__vbspInstancedAmbCubes instanceof Float32Array);
+  assert.equal(inst.userData.__vbspInstancedAmbCubes.length, 36);
+  assert.deepEqual(inst.userData.splitClusters, [1]);
+
+  // VisibilityController 必须按 InstancedMesh 包围球/盒判定而非局部 (0,0,0) 几何
+  root.updateMatrixWorld(true);
+  const vis = new VisibilityController();
+  vis.enablePvs = false;
+  vis.collect(root, null);
+  vis.setCullDistance(1000, 100);
+  const resNear = vis.update({ position: new THREE.Vector3(500, 0, 0) }, null);
+  assert.ok(resNear.visible >= 1);
+  assert.equal(inst.visible, true);
+
+  // NearPlaneController 必须能探测到远离原点的 InstancedMesh 实例表面
+  const near = new NearPlaneController();
+  const cam = new THREE.PerspectiveCamera(75, 16 / 9, 0.1, 10000);
+  cam.position.set(500, 0, 10); // 距 (500,0,0) 的 10x10x10 盒子表面 (+5) 只有 5 HU
+  cam.updateMatrixWorld(true);
+  near.setDefaultNear(8);
+  near.update(cam, root, 500, 0, 10, { roots: [root] });
+  assert.ok(cam.near < 4, `预期 InstancedMesh 触发 near 收缩 (<4), 实际 cam.near=${cam.near}`);
+
+  // disposeObject 释放 __vbspAmbCubeTex 与 InstancedMesh
+  let disposedTex = false;
+  inst.material = new THREE.MeshBasicMaterial();
+  inst.material.userData.__vbspAmbCubeTex = { isTexture: true, dispose: () => { disposedTex = true; } };
+  disposeObject(root);
+  assert.equal(disposedTex, true);
+});
+
 
 
 
