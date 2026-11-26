@@ -56,10 +56,13 @@ import {
   COMPUTE_CAP_MAX,
   COMPUTE_CAP_MIN,
 } from '../../../../src/ts-shared/app/compute-cap.js';
+import { M_YAW } from '../../../../src/ts-shared/input/input-layer.js';
 import { Variant } from '../../../../src/ts-shared/entity/variant.js';
 import type { EntityEvent } from '../../../../src/ts-shared/entity/types.js';
 
 const DEG2RAD = Math.PI / 180;
+/** 视觉俯仰钳制（度）：与 Rust `player::PITCH_CLAMP`（89）一致。 */
+const VIEW_PITCH_CLAMP = 89;
 
 /** 相机位姿快照（世界坐标眼位 + 角度，度）：固定步长物理每步记录一份，rAF 在两份之间插值。 */
 interface CameraState {
@@ -143,13 +146,26 @@ export class RendererMain {
    */
   private computeRateCap = COMPUTE_CAP_DEFAULT;
 
-  // ── 相机固定步长插值（T-D132 回归修复）──────────────────────────
-  /** 上一步物理的眼位（rAF 在上一帧与当前帧之间插值；传送/重生时置空强制贴齐）。 */
+  // ── 视觉线（计算步频率）与物理线（physics.tickRate）分离 ─────────────
+  /** 上一步物理的眼位（视觉线在上一份与当前份之间插值；传送/重生时置空强制贴齐）。 */
   private cameraPrev: CameraState | null = null;
   /** 最新一步物理的眼位（`applyCamera` 每个物理步写入）。 */
   private cameraCur: CameraState | null = null;
   /** `cameraCur` 对应的墙钟毫秒（插值分母使用有效物理频率）。 */
   private cameraCurAtMs = 0;
+  /**
+   * 视觉视角（度）：由 `stepVisual()` 在每个计算步消费 `viewDx/viewDy` 后累加，
+   * 与输入事件回调、64tick 物理都解耦；`updateCamera` 直接用它摆相机，
+   * 不等物理 tick（否则视角落后约 15.6ms）。
+   * 物理 tick 的 `applyCamera` 会用权威 state 重新对齐（同一份输入已消费，正常无跳变）。
+   */
+  private viewYaw = 0;
+  private viewPitch = 0;
+  /** 待视觉线消费的鼠标增量：`feedInput` 只入队，不直接改相机/视角。 */
+  private viewDx = 0;
+  private viewDy = 0;
+  /** 视觉视角是否已从第一份物理 state 初始化（初始化前 stepVisual 只清队列）。 */
+  private viewInitialized = false;
 
   /**
    * 固定步长模拟时钟（共享 `sim-clock`）：把「计算」从 rAF 解耦——rAF 只负责渲染，
@@ -281,6 +297,11 @@ export class RendererMain {
           }
           this.cameraCur = next;
           this.cameraCurAtMs = now;
+          // 物理已消费完本次输入，用权威 state 对齐视觉视角；正常玩时与 stepVisual 的
+          // 累加值一致，只在传送/冻结/校准修正时纠偏。
+          this.viewYaw = next.yaw;
+          this.viewPitch = next.pitch;
+          this.viewInitialized = true;
         },
       },
     });
@@ -332,6 +353,31 @@ export class RendererMain {
     return this.gameplay?.speedCapApplied ?? null;
   }
 
+  /**
+   * 视觉/呈现线：每个计算步（默认 1000Hz）独立推进，和 64tick 物理完全解耦。
+   *
+   * 只做视觉状态：消费 feedInput 入队的鼠标增量更新视角，并把相机插值到当前时刻；
+   * 不写 PhysWorld、不推进实体 I/O。输入事件回调只负责入队，因此视觉更新不会随鼠标
+   * 事件抖动，也不会被物理 tick 拖到 64Hz——即使这一计算步没有攒够一个物理步，视觉
+   * 世界仍然更新。
+   */
+  private stepVisual(now: number): void {
+    if (!this.camera) return;
+    const dx = this.viewDx;
+    const dy = this.viewDy;
+    this.viewDx = 0;
+    this.viewDy = 0;
+    // holdPoint 冻结时物理会被 afterTick 拉回存点位姿，视觉角度也跟随存点，不叠加鼠标。
+    if (this.viewInitialized && !this.holdPoint) {
+      this.viewYaw -= dx * M_YAW;
+      this.viewPitch = Math.max(
+        -VIEW_PITCH_CLAMP,
+        Math.min(VIEW_PITCH_CLAMP, this.viewPitch - dy * M_YAW),
+      );
+    }
+    this.updateCamera(now);
+  }
+
   /** 固定步长模拟步（`sim-clock` 的 step 回调）：物理未就绪时让路，避免空转推进时基；
    *  页面隐藏时不推进（时钟不依赖 rAF，后台泵帧只会空烧 CPU，欠账由时钟截顶丢弃）。 */
   private stepFixedSimulation(dt: number): void {
@@ -340,9 +386,15 @@ export class RendererMain {
     const presentation = this.presentation;
     if (!presentation) return;
 
+    // 视觉线先跑：即使本计算步没有物理步，视角/相机也按 1000Hz 更新；先消费视觉增量，
+    // 物理随后消费同一份 pendingDx/Dy 时 applyCamera 会回到同一角度，不会重复叠加。
+    const now = performance.now();
+    this.stepVisual(now);
+
     // worker 双线：预测线每个计算步推进一步（权威 Worker 自己跑 64tick）。
     if (this.authorityMode === 'worker') {
-      presentation.step(dt);
+      presentation.step(dt, now);
+      this.updateCamera(performance.now());
       return;
     }
 
@@ -355,10 +407,13 @@ export class RendererMain {
     if (this.physicsAccumulator > maxAccumulator) this.physicsAccumulator = maxAccumulator;
     let steps = 0;
     while (this.physicsAccumulator + 1e-9 >= step && steps < 8) {
-      presentation.step(step);
+      presentation.step(step, now);
       this.physicsAccumulator -= step;
       steps++;
     }
+    // 物理步刚更新了 cameraCur；立刻刷新一次相机，避免 rAF 恰好落在两个计算步之间时
+    // 还拿着物理步前的旧位置。输入队列已在 stepVisual 里清空，这里只做位置/角度插值。
+    if (steps > 0) this.updateCamera(performance.now());
   }
 
   /** 场景装载完成回调（`loadScene` 用场景包围盒最小 Y 调用一次）；`apps/game/src/app.ts` 注册它
@@ -711,9 +766,12 @@ export class RendererMain {
     this.resetSampleStream();
   }
 
-  /** 物理实例输入（app 事件回调喂入；dx/dy 为角度增量、keysMask 为键位掩码）：dx/dy 累加、
-   *  键位覆盖写。 */
+  /** 物理/视觉输入入队（app 事件回调喂入；dx/dy 为角度增量、keysMask 为键位掩码）。
+   *  这里**只入队**：视觉增量交给 `stepVisual` 在计算步消费，物理增量交给 64tick 物理消费；
+   *  输入回调不直接改相机/视角，避免视觉更新跟事件抖动或退化成事件驱动。 */
   feedInput(dx: number, dy: number, keysMask: number): void {
+    this.viewDx += dx;
+    this.viewDy += dy;
     this.pendingDx += dx;
     this.pendingDy += dy;
     this.pendingKeys = keysMask;
@@ -724,6 +782,8 @@ export class RendererMain {
     this.pendingDx = 0;
     this.pendingDy = 0;
     this.pendingKeys = 0;
+    this.viewDx = 0;
+    this.viewDy = 0;
   }
 
   /** 重生：直接让主线程物理调 `respawn`（不经 Worker），随后重启渲染采样流。 */
@@ -916,6 +976,10 @@ export class RendererMain {
   private snapCamera(): void {
     this.cameraPrev = null;
     this.cameraCur = null;
+    // 下一份物理 state 将重建视觉视角；在此之前丢弃旧视角增量，避免传送后残留鼠标把视角甩偏。
+    this.viewInitialized = false;
+    this.viewDx = 0;
+    this.viewDy = 0;
   }
 
   /** 位置突变（传送/重生）或角度大跳时不做插值，避免相机穿过地图。 */
@@ -942,16 +1006,15 @@ export class RendererMain {
     let alpha = prev ? (now - this.cameraCurAtMs) / stepMs : 1;
     if (!Number.isFinite(alpha)) alpha = 1;
     alpha = Math.max(0, Math.min(1, alpha));
+    // 角度不吃物理插值：`viewYaw/viewPitch` 由 stepVisual 按计算步累加，
+    // 直接摆相机才是零物理 tick 延迟；位置仍按 64tick 前后两份 state 插值。
+    const yaw = this.viewInitialized ? this.viewYaw : cur.yaw;
+    const pitch = this.viewInitialized ? this.viewPitch : cur.pitch;
     if (!prev || alpha >= 1) {
-      cam.rotation.set(cur.pitch * DEG2RAD, cur.yaw * DEG2RAD, 0, 'YXZ');
+      cam.rotation.set(pitch * DEG2RAD, yaw * DEG2RAD, 0, 'YXZ');
       cam.position.set(cur.x, cur.y, cur.z);
       return;
     }
-    // yaw 走最短弧，避免 359°→0° 时绕一整圈。
-    let dyaw = cur.yaw - prev.yaw;
-    dyaw = ((dyaw + 180) % 360 + 360) % 360 - 180;
-    const yaw = prev.yaw + dyaw * alpha;
-    const pitch = prev.pitch + (cur.pitch - prev.pitch) * alpha;
     cam.rotation.set(pitch * DEG2RAD, yaw * DEG2RAD, 0, 'YXZ');
     cam.position.set(
       prev.x + (cur.x - prev.x) * alpha,
@@ -961,10 +1024,10 @@ export class RendererMain {
   }
 
   /**
-   * rAF 渲染回调：相机插值到当前时刻，再走共享会话的可见性/近平面/天空与主世界绘制。
-   * 物理/实体由固定步长 `simClock` 推进（见 `stepFixedSimulation`）；时钟未启动
-   * （物理/场景未就绪）时在这里用 `presentation.update(now)` 兜底走 rAF 变步长。
-   * 副作用：改相机位姿、改 mesh 可见性、首帧后跑一次注入统计。
+   * rAF 渲染回调：视觉线已由 `simClock` 的计算步推进（见 `stepVisual` / `stepFixedSimulation`），
+   * 这里只走共享会话的可见性/近平面/天空与主世界绘制；时钟未启动（物理/场景未就绪）时
+   * 才在这里兜底跑视觉线 + `presentation.update(now)` 的 rAF 变步长。
+   * 副作用：改 mesh 可见性、首帧后跑一次注入统计。
    */
   private tick(now: number): void {
     if (!this.running) return;
@@ -973,10 +1036,12 @@ export class RendererMain {
 
     // 1. 主线程物理/呈现同意循环（共享 `player-presentation`）：输入 → 共享槽 → 权威校准 →
     //    推进物理 → 冻结分支 → 渲染采样 → 相机；序列与 debug 共用一份，game 特色走构造期 hooks。
-    //    正常游玩由固定步长时钟 `simClock` 驱动（见 `stepFixedSimulation`），rAF 只负责渲染；
-    //    时钟未启动（物理/场景未就绪）时由这里兜底走 rAF 变步长，保证首帧即可推进。
-    if (!this.simClock?.running) this.presentation?.update(now);
-    this.updateCamera(now);
+    //    正常游玩由固定步长时钟 `simClock` 驱动（见 `stepFixedSimulation`），视觉线每个计算步
+    //    更新、rAF 只负责渲染；时钟未启动时才在这里兜底，保证首帧即可推进。
+    if (!this.simClock?.running) {
+      this.stepVisual(now);
+      if (this.presentation?.update(now)) this.updateCamera(performance.now());
+    }
 
     // 2+3. 共享会话：可见性判定 → 近平面贴墙（隔帧）→ 天空/主世界绘制。
     // 近平面只在物理就绪后探测（物理未就绪时相机停在初始位姿，探测没有意义）。
