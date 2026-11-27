@@ -937,13 +937,7 @@ export class PanelController {
     const box = document.getElementById('savepointList');
     if (!box) return;
     box.innerHTML = '';
-    if (list.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'hint';
-      empty.textContent = '暂无存点（X 键存点 / C 键读最近）';
-      box.appendChild(empty);
-      return;
-    }
+    if (list.length === 0) return;
     list.forEach((p, i) => {
       const row = document.createElement('div');
       row.className = 'savepoint-row';
@@ -1001,13 +995,24 @@ export class PanelController {
       if (!PanelController.PANE_RESET[pane]) return;
       let btn = paneEl.querySelector<HTMLButtonElement>('[data-reset-pane]');
       if (!btn) {
-        const row = document.createElement('div');
-        row.className = 'row';
-        row.innerHTML = '<label></label><button class="small" data-reset-pane type="button">恢复默认</button>';
-        paneEl.appendChild(row);
-        btn = row.querySelector('button');
+        btn = document.createElement('button');
+        btn.className = 'small pane-reset';
+        btn.type = 'button';
+        btn.dataset.resetPane = pane;
+        btn.title = '把本页设置恢复为默认值';
+        btn.textContent = '恢复默认';
+        const acts = paneEl.querySelector('.pane-acts');
+        if (acts) {
+          acts.appendChild(btn);
+        } else {
+          const row = document.createElement('div');
+          row.className = 'row';
+          row.innerHTML = '<label></label>';
+          row.appendChild(btn);
+          paneEl.appendChild(row);
+        }
       }
-      btn?.addEventListener('click', () => this.resetPane(pane));
+      btn.addEventListener('click', () => this.resetPane(pane));
     });
   }
 
@@ -1028,6 +1033,20 @@ export class PanelController {
     this.savePanelPrefs();
     // 物理分栏的「默认」= 启动探测的计算帧率上限（不是 DEFAULT_CONFIG 的 64Hz 锁定值）。
     if (pane === 'physics') this.restoreComputeRateDefault();
+    if (pane === 'view') {
+      document.getElementById('noclipToggle')?.classList.remove('active');
+      this.onNoclipChange?.(false);
+    }
+    if (pane === 'display') {
+      for (const id of ['nearProbeDist', 'nearRatio']) {
+        const el = document.getElementById(id) as HTMLInputElement | null;
+        if (el) {
+          el.value = el.defaultValue;
+          el.dispatchEvent(new Event('input'));
+        }
+      }
+      this.root.querySelector<HTMLButtonElement>('#renderPanel .rp-reset-all')?.click();
+    }
   }
 }
 

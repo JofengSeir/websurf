@@ -18,7 +18,7 @@
     #crosshair 准星（行内 CSS 变量由 src/panel/panel-controller.ts 写入）·
     #hud>#stats 速度读数（bottom: 24%）· #keys 按键簇（Q/W/E/A/S/D/蹲/跳，标签由
     src/app.ts 按当前键位写首版、高亮随实时输入）· #fps 帧率 · #loadingOverlay 加载
-    进度覆盖层 · #panel>.win ESC 控制面板（左导航 + 右设置体）。
+    进度覆盖层 · #panel>.win M/ESC 控制面板（左侧栏 + 右设置体，结构见 #panel 处注释）。
   -->
   <link rel="stylesheet" href="./styles.css" />
 </head>
@@ -62,76 +62,104 @@
     <!-- #loadingOverlay：地图加载进度覆盖层 -->
   <div id="loadingOverlay">
     <div class="load-card">
-      <!-- 装饰件（纯外观，无 JS 钩子）：档案编号，与面板 pane 同语彙。
-           原「切角斜边线」`<i class="load-chamfer">` 已随全站切角撤销（owner 2026-10-16）。 -->
-      <span class="load-code" aria-hidden="true">LD-00</span>
-      <div class="load-title">正在加载地图</div>
-      <div class="load-sub" id="loadingSub">准备中…</div>
+      <div class="load-head">
+        <span class="load-mark" aria-hidden="true"></span>
+        <div class="load-head-text">
+          <div class="load-title">正在加载地图</div>
+          <div class="load-sub" id="loadingSub">准备中…</div>
+        </div>
+        <span class="load-pct" id="loadingPct">0%</span>
+      </div>
       <div class="load-track"><div class="load-fill" id="loadingFill"></div></div>
       <div class="load-meta">
-        <span id="loadingStage">初始化</span>
-        <span id="loadingPct">0%</span>
+        <span class="load-stage"><i class="load-dot" aria-hidden="true"></i><span id="loadingStage">初始化</span></span>
+        <span class="load-brand" aria-hidden="true">WebSurf</span>
       </div>
     </div>
   </div>
 
-    <!-- #panel：ESC 控制面板（左导航 + 右设置体） -->
+    <!-- #panel：ESC / M 控制面板。结构：.win > aside.side（品牌 + .nav 模块导航 + 构建信息页脚）
+         + .body（每个 .mod-pane = 吸顶 .pane-head〔标题/说明 + .pane-acts 本页操作〕+ 设置内容）。
+         JS 契约（apps/game/src/panel/panel-controller.ts）：.nav 事件委托按 data-mod 切 .mod/.mod-pane 的 active；
+         「恢复默认」由 bindPaneResets 注入到各 pane 的 .pane-acts（已写死 [data-reset-pane] 的不重复注入）；
+         #panelBuildRev / #panelMapName 由 apps/game/src/app.ts 写入。 -->
   <div id="panel">
-    <div class="win">
-      <!-- 关闭控件：就是窗口右上角那颗螺丝（斜置 45°，9px→12px），既是硬件件也是按钮；
-           id 保持 #panelClose（面板控制器在 apps/game/src/panel/panel-controller.ts 绑定）。
-           兜底：点击 #panel 遮罩空白处同样关闭（同一入口，见该文件的 bindPanelClose）。 -->
-      <button class="win-close" id="panelClose" type="button" aria-label="关闭面板"></button>
-      <!-- 左侧模块导航 -->
-      <div class="nav">
-        <h2>控制面板</h2>
-        <div tabindex="0" role="button" class="mod active" data-mod="general"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11 12 4l8 7"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/></svg></span>通用</div>
-        <div tabindex="0" role="button" class="mod" data-mod="physics"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h8M16.5 7H20M4 12h2.5M11 12h9M4 17h11M19.5 17H20"/><circle cx="14" cy="7" r="2"/><circle cx="8.5" cy="12" r="2"/><circle cx="17" cy="17" r="2"/></svg></span>物理</div>
-        <div tabindex="0" role="button" class="mod" data-mod="hull"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7.2" r="3.1"/><path d="M5.8 20c.6-3.4 3.1-5.3 6.2-5.3s5.6 1.9 6.2 5.3"/></svg></span>体型</div>
-        <div tabindex="0" role="button" class="mod" data-mod="keys"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6.5" width="18" height="11" rx="2"/><path d="M7 10.2h.01M10.7 10.2h.01M14.4 10.2h.01M18 10.2h.01M7 13.8h.01M18 13.8h.01M10 13.8h4.2"/></svg></span>按键</div>
-        <div tabindex="0" role="button" class="mod" data-mod="look"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3.2" width="8" height="17.6" rx="4"/><path d="M12 6.8v3.6"/></svg></span>操作</div>
-        <div tabindex="0" role="button" class="mod" data-mod="display"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12.5" rx="2"/><path d="M9.5 20.5h5M12 17v3.5"/></svg></span>显示</div>
-        <div tabindex="0" role="button" class="mod" data-mod="optimize"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2.5 4.8 14H11l-1 7.5 8.2-11.5H12Z"/></svg></span>优化处理</div>
-        <div tabindex="0" role="button" class="mod" data-mod="view"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v17M3.5 12h17"/><path d="M9.8 5.7 12 3.5l2.2 2.2M9.8 18.3l2.2 2.2 2.2-2.2M5.7 9.8 3.5 12l2.2 2.2M18.3 9.8l2.2 2.2-2.2 2.2"/></svg></span>视角</div>
-        <div tabindex="0" role="button" class="mod" data-mod="health"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-7 4 14 3-8H21"/></svg></span>权威健康</div>
-      </div>
+    <div class="win" role="dialog" aria-label="控制面板">
+      <button class="win-close" id="panelClose" type="button" aria-label="关闭面板" title="关闭（M）"></button>
+
+      <aside class="side">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div class="brand-text">
+            <span class="brand-name">WebSurf</span>
+            <span class="brand-sub">控制面板</span>
+          </div>
+        </div>
+        <!-- 模块导航（只放 .mod：onActivate 的 Enter/空格会 preventDefault，别把其它按钮放进来） -->
+        <div class="nav">
+          <div class="nav-group">游戏</div>
+          <div tabindex="0" role="button" class="mod active" data-mod="general"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11 12 4l8 7"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/></svg></span>通用</div>
+          <div tabindex="0" role="button" class="mod" data-mod="physics"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h8M16.5 7H20M4 12h2.5M11 12h9M4 17h11M19.5 17H20"/><circle cx="14" cy="7" r="2"/><circle cx="8.5" cy="12" r="2"/><circle cx="17" cy="17" r="2"/></svg></span>物理</div>
+          <div tabindex="0" role="button" class="mod" data-mod="hull"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7.2" r="3.1"/><path d="M5.8 20c.6-3.4 3.1-5.3 6.2-5.3s5.6 1.9 6.2 5.3"/></svg></span>体型</div>
+          <div tabindex="0" role="button" class="mod" data-mod="view"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v17M3.5 12h17"/><path d="M9.8 5.7 12 3.5l2.2 2.2M9.8 18.3l2.2 2.2 2.2-2.2M5.7 9.8 3.5 12l2.2 2.2M18.3 9.8l2.2 2.2-2.2 2.2"/></svg></span>视角</div>
+          <div class="nav-group">输入</div>
+          <div tabindex="0" role="button" class="mod" data-mod="keys"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6.5" width="18" height="11" rx="2"/><path d="M7 10.2h.01M10.7 10.2h.01M14.4 10.2h.01M18 10.2h.01M7 13.8h.01M18 13.8h.01M10 13.8h4.2"/></svg></span>按键</div>
+          <div tabindex="0" role="button" class="mod" data-mod="look"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3.2" width="8" height="17.6" rx="4"/><path d="M12 6.8v3.6"/></svg></span>鼠标</div>
+          <div class="nav-group">画面</div>
+          <div tabindex="0" role="button" class="mod" data-mod="display"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12.5" rx="2"/><path d="M9.5 20.5h5M12 17v3.5"/></svg></span>显示</div>
+          <div tabindex="0" role="button" class="mod" data-mod="optimize"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2.5 4.8 14H11l-1 7.5 8.2-11.5H12Z"/></svg></span>性能兜底</div>
+          <div class="nav-group">诊断</div>
+          <div tabindex="0" role="button" class="mod" data-mod="health"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-7 4 14 3-8H21"/></svg></span>权威健康</div>
+        </div>
+        <!-- 构建信息：地图名 + 构建版本（RENDER_REV，点击复制），用来一眼识别「浏览器还在跑旧包」 -->
+        <div class="side-foot">
+          <div class="sf-row"><span class="sf-k">地图</span><span class="sf-v" id="panelMapName">未载入</span></div>
+          <button type="button" class="sf-rev" id="panelBuildRev" title="构建版本（点击复制）">
+            <span class="sf-k">REV</span><code class="sf-v" id="panelBuildRevText">dev</code>
+          </button>
+          <div class="sf-hint"><kbd>M</kbd> 开关面板 · 点画面回到游戏</div>
+        </div>
+      </aside>
 
       <!-- 右侧设置 -->
       <div class="body">
-        <!-- 通用：地图加载 / 重生 -->
+        <!-- 通用：地图加载 / 重生 / 存点 -->
         <div class="mod-pane active" data-pane="general">
-          <div class="pane-title">通用</div>
-          <div class="pane-desc">加载 .bsp 地图、出生点与重生</div>
+          <div class="pane-head">
+            <div class="pane-head-main"><div class="pane-title">通用</div><div class="pane-desc">加载 .bsp 地图、出生点与存点</div></div>
+            <div class="pane-acts"></div>
+          </div>
           <input type="file" id="bspFile" accept=".bsp" />
           <button id="loadMapBtn" class="map-btn"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4.2 3.6 6v13.8L9 18l6 1.8 5.4-1.8V4.2L15 6 9 4.2Z"/><path d="M9 4.2V18M15 6v13.8"/></svg></span>加载地图</button>
           <h4>出生点</h4>
-          <div class="row"><label>重生</label>
+          <div class="row"><label>选择出生点</label>
+            <select id="spawnSelect" disabled></select>
             <button class="small" id="respawnBtn" disabled>重生</button></div>
-          <div class="row"><label>出生点</label>
-            <select id="spawnSelect" disabled></select></div>
           <h4>存点</h4>
-          <div class="hint">X 键存点（位置/朝向/速度）· C 键读最近存点 · 按地图持久化（上限 50）</div>
+          <div class="hint"><kbd>X</kbd> 存点（位置 / 朝向 / 速度）· <kbd>C</kbd> 读最近存点 · 按地图持久化，上限 50</div>
           <div id="savepointList" class="savepoint-list"></div>
         </div>
 
         <!-- 物理 -->
         <div class="mod-pane" data-pane="physics">
-          <div class="pane-title">物理参数</div>
-          <div class="pane-desc">主线程权威 1000Hz 计算 · 64tick 物理（tickRate）· ?authority=worker 回切 Worker 预测 · 面板可调（计时玩法锁定）</div>
+          <div class="pane-head">
+            <div class="pane-head-main"><div class="pane-title">物理参数</div><div class="pane-desc">主线程权威 · 64 tick 物理 · 计时玩法下锁定（<code>?authority=worker</code> 回切 Worker 预测）</div></div>
+            <div class="pane-acts"></div>
+          </div>
           <h4>基础</h4>
           <div class="row"><label>tickRate (Hz)</label>
             <input type="range" id="tickRate" min="48" max="128" step="1" value="64" />
             <div class="val"><input id="tickRateNum" type="number" value="64" /></div></div>
           <!-- task-95：计算频率上限（模拟时钟泵频；main 物理按 tickRate 固定步进，不是物理频率）。
                默认 1000Hz、最高 2000Hz（owner 2026-11-19 指定），见 compute-cap.ts -->
-          <div class="row" id="computeRateCapRow"><label>计算频率上限 (Hz)</label>
+          <div class="row" id="computeRateCapRow"><label>计算频率上限</label>
             <input type="range" id="computeRateCap" min="48" max="2000" step="1" value="1000" />
-            <div class="val"><input id="computeRateCapNum" type="number" value="1000" /></div></div>
+            <div class="val"><input id="computeRateCapNum" type="number" value="1000" /><span class="unit">Hz</span></div></div>
           <!-- 横向限速（用户设置项，0 = 关闭）：与地图 sv_maxvelocity 取较小者生效，
                只钳水平速度模长（竖直不受限），见共享 EntityGameplay.setUserSpeedCap -->
-          <div class="row"><label>横向限速 (u/s)</label>
+          <div class="row"><label title="0 = 关闭；与地图 sv_maxvelocity 取较小者生效，只限水平速度">横向限速</label>
             <input type="range" id="maxHorizontalSpeed" min="0" max="20000" step="50" value="5000" />
-            <div class="val"><input id="maxHorizontalSpeedNum" type="number" value="5000" /></div></div>
+            <div class="val"><input id="maxHorizontalSpeedNum" type="number" value="5000" /><span class="unit">u/s</span></div></div>
           <div class="row"><label>重力</label>
             <input type="range" id="gravity" min="200" max="2000" step="1" value="800" />
             <div class="val"><input id="gravityNum" type="number" value="800" /></div></div>
@@ -161,11 +189,11 @@
           <div class="row"><label>跳跃速度</label>
             <input type="range" id="jumpSpeed" min="100" max="600" step="1" value="302" />
             <div class="val"><input id="jumpSpeedNum" type="number" value="302" /><span class="unit">u/s</span></div></div>
-          <h4>行为</h4>
           <div class="row"><label>自动连跳</label>
             <input type="checkbox" id="autobhop" checked /></div>
           <div class="row"><label>连跳限速</label>
             <input type="checkbox" id="bhopSpeedClamp" checked /></div>
+          <h4>碰撞修正</h4>
           <div class="row"><label>贴面推开量</label>
             <input type="range" id="pushOut" min="0" max="1" step="0.01" value="0.1" />
             <div class="val"><input id="pushOutNum" type="number" value="0.1" /><span class="unit">u</span></div></div>
@@ -175,8 +203,10 @@
 
         <!-- 体型 -->
         <div class="mod-pane" data-pane="hull">
-          <div class="pane-title">人物体型</div>
-          <div class="pane-desc">碰撞箱尺寸（CS:S 基准：32×32×72 / 蹲 54）</div>
+          <div class="pane-head">
+            <div class="pane-head-main"><div class="pane-title">人物体型</div><div class="pane-desc">碰撞箱尺寸（CS:S 基准 32 × 32 × 72，蹲 54）</div></div>
+            <div class="pane-acts"><button class="small pane-reset" id="hullReset" data-reset-pane="hull" type="button" title="把本页设置恢复为默认值">恢复默认</button></div>
+          </div>
           <h4>碰撞箱</h4>
           <div class="row"><label>半宽</label>
             <input type="range" id="hullHalfWidth" min="4" max="32" step="1" value="16" />
@@ -187,38 +217,72 @@
           <div class="row"><label>蹲高</label>
             <input type="range" id="hullDuckHeight" min="24" max="108" step="1" value="54" />
             <div class="val"><input id="hullDuckHeightNum" type="number" value="54" /><span class="unit">HU</span></div></div>
-          <div class="row"><label></label><button class="small" id="hullReset" data-reset-pane="hull">恢复默认</button></div>
         </div>
 
         <!-- 按键 -->
         <div class="mod-pane" data-pane="keys">
-          <div class="pane-title">自定义按键</div>
-          <div class="pane-desc">点击键位重新录制 · 悬停键位点 ✕ 删除 · localStorage 持久化</div>
+          <div class="pane-head">
+            <div class="pane-head-main"><div class="pane-title">自定义按键</div><div class="pane-desc">点击键位重新录制 · 悬停键位点 ✕ 删除 · 本地持久化</div></div>
+            <div class="pane-acts"><button class="small pane-reset" id="keyReset" type="button" title="恢复全部默认键位">恢复默认键位</button></div>
+          </div>
           <div id="keyRecHint" class="key-rec-hint">按下一个键来绑定…（Esc 取消）</div>
           <div id="keyList"></div>
-          <div class="mt-12">
-            <button class="small" id="keyReset">恢复默认键位</button>
-          </div>
         </div>
 
-        <!-- 操作 -->
+        <!-- 鼠标 / 键盘视角 -->
         <div class="mod-pane" data-pane="look">
-          <div class="pane-title">操作</div>
-          <div class="pane-desc">鼠标与视角</div>
+          <div class="pane-head">
+            <div class="pane-head-main"><div class="pane-title">鼠标与视角</div><div class="pane-desc">鼠标灵敏度与键盘转向速度</div></div>
+            <div class="pane-acts"></div>
+          </div>
           <h4>鼠标</h4>
           <div class="row"><label>灵敏度</label>
             <input type="range" id="sensitivity" min="0.1" max="5" step="0.01" value="1.5" />
             <div class="val"><input id="sensitivityNum" type="number" value="1.5" /></div></div>
           <h4>键盘视角</h4>
-          <div class="row"><label>Q/E 旋转 (°/s)</label>
+          <div class="row"><label>Q / E 旋转</label>
             <input type="range" id="yawBindSpeed" min="0" max="720" step="1" value="210" />
             <div class="val"><input id="yawBindSpeedNum" type="number" value="210" /><span class="unit">°/s</span></div></div>
         </div>
 
         <!-- 显示 -->
         <div class="mod-pane" data-pane="display">
-          <div class="pane-title">显示</div>
-          <div class="pane-desc">准星与速度面板</div>
+          <div class="pane-head">
+            <div class="pane-head-main"><div class="pane-title">显示</div><div class="pane-desc">画面、光照、准星、速度面板与渲染选项 · 每项悬停可单独恢复默认</div></div>
+            <div class="pane-acts"></div>
+          </div>
+          <h4>画面与光照</h4>
+          <div class="row"><label>视野 FOV</label>
+            <input type="range" id="fov" min="20" max="150" step="0.1" value="73.6" />
+            <div class="val"><input id="fovNum" type="number" min="20" max="150" value="73.6" /><span class="unit">°</span></div></div>
+          <div class="row"><label>亮度（曝光）</label>
+            <input type="range" id="exposure" min="0.02" max="40" step="0.01" value="2" />
+            <div class="val"><input id="exposureNum" type="number" min="0.02" max="40" step="0.01" value="2" /></div></div>
+          <div class="row"><label>暗部提升（γ）</label>
+            <input type="range" id="lightGamma" min="0.10" max="8.00" step="0.01" value="1" />
+            <div class="val"><input id="lightGammaNum" type="number" min="0.10" max="8.00" step="0.01" value="1" /></div></div>
+          <div class="row"><label>模型光照</label>
+            <input type="range" id="ambientScale" min="0" max="10" step="0.01" value="1" />
+            <div class="val"><input id="ambientScaleNum" type="number" min="0" max="10" step="0.01" value="1" /></div></div>
+          <div class="row"><label title="原始 = VTF 解码原图；压缩 = mosaic 字节码还原的低清纹理（切换即时生效，无需重载地图）">纹理画质</label>
+            <select id="textureQuality">
+              <option value="original" selected>原始纹理</option>
+              <option value="mini">压缩低清</option>
+            </select></div>
+          <div class="row"><label title="预烘焙 = 每像素采 lightmap atlas + 逐顶点/环境盒烘焙光照（每帧光照开销更大）；纯纹理 = 只上漫反射贴图（每帧光照开销最小）">光照模式</label>
+            <select id="lightingMode">
+              <option value="baked" selected>预烘焙</option>
+              <option value="texture">纯纹理</option>
+            </select></div>
+          <details class="hint hint-more" id="lightingModeHint">
+            <summary>两种光照模式有什么区别？</summary>
+            预烘焙：每个像素都采光照图集并算逐顶点 / 环境盒烘焙光照，画面有明暗关系，代价是每帧光照开销更大。
+            纯纹理：只上漫反射贴图，不采光照图、不算烘焙项，每帧光照开销最小——适合「人物移动时帧时间不要大幅跳变」
+            （实际幅度取决于 GPU / 分辨率 / 地图）。切换即时生效，不重建场景、不打断操作。
+          </details>
+          <div class="row"><label title="0 = 自动（按地图包围盒对角线的一半）；单位 ≈ 1 英寸。超出的空间块不渲染（省 draw call）">渲染距离</label>
+            <input type="range" id="renderDistance" min="0" max="200000" step="500" value="0" />
+            <div class="val"><input id="renderDistanceNum" type="number" min="0" max="200000" step="500" value="0" /><span class="unit">HU</span></div></div>
           <h4>准星</h4>
           <div class="row"><label>显示准星</label>
             <input type="checkbox" id="showCrosshair" checked /></div>
@@ -237,21 +301,6 @@
             <input type="checkbox" id="chOutline" checked /></div>
           <div class="row"><label>中心点</label>
             <input type="checkbox" id="chDot" /></div>
-          <div class="row"><label>视野 FOV</label>
-            <input type="range" id="fov" min="20" max="150" step="0.1" value="73.6" />
-            <div class="val"><input id="fovNum" type="number" min="20" max="150" value="73.6" /><span class="unit">°</span></div></div>
-          <div class="row"><label>亮度（曝光）</label>
-            <input type="range" id="exposure" min="0.02" max="40" step="0.01" value="2" />
-            <div class="val"><input id="exposureNum" type="number" min="0.02" max="40" step="0.01" value="2" /></div></div>
-          <div class="row"><label>暗部提升（γ）</label>
-            <input type="range" id="lightGamma" min="0.10" max="8.00" step="0.01" value="1" />
-            <div class="val"><input id="lightGammaNum" type="number" min="0.10" max="8.00" step="0.01" value="1" /></div></div>
-          <div class="row"><label>模型光照</label>
-            <input type="range" id="ambientScale" min="0" max="10" step="0.01" value="1" />
-            <div class="val"><input id="ambientScaleNum" type="number" min="0" max="10" step="0.01" value="1" /></div></div>
-          <div class="row"><label title="0 = 自动（按地图包围盒对角线的一半）；单位 ≈ 1 英寸。超出的空间块不渲染（省 draw call）">渲染距离</label>
-            <input type="range" id="renderDistance" min="0" max="200000" step="500" value="0" />
-            <div class="val"><input id="renderDistanceNum" type="number" min="0" max="200000" step="500" value="0" /><span class="unit">HU</span></div></div>
           <h4>速度面板</h4>
           <div class="row"><label>模式</label>
             <select id="speedMode">
@@ -259,19 +308,6 @@
               <option value="lateral-vertical">横向 + 竖向</option>
               <option value="total">综合速度</option>
             </select></div>
-          <h4>纹理画质</h4>
-          <div class="row"><label title="原始 = VTF 解码原图；压缩 = mosaic 字节码还原的低清纹理（切换即时生效，无需重载地图）">画质</label>
-            <select id="textureQuality">
-              <option value="original" selected>原始纹理</option>
-              <option value="mini">压缩低清</option>
-            </select></div>
-          <h4>光照模式</h4>
-          <div class="row"><label title="预烘焙 = 每像素采 lightmap atlas + 逐顶点/环境盒烘焙光照（每帧光照开销更大）；纯纹理 = 只上漫反射贴图（每帧光照开销最小）">模式</label>
-            <select id="lightingMode">
-              <option value="baked" selected>预烘焙</option>
-              <option value="texture">纯纹理</option>
-            </select></div>
-          <p class="hint" id="lightingModeHint">预烘焙：每个像素都采光照图集并算逐顶点/环境盒烘焙光照，画面有明暗关系，代价是每帧光照开销更大。纯纹理：只上漫反射贴图，不采光照图、不算烘焙项，每帧光照开销最小——这就是给「人物移动时渲染速度不要大幅跳变」用的旋钮（实际幅度取决于 GPU / 分辨率 / 地图）。切换即时生效（不重建场景、不打断操作）。</p>
           <h4>近平面（防贴墙透视）</h4>
           <div class="row"><label title="近平面贴墙自适应探测距离：越大越斜的贴墙角度也能探测到，性能开销略增">探测距离</label>
             <input type="range" id="nearProbeDist" min="100" max="300" step="1" value="200" />
@@ -281,8 +317,8 @@
             <div class="val"><input id="nearRatioNum" type="number" min="0" max="1" step="any" value="0" /></div></div>
 
           <!-- 更多画面项（T-688）：控件由共享规格表 src/renderer-shared/config/render-panel-spec.ts 生成，
-               绑定点在 src/app.ts 的 setupRenderPanel；本页已有的 FOV / 亮度 / 暗部提升 / 模型光照 /
-               渲染距离 / 画质档 / 光照模式 / 近平面 两项不重复出现。 -->
+               绑定点在 src/app.ts 的 setupRenderPanel。共享构建器自带的「全部恢复默认」在本端隐藏，
+               由页头「恢复默认」统一触发（panel-controller 的 resetPane('display')）。 -->
           <div id="renderPanel"></div>
         </div>
 
@@ -291,35 +327,38 @@
              勾选写 config.optimize → 下发 Worker 副本 + 共享渲染层 setOptimizeFlags；
              偏好落 vbsp:panelPrefs 的 optimize 段，启动时由 PanelController 恢复。 -->
         <div class="mod-pane" data-pane="optimize">
-          <div class="pane-title">优化处理</div>
-          <div class="pane-desc">帧预算不足时的兜底开关 · 默认全关（勾选有画面代价）</div>
+          <div class="pane-head">
+            <div class="pane-head-main"><div class="pane-title">性能兜底</div><div class="pane-desc">帧预算不足时的兜底开关 · 默认全关，勾选会有画面代价</div></div>
+            <div class="pane-acts"></div>
+          </div>
           <h4>渲染兜底</h4>
-          <div class="row"><label title="帧预算不足时跳过水面反射 RT 更新，直接复用上一帧结果（画面滞后 1 帧，帧时间更稳）">掉槽时复用上一帧水面反射（画面滞后 1 帧）</label>
+          <div class="row row-wide"><label title="帧预算不足时跳过水面反射 RT 更新，直接复用上一帧结果（画面滞后 1 帧，帧时间更稳）">掉槽时复用上一帧水面反射<small>画面滞后 1 帧</small></label>
             <input type="checkbox" id="waterRtReuse" /></div>
-          <div class="row"><label title="帧预算不足时跳过光晕层，直接输出画面（光效减弱，省掉后处理开销）">掉槽时跳过光晕直出（光效减弱）</label>
+          <div class="row row-wide"><label title="帧预算不足时跳过光晕层，直接输出画面（光效减弱，省掉后处理开销）">掉槽时跳过光晕直出<small>光效减弱</small></label>
             <input type="checkbox" id="bloomDirect" /></div>
-          <div class="row"><label title="水面镜面反射 RT 降为一半分辨率（1024² → 512²；倒影变糊，省显存与采样开销）">水面镜面反射半分辨率（倒影变糊）</label>
+          <div class="row row-wide"><label title="水面镜面反射 RT 降为一半分辨率（1024² → 512²；倒影变糊，省显存与采样开销）">水面镜面反射半分辨率<small>倒影变糊</small></label>
             <input type="checkbox" id="mirrorLowRes" /></div>
         </div>
 
         <!-- 视角 -->
         <div class="mod-pane" data-pane="view">
-          <div class="pane-title">视角</div>
-          <div class="pane-desc">自由视角（noclip）</div>
+          <div class="pane-head">
+            <div class="pane-head-main"><div class="pane-title">视角</div><div class="pane-desc">自由视角（noclip）</div></div>
+            <div class="pane-acts"></div>
+          </div>
           <h4>自由视角</h4>
-          <div class="row"><label>切换</label>
-            <button class="small" id="noclipToggle">自由视角</button></div>
+          <div class="row"><label>自由视角</label>
+            <button class="small toggle-btn" id="noclipToggle" type="button" title="切换自由视角（noclip）"></button></div>
           <div class="row"><label>移动速度</label>
             <input type="range" id="noclipSpeed" min="200" max="3000" step="1" value="800" />
             <div class="val"><input id="noclipSpeedNum" type="number" value="800" /><span class="unit">u/s</span></div></div>
         </div>
 
         <div class="mod-pane" data-pane="health">
-          <div class="pane-title">权威健康</div>
-          <div class="pane-desc">Worker 权威健康探测消息（最近 30 条；不进 console）</div>
-          <div class="row"><label>消息数</label>
-            <span id="health-count">0</span>
-            <button class="small" id="health-clear">清空</button></div>
+          <div class="pane-head">
+            <div class="pane-head-main"><div class="pane-title">权威健康</div><div class="pane-desc">权威健康探测消息（最近 30 条；不进 console）· 共 <span id="health-count">0</span> 条</div></div>
+            <div class="pane-acts"><button class="small" id="health-clear" type="button">清空</button></div>
+          </div>
           <pre id="health-log" class="health-log">（无消息）</pre>
         </div>
       </div>

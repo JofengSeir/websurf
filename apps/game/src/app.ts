@@ -45,6 +45,7 @@ import { PanelController } from './panel/panel-controller.js';
 import { SavePointStore, SAVEPOINT_MAX, type SavePoint } from './savepoint.js';
 import { readRenderPrefs, writeRenderPrefs, applyRenderPrefs, defaultRenderPrefs, readPrefsPath, prefsPathPatch } from '../../../src/renderer-shared/config/render-prefs.js';
 import { buildRenderPanel, type RenderPanelApi, type RenderPanelValue } from '../../../src/renderer-shared/config/render-panel-ui.js';
+import { RENDER_REV } from '../../../src/renderer-shared/scene/render-session.js';
 import { setOptimizeFlags } from '../../../src/renderer-shared/config/optimize-flags.js';
 import type { RenderPanelItem } from '../../../src/renderer-shared/config/render-panel-spec.js';
 import {
@@ -77,6 +78,10 @@ const dom = {
   loadingFill: document.getElementById('loadingFill') as HTMLElement | null,
   loadingStage: document.getElementById('loadingStage') as HTMLElement | null,
   loadingPct: document.getElementById('loadingPct') as HTMLElement | null,
+  // 面板侧栏页脚：当前地图名 + 构建版本（点击复制）
+  panelMapName: document.getElementById('panelMapName') as HTMLElement | null,
+  panelBuildRev: document.getElementById('panelBuildRev') as HTMLButtonElement | null,
+  panelBuildRevText: document.getElementById('panelBuildRevText') as HTMLElement | null,
 } as const;
 
 const keyboard = new KeyboardInput(loadKeymap());
@@ -202,6 +207,7 @@ async function main(): Promise<void> {
 
   // 4. 面板（参数变更实时同步主线程物理；构造与回调见 createPanel）
   panel = createPanel(bridge);
+  initPanelMeta();
 
   // 5. 输入绑定（按键簇标签先就位，避免首帧显示 HTML 里的默认键名）
   initKeyHud();
@@ -721,6 +727,10 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
   chatOverlay?.clear();
   // 存点按地图持久化：记录地图名并加载该地图存点列表（换地图清空/载入）
   currentMapName = fileName.replace(/\.bsp$/i, '');
+  if (dom.panelMapName) {
+    dom.panelMapName.textContent = currentMapName || '未载入';
+    dom.panelMapName.title = currentMapName;
+  }
   renderPanelHandle?.sync(); // 顶部「未载入地图」状态行随之收起
   savePointStore.load(currentMapName);
   panel?.renderSavePoints(savePointStore.all());
@@ -1144,6 +1154,25 @@ function setupRenderPanel(): void {
     },
   };
   renderPanelHandle = buildRenderPanel(host, api);
+}
+
+let revCopyTimer: number | null = null;
+function initPanelMeta(): void {
+  if (dom.panelBuildRevText) {
+    dom.panelBuildRevText.textContent = RENDER_REV;
+    dom.panelBuildRevText.title = RENDER_REV;
+  }
+  dom.panelBuildRev?.addEventListener('click', () => {
+    void navigator.clipboard?.writeText(RENDER_REV).catch(() => {});
+    const btn = dom.panelBuildRev;
+    if (!btn) return;
+    btn.classList.add('copied');
+    if (revCopyTimer !== null) clearTimeout(revCopyTimer);
+    revCopyTimer = window.setTimeout(() => {
+      btn.classList.remove('copied');
+      revCopyTimer = null;
+    }, 1200);
+  });
 }
 
 setupRenderPanel();
