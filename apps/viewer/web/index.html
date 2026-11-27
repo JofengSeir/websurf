@@ -91,7 +91,7 @@
 <!-- 拖拽高亮反馈条：`#dropzone`，拖拽期间由 `apps/viewer/src/ui/hud.ts` 切换 `active` 类 -->
   <div id="dropzone">松开鼠标：.bsp 加载地图、.replay 导入记录、.dem 导入录像</div>
 
-  <!-- 地图加载进度覆盖层（导演工作台风格） -->
+  <!-- 地图加载进度条（导演工作台风格：纯白主体 + 刻度尺，不遮挡侧栏与顶栏） -->
   <div id="loadingOverlay">
     <div class="load-card">
       <div class="load-head">
@@ -101,7 +101,10 @@
         </div>
         <span class="load-pct" id="loadingPct">0%</span>
       </div>
-      <div class="load-track"><div class="load-fill" id="loadingFill"></div></div>
+      <div class="load-progress">
+        <div class="load-track"><div class="load-fill" id="loadingFill"></div></div>
+        <div class="load-ruler" aria-hidden="true"></div>
+      </div>
       <div class="load-meta">
         <span class="load-stage"><i class="load-dot" aria-hidden="true"></i><span id="loadingStage">初始化</span></span>
         <span class="load-tag" aria-hidden="true">SCENE LOAD</span>

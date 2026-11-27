@@ -100,6 +100,7 @@ function setupEntitySystem(entityIoJson?: string): void {
 const sidebarEl = qs('sidebar');
 const dockEl = qs('dock');
 const telemetryEl = qs('telemetry');
+const loadingOverlayEl = qs('loadingOverlay');
 const sidebarToggle = qs<HTMLButtonElement>('sidebarToggle');
 
 sidebarToggle?.addEventListener('click', () => {
@@ -108,6 +109,7 @@ sidebarToggle?.addEventListener('click', () => {
   dockEl?.classList.toggle('full', hidden);
   // 速度 HUD 锚点跟随可视区域：面板收起 → 全屏居中
   telemetryEl?.classList.toggle('full', hidden);
+  loadingOverlayEl?.classList.toggle('full', hidden);
 });
 
 // ── 两个回放会话 ────────────────────────────────────────────────────
@@ -204,6 +206,7 @@ function switchTab(name: string): void {
     sidebarToggle?.classList.add('active');
     dockEl?.classList.remove('full');
     telemetryEl?.classList.remove('full');
+    loadingOverlayEl?.classList.remove('full');
   }
 }
 
@@ -618,7 +621,7 @@ function scheduleMapReload(): void {
 }
 
 const loadingOverlay = createLoadingOverlay(() => ({
-  overlay: document.getElementById('loadingOverlay'),
+  overlay: loadingOverlayEl,
   sub: document.getElementById('loadingSub'),
   fill: document.getElementById('loadingFill'),
   stage: document.getElementById('loadingStage'),
@@ -636,7 +639,7 @@ async function loadBsp(file: File): Promise<void> {
   loadedMapName = file.name;
   displayPanelHandle?.sync(); // 顶部「未载入地图」状态行随之收起
   setLoadBusy(true);
-  hud.clearGuideError();
+  hud.hideGuide();
   loadingOverlay.show(file.name);
   const prevStatus = hud.statusText(); // 换图失败后要还原的旧地图摘要
   try {
@@ -672,7 +675,6 @@ async function loadBsp(file: File): Promise<void> {
       `${file.name}：${result.meta.magic ?? 'VBSP'}，${result.meta.num_brushes ?? 0} brushes，` +
         `${result.spawnPoints.length} 出生点，GLB ${glbKb} KB${initialPoseNote(init)}`,
     );
-    hud.hideGuide();
     loadingOverlay.finish();
   } catch (e) {
     loadingOverlay.hide();
