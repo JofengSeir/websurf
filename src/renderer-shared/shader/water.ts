@@ -57,6 +57,7 @@ import {
   advanceWaterAnimation,
   cullBeneathMaterials,
   hasRefractionTarget,
+  needsRefractionDepthPass,
   renderRefraction,
   resetRefractionState,
   updateRefrUniforms,
@@ -312,7 +313,7 @@ export function renderWaterFramePasses(
     refrSinceRender = 0;
     framesSinceAnyPass = 0;
     const tPass = performance.now();
-    renderRefraction(renderer, scene, camera);
+    renderRefraction(renderer, scene, camera, !needsRefractionDepthPass(visibleHeights));
     recordWaterCost(performance.now() - tPass);
     waterBudgetStats.passes++;
     markRefrPose(camera); // 只有真渲过才标记，跳过的帧留到下一帧补渲

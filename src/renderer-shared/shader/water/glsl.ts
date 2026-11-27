@@ -40,6 +40,7 @@ export const WATER_VERTEX_HEADER =
       'uniform float vbspWaterReflStrength;',
       'uniform float vbspWaterDepthGate;',
       'uniform float vbspWaterAlphaFloor;',
+      'uniform float vbspWaterAlphaCap;',
       'uniform vec3 vbspWaterBaseColor;',
       'uniform float vbspWaterTintStrength;',
       'uniform float vbspWaterAbsorb;',
@@ -363,6 +364,7 @@ export const WATER_VERTEX_HEADER =
       // 反射越强越不透（Source 的 `lerp(refract, reflect, fresnel)` 同样是替换而不是叠加）
       '		diffuseColor.a = mix( diffuseColor.a, 1.0, vbspMix );',
       '	}',
+      '	diffuseColor.a = min( diffuseColor.a, vbspWaterAlphaCap );',
       // 没有水下几何（RT alpha=0）⇒ 水几乎透明，让主画面的冰/岩透出来；
       // 不能铺雾蓝，否则就是 owner 看到的“整片蓝板”。
       'if ( vbspNoGeom ) diffuseColor.a = min( diffuseColor.a, 0.25 );',

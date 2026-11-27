@@ -2112,6 +2112,19 @@ test('mergeIntoChunks 隔离不同半透明材质，且 mergeWaterSurfaces 支�
   const mergedWater = wRoot.children[0];
   assert.equal(Array.isArray(mergedWater.material), false, '单槽水面归并后应传单个 Material');
   assert.equal(mergedWater.geometry.attributes.position.count, 12);
+
+  // 3. 同层同材质但属性集不同（有/无 normal 或交错/非交错）时按属性签名分子桶各自归并，不放弃整组
+  const mkMixed = (x0, withNormal) => {
+    const m = makeQuad(x0, 200, 0, x0 + 50, 200, 50, waterMat);
+    if (withNormal) {
+      m.geometry.setAttribute('normal', new THREE.Float32BufferAttribute(new Array(18).fill(0).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
+    }
+    return m;
+  };
+  const mRoot = new THREE.Group();
+  mRoot.add(mkMixed(0, true), mkMixed(50, true), mkMixed(100, false), mkMixed(150, false));
+  const mStats = mergeWaterSurfaces(mRoot);
+  assert.ok(mStats && mStats.groups === 2 && mStats.mergedMeshes === 2 && mStats.removedMeshes === 4, '混合属性水面应按属性签名分子桶全部归并');
 });
 
 

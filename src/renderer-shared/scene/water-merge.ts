@@ -22,6 +22,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { SKY_LAYER } from '../environment/miniature-sky.js';
+import { normalizeMergeGroup } from './scene-optimizer.js';
 
 /** 高度层厚度（世界单位）：水面全部落在同一个 8 HU 桶里时归并成 1 个 mesh。 */
 const HEIGHT_BUCKET_HU = 8;
@@ -43,6 +44,23 @@ interface WaterMeshEntry {
   layer: number;
   /** 材质槽签名（含 `userData.vbsp_water` 的稳定序列化） */
   signature: string;
+  /** 几何属性布局签名（避免不同属性集强行合并失败导致整组放弃） */
+  attrKeys: string;
+}
+
+function geomAttrSig(geometry: THREE.BufferGeometry): string {
+  const parts: string[] = [];
+  for (const name of Object.keys(geometry.attributes).sort()) {
+    const a = geometry.attributes[name] as THREE.BufferAttribute;
+    const holder = a as unknown as {
+      isInterleavedBufferAttribute?: boolean;
+      array?: { constructor?: { name?: string } };
+      data?: { array?: { constructor?: { name?: string } } };
+    };
+    const ctor = holder.array?.constructor?.name ?? holder.data?.array?.constructor?.name ?? 'interleaved';
+    parts.push(`${name}:${a.itemSize}:${a.normalized ? 1 : 0}:${ctor}`);
+  }
+  return parts.join('|');
 }
 
 /** 不改变渲染语义的稳定序列化：对象按键名排序，数组按原顺序。 */
@@ -148,23 +166,14 @@ function parentInverse(parent: THREE.Object3D): THREE.Matrix4 | null {
   return inv.equals(new THREE.Matrix4()) ? null : inv;
 }
 
-/** 合并一个槽的几何；索引状态不一致时把有索引的转成无索引再合并。 */
+/** 合并一个槽的几何；先经 `normalizeMergeGroup` 统一索引/gpuType/交错缓冲再合并。 */
 function mergeSlotGeometries(geoms: THREE.BufferGeometry[]): THREE.BufferGeometry | null {
-  const indexed = geoms.some((g) => !!g.index);
-  const unindexed = geoms.some((g) => !g.index);
-  if (indexed && unindexed) {
-    const converted: THREE.BufferGeometry[] = [];
-    const list = geoms.map((g) => {
-      if (!g.index) return g;
-      const conv = g.toNonIndexed();
-      converted.push(conv);
-      return conv;
-    });
-    const merged = mergeGeometries(list, false);
-    for (const c of converted) c.dispose();
-    return merged;
+  const normalized = normalizeMergeGroup(geoms);
+  const merged = mergeGeometries(normalized, false);
+  for (const g of normalized) {
+    if (!geoms.includes(g)) g.dispose();
   }
-  return mergeGeometries(geoms, false);
+  return merged;
 }
 
 /**
@@ -199,6 +208,7 @@ export function mergeWaterSurfaces(root: THREE.Object3D): WaterMergeStats | null
       parent: mesh.parent ?? root,
       layer: Math.round(worldHeightOf(mesh) / HEIGHT_BUCKET_HU),
       signature: materials.map(materialSignature).join('||'),
+      attrKeys: geomAttrSig(mesh.geometry),
     });
   });
   const diag = { totalMeshes, waterEntries: entries.length, skySkipped, merged: 0, groups: 0 };
@@ -208,10 +218,10 @@ export function mergeWaterSurfaces(root: THREE.Object3D): WaterMergeStats | null
     return null;
   }
 
-  // 组键 = 高度层 + 材质槽签名 + 父节点（同一父节点的世界变换相同才可直接换 mesh）。
+  // 组键 = 高度层 + 材质槽签名 + 属性布局 + 父节点（同一父节点的世界变换相同才可直接换 mesh）。
   const buckets = new Map<string, WaterMeshEntry[]>();
   for (const entry of entries) {
-    const key = `${entry.layer}|${entry.signature}|${entry.parent.uuid}`;
+    const key = `${entry.layer}|${entry.signature}|${entry.attrKeys}|${entry.parent.uuid}`;
     const list = buckets.get(key);
     if (list) list.push(entry);
     else buckets.set(key, [entry]);

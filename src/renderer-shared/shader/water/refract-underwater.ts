@@ -98,6 +98,7 @@ const g = globalThis as {
   __vbspWaterDepthGate?: unknown;
   __vbspWaterHideAllRefr?: unknown;
   __vbspWaterAlphaFloor?: unknown;
+  __vbspWaterAlphaCap?: unknown;
   /** 近处/远处的水面不透明度（缺省 0.10 / 0.45）：近处近乎透明、远处带蓝更像水。 */
   __vbspWaterNearAlpha?: unknown;
   __vbspWaterFarAlpha?: unknown;
@@ -395,6 +396,10 @@ const waterBoxes = new Map<THREE.Mesh, THREE.Box3>();
 const _waterBox = new THREE.Box3();
 /** 装配期预筛的 `*_beneath` 水下底面材质 → 水位高度，避免每帧对全部水材质跑正则。 */
 const beneathMaterials = new Map<THREE.MeshBasicMaterial, number>();
+/** 装配期预筛的非水体半透明网格 + 世界包围盒底面 y，用于在折射 RT 中跳过水面之上的玻璃/透明物。 */
+const aboveRefrCandidates: Array<{ mesh: THREE.Mesh; minY: number }> = [];
+/** 当前场景最低一层水面的高度（仅最低层在多面水中会落回 depthRT 测深）。 */
+let lowestWaterHeight: number | null = null;
 
 function refractionOff(): boolean {
   // **缺省开**（2026-10-21 第 4 轮）：编译错误已由 harness 硬门禁兜住（出现 shader error 直接失败），
@@ -429,8 +434,20 @@ function planeDepthRange(sortedHeights: number[], fallback: number): number {
   return Number.isFinite(best) ? best : fallback;
 }
 
+/** 是否需要跑第二趟折射 depthRT（单层水或最低层水在视锥内时才需要；多层水高处像素只查 planeA/B）。 */
+export function needsRefractionDepthPass(visibleHeights: Set<number> | null): boolean {
+  if (planeCount.value <= 1 || lowestWaterHeight === null || visibleHeights === null) return true;
+  if (num(g.__vbspWaterDebugDepth, 0) > 0.5) return true;
+  return visibleHeights.has(lowestWaterHeight);
+}
+
 /** 渲染折射 RT：隐藏水面材质后把同一相机看到的场景渲进 color+depth。 */
-export function renderRefraction(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera): void {
+export function renderRefraction(
+  renderer: THREE.WebGLRenderer,
+  scene: THREE.Scene,
+  camera: THREE.Camera,
+  skipDepthPass = false,
+): void {
   const canvas = renderer.getDrawingBufferSize(_refrCanvasSize);
   // 只用于 A/B 取证：`__vbspWaterRefrScale = 0.25` 看「RT 分辨率是不是瓶颈」（改了会触发一次重建）。
   const scale = (g as { __vbspWaterRefrScale?: number }).__vbspWaterRefrScale ?? REFR_SCALE;
@@ -530,6 +547,18 @@ export function renderRefraction(renderer: THREE.WebGLRenderer, scene: THREE.Sce
       }
     });
   }
+  // 相机在水面上方时，隐藏严格位于该水面之上的非水体半透明网格（如水池上方网格玻璃），
+  // 既省去折射/深度 pass 中的半透明 draw，也避免主画面玻璃叠加折射 RT 里的玻璃产生双层泛白。
+  if (nearest !== null && camera.position.y > nearest - 0.5) {
+    for (let i = 0; i < aboveRefrCandidates.length; i++) {
+      const c = aboveRefrCandidates[i];
+      if (!c.mesh.visible) continue;
+      if (c.minY >= nearest - 0.5) {
+        c.mesh.visible = false;
+        _refrHidden.push(c.mesh);
+      }
+    }
+  }
   const prevTarget = renderer.getRenderTarget();
   refrRendering = true;
   // RT 的"背景"要与主画面接近：本工程的天空是**网格**（不是 `scene.background`），
@@ -551,7 +580,7 @@ export function renderRefraction(renderer: THREE.WebGLRenderer, scene: THREE.Sce
     renderer.render(scene, camera);
     // 深度 pass：同一相机、同一"隐藏水面"集合，用自带 shader 把视线距离写进颜色。
     // ① 2026-11-17：默认改为采颜色 RT 的深度附件（见 depthTexUniform 注释），这趟只剩回退路径。
-    if (depthRT && depthMat && depthTexOn.value <= 0.5) {
+    if (!skipDepthPass && depthRT && depthMat && depthTexOn.value <= 0.5) {
       const prevOverride = scene.overrideMaterial;
       scene.overrideMaterial = depthMat;
       renderer.setRenderTarget(depthRT);
@@ -845,11 +874,10 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
     list.push({ name: material.name, thickness: w.waterThickness });
   }
   const baseColor = darkFog ? fog.clone().convertSRGBToLinear() : new THREE.Color(0.12, 0.52, 0.72);
-  const tintDefault = darkFog ? 0.3 : 0;
-  const alphaFloorDefault = darkFog ? 0.2 : 0;
-  // 亮色 fog（boreas）保留原来的反射强度/深度 gate；暗色 fog（666）才为浅水反射
-  // 关 gate、提高强度。
-  const reflectDefault = darkFog ? 0.3 : 0.12;
+  const tintDefault = darkFog ? 0.10 : 0;
+  const alphaFloorDefault = darkFog ? 0.08 : 0;
+  // 亮色 fog（boreas）保留原来的反射强度/深度 gate；暗色 fog（666）适度压低泛白与反射强度，水下更通透。
+  const reflectDefault = darkFog ? 0.16 : 0.12;
   const depthGateDefault = darkFog ? 0 : 1;
   material.color.copy(baseColor);
   // 调试：覆盖基色（isolate 判断波纹形状时用明显颜色）
@@ -864,8 +892,10 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
   const lift = darkFog ? 1.0 : Math.max(1, num(g.__vbspWaterLift, 1.35));
   // R3 掠射采样稳定：位移 × att，视线越接近水平越收紧（只动采样坐标，不补偿任何观感量）。
   const grazAtt = darkFog ? 1.0 : Math.min(1, Math.max(0, num(g.__vbspWaterGrazAtt, 0.35)));
-  // R4 反射限幅：混合权重 clamp 上限；反射仍然存在（与被否决的「关反射」方向 #4 的本质区别）。
-  const reflCap = darkFog ? 0.4 : Math.min(1, Math.max(0, num(g.__vbspWaterReflCap, 0.25)));
+  // R4 反射限幅：混合权重 clamp 上限；暗雾流收紧到 0.22 避免浅水反白，亮雾流保持 0.25。
+  const reflCap = darkFog
+    ? Math.min(1, Math.max(0, num(g.__vbspWaterReflCap, 0.22)))
+    : Math.min(1, Math.max(0, num(g.__vbspWaterReflCap, 0.25)));
   // R5 真·打空像素：只在亮雾流启用；回落色缺省 = 本材质 fog 线性值 ×0.25，
   // 装配完成后按「最近下方 beneath 材质的 $fogcolor 原值（按线性使用）」回填。
   const r5on = darkFog ? 0 : 1;
@@ -906,10 +936,13 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
         ? 0
         : Math.max(0, Math.min(1, num(g.__vbspWaterDepthGate, depthGateDefault))),
     };
-    // 暗色 fog（666）：浅水 alpha 下限 0.2，近透明但有轻微倒影；
-    // 亮色 fog（boreas）：下限 0，按深度/岸边公式保持表层透明。
+    // 暗色 fog（666）：浅水 alpha 下限 0.08、上限 0.58，近处更通透；
+    // 亮色 fog（boreas）：下限 0、上限 1.0，保持原深度泛蓝观感。
     shader.uniforms.vbspWaterAlphaFloor = {
       value: Math.max(0, Math.min(1, num(g.__vbspWaterAlphaFloor, alphaFloorDefault))),
+    };
+    shader.uniforms.vbspWaterAlphaCap = {
+      value: Math.min(1, Math.max(0.05, num(g.__vbspWaterAlphaCap, darkFog ? 0.58 : 1.0))),
     };
     // 水体色（最终往它收敛）+ 收敛强度
     shader.uniforms.vbspWaterBaseColor = { value: new THREE.Vector3(baseColor.r, baseColor.g, baseColor.b) };
@@ -940,9 +973,9 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
     // 想退回常数膜厚模型：`__vbspWaterUseDepthPass=false`。
     shader.uniforms.vbspWaterUseDepthPass = { value: g.__vbspWaterUseDepthPass === false ? 0 : 1 };
     // 「水底太蓝了，浅一些」：fogMix 上限 + 中段软化曲线。
-    // R1（T-650 v2）：雾罩封顶挂亮雾流 —— 上限 0.45 → 0.30（暗雾流保持 0.45，666 零回归）。
+    // R1（T-650 v2）：雾罩封顶挂亮雾流 —— 亮雾流 0.30（boreas 不变）；暗雾流压至 0.25 减轻灰白浑浊。
     shader.uniforms.vbspWaterFogMax = {
-      value: Math.min(1, Math.max(0, num(g.__vbspWaterFogMax, darkFog ? 0.45 : 0.30))),
+      value: Math.min(1, Math.max(0, num(g.__vbspWaterFogMax, darkFog ? 0.25 : 0.30))),
     };
     // 「稍微白点、近似透明」：水色下限（tp-more 用的是 0）
     shader.uniforms.vbspWaterFogFloor = {
@@ -1124,7 +1157,18 @@ export function applyWaterShaders(root: THREE.Object3D): number {
     }
     // 镜像驱动挂在**水面块**上（块里只要有一槽是水就算），高度取包围球中心
     // ⚠️ 体检与高度表**不受 `__vbspWaterReflectOff` 影响**：水深计算要用它们。
-    if (mats.some((m) => readWater(m))) {
+    if (!mats.some((m) => readWater(m))) {
+      if (mats.some((m) => m && m.transparent === true) && mesh.geometry) {
+        if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+        if (mesh.geometry.boundingBox) {
+          mesh.updateMatrixWorld();
+          _waterBox.copy(mesh.geometry.boundingBox).applyMatrix4(mesh.matrixWorld);
+          aboveRefrCandidates.push({ mesh, minY: _waterBox.min.y });
+        }
+      }
+      return;
+    }
+    {
       const geom = mesh.geometry;
       if (!geom.boundingSphere) geom.computeBoundingSphere();
       if (!geom.boundingBox) geom.computeBoundingBox();
@@ -1203,6 +1247,7 @@ export function applyWaterShaders(root: THREE.Object3D): number {
     planeA.value.copy(a);
     planeB.value.copy(b);
     planeCount.value = planeHeights.length;
+    lowestWaterHeight = Math.round(planeHeights[0] * 100) / 100;
     // 竖直深度的归一化范围：用**相邻水层的最小合理间隔**（就是这张图的池深）。
     // 例 surf_666 升序 -16064 / -11968 / -11071 / 15296 / 15312 ⇒ 897 被选中（池深）。
     // 单层薄膜（如 boreas，只有 y=197）⇒ 无间隔，落回缺省值。
@@ -1338,6 +1383,8 @@ export function resetRefractionState(): void {
   waterMeshes.clear();
   waterBoxes.clear();
   beneathMaterials.clear();
+  aboveRefrCandidates.length = 0;
+  lowestWaterHeight = null;
   materialHeight.clear();
   materialDepth.clear();
   beneathFogHolders.clear();
