@@ -433,12 +433,11 @@ export class PathRecorder {
   }
 
   /**
-   * 记一个渲染物理节点。调用点 `apps/debug/src/renderer/renderer-main.ts` 在每个 rAF 物理步
+   * 记一个渲染物理节点。调用点 `apps/debug/src/renderer/renderer-main.ts` 在每个物理步
    * 里调一次（`predPhys.tick` 之后读 `predPhys.state()`）。
    *
-   * **恒 append**：不在记录状态时也压入 `renderNodes`——记录器的 render 节点下标必须与调用点
-   * `shared.writeRenderSample(..., i0, ...)` 的 `i0` 一一对应，中途少压一个节点就会整体错位。
-   * 绘制、导出、计数只看 `rec`：未记录时不更新 `prevRender`、不连线、不计数、不进导出。
+   * **未记录时早退**：`RendererMain.renderSampleIndex` 已独立维护 `writeRenderSample` 的 `i0`
+   * 序号；若在未录制期也以 1000Hz 持续 append `PathPoint`，会导致 `renderNodes` 无上限增长并触发 Major GC。
    * @param t 主线程 `performance.now()`（ms）
    * @param extra 可选的逐步状态（速度/着地/按键掩码/步长）：只在记录期节点上写入，
    *   供离线逐帧重放定位「某一步速度被清零」这类问题（见 `PathPoint` 同名字段注释）。
@@ -453,24 +452,22 @@ export class PathRecorder {
       yaw?: number; pitch?: number;
     },
   ): void {
-    const p: PathPoint = { t, x, y, z };
-    if (this.recording) {
-      p.rec = true;
-      if (extra) {
-        p.vx = extra.vx;
-        p.vy = extra.vy;
-        p.vz = extra.vz;
-        p.g = extra.g;
-        p.k = extra.k;
-        p.dt = extra.dt;
-        p.yaw = extra.yaw;
-        p.pitch = extra.pitch;
-      }
-      this.recordedRenderCount++;
-      const prev = this.prevRender;
-      if (prev && !isJump(prev, p)) this.renderBuf.pushPair([prev.x, prev.y, prev.z], [x, y, z], [0, 0, 0]);
-      this.prevRender = p;
+    if (!this.recording) return;
+    const p: PathPoint = { t, x, y, z, rec: true };
+    if (extra) {
+      p.vx = extra.vx;
+      p.vy = extra.vy;
+      p.vz = extra.vz;
+      p.g = extra.g;
+      p.k = extra.k;
+      p.dt = extra.dt;
+      p.yaw = extra.yaw;
+      p.pitch = extra.pitch;
     }
+    this.recordedRenderCount++;
+    const prev = this.prevRender;
+    if (prev && !isJump(prev, p)) this.renderBuf.pushPair([prev.x, prev.y, prev.z], [x, y, z], [0, 0, 0]);
+    this.prevRender = p;
     this.renderNodes.push(p);
   }
 

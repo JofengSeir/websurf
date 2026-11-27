@@ -321,8 +321,13 @@ export function createSimClock(options: SimClockOptions): SimClock {
   let capHz = MIN_RATE_HZ;
   /** 最近一次解析出的有效频率（Hz）。 */
   let rateHz = MIN_RATE_HZ;
-  /** 最近 1s 窗口的步数采样：仅在执行了步进的拍上记录（`atMs` 为拍时间戳）。 */
-  const rateSamples: { atMs: number; count: number }[] = [];
+  /** 最近 1s 窗口的步数采样环形缓冲：O(1) 零分配，避免 1000Hz 下每拍分配对象与 shift()。 */
+  const sampleAt = new Float64Array(MAX_RATE_SAMPLES);
+  const sampleCount = new Int32Array(MAX_RATE_SAMPLES);
+  let sampleHead = 0;
+  let sampleLen = 0;
+  let sampleSum = 0;
+  const freqScratch: ResolvedFreq = { targetHz: MIN_RATE_HZ, capHz: MIN_RATE_HZ, rateHz: MIN_RATE_HZ };
   /** 滚动窗口内的实际步频（Hz）。 */
   let actualHz = 0;
   /** 有效频率变化回调。 */
@@ -349,7 +354,10 @@ export function createSimClock(options: SimClockOptions): SimClock {
         cap = Math.max(MIN_RATE_HZ, Math.min(rawCap, MAX_RATE_HZ));
       }
     }
-    return { targetHz: target, capHz: cap, rateHz: Math.min(target, cap) };
+    freqScratch.targetHz = target;
+    freqScratch.capHz = cap;
+    freqScratch.rateHz = Math.min(target, cap);
+    return freqScratch;
   }
 
   // 构造时先解析一次，让 stats 在首次 pump 前也有有意义的值。
@@ -362,17 +370,29 @@ export function createSimClock(options: SimClockOptions): SimClock {
 
   /** 记录一拍执行结果并刷新 `actualHz`：窗口 = 最早样本 → 当前拍，边界样本计入跨度但不计步数。 */
   function recordRateSample(atMs: number, count: number): void {
-    if (count > 0) rateSamples.push({ atMs, count });
-    while (rateSamples.length > 2 && atMs - rateSamples[0].atMs > ACTUAL_WINDOW_MS) rateSamples.shift();
-    if (rateSamples.length > MAX_RATE_SAMPLES) rateSamples.splice(0, rateSamples.length - MAX_RATE_SAMPLES);
-    if (rateSamples.length < 2) {
+    if (count > 0) {
+      if (sampleLen === MAX_RATE_SAMPLES) {
+        sampleSum -= sampleCount[sampleHead];
+        sampleHead = (sampleHead + 1) % MAX_RATE_SAMPLES;
+        sampleLen--;
+      }
+      const tail = (sampleHead + sampleLen) % MAX_RATE_SAMPLES;
+      sampleAt[tail] = atMs;
+      sampleCount[tail] = count;
+      sampleLen++;
+      sampleSum += count;
+    }
+    while (sampleLen > 2 && atMs - sampleAt[sampleHead] > ACTUAL_WINDOW_MS) {
+      sampleSum -= sampleCount[sampleHead];
+      sampleHead = (sampleHead + 1) % MAX_RATE_SAMPLES;
+      sampleLen--;
+    }
+    if (sampleLen < 2) {
       actualHz = 0;
       return;
     }
-    const first = rateSamples[0];
-    let counted = 0;
-    for (let i = 1; i < rateSamples.length; i++) counted += rateSamples[i].count;
-    const spanMs = atMs - first.atMs;
+    const counted = sampleSum - sampleCount[sampleHead];
+    const spanMs = atMs - sampleAt[sampleHead];
     if (spanMs > 0) actualHz = (counted * 1000) / spanMs;
   }
 
@@ -486,7 +506,9 @@ export function createSimClock(options: SimClockOptions): SimClock {
     timebaseReady = true;
     accMs = 0;
     lastOwedMs = 0;
-    rateSamples.length = 0;
+    sampleHead = 0;
+    sampleLen = 0;
+    sampleSum = 0;
     actualHz = 0;
     const resolved = resolveFreq();
     targetHz = resolved.targetHz;
@@ -503,7 +525,9 @@ export function createSimClock(options: SimClockOptions): SimClock {
     lastNowMs = wallNow();
     accMs = 0;
     lastOwedMs = 0;
-    rateSamples.length = 0;
+    sampleHead = 0;
+    sampleLen = 0;
+    sampleSum = 0;
     actualHz = 0;
   }
 

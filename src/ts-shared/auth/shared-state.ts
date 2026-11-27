@@ -403,6 +403,11 @@ export class MsgState {
     this.publishedTauUs = 0;
   }
 
+  /** 读最近权威帧版本号（0 = 尚未开始；不触发对象分配）。 */
+  readAuthoritativeVersion(): number {
+    return this.latest ? this.latest.va : 0;
+  }
+
   /** 读最近权威帧（Worker `phys-frame` 消息缓存）。 */
   readAuthoritative(): { frame: AuthFrame; va: number } | null {
     return this.latest;
@@ -582,15 +587,24 @@ export class ShmState {
 
   // ── 主线程侧 ───────────────────────────────────────────────
 
-  /** 写入鼠标增量（定点 ×1000 后原子累加；0 不写，省一次原子操作）+ 键位（无条件覆盖：
+  /** 写入鼠标增量（定点 ×1000 后原子累加；0 不写，省一次原子操作与 BigInt 分配）+ 键位（无条件覆盖：
    * 0 也写，松手即清零）。 */
   addInput(dx: number, dy: number, keysMask: number): void {
-    const dxFixed = BigInt(Math.round(dx * 1000));
-    const dyFixed = BigInt(Math.round(dy * 1000));
-    if (dxFixed !== 0n) Atomics.add(this.b64, B_DX_ACC, dxFixed);
-    if (dyFixed !== 0n) Atomics.add(this.b64, B_DY_ACC, dyFixed);
+    if (dx !== 0) {
+      const dxFixed = BigInt(Math.round(dx * 1000));
+      if (dxFixed !== 0n) Atomics.add(this.b64, B_DX_ACC, dxFixed);
+    }
+    if (dy !== 0) {
+      const dyFixed = BigInt(Math.round(dy * 1000));
+      if (dyFixed !== 0n) Atomics.add(this.b64, B_DY_ACC, dyFixed);
+    }
     // 无条件写 keysMask（0 也写）：反映"当前按键状态"，松手即清零
     Atomics.store(this.i32, I_KEYS, keysMask);
+  }
+
+  /** 读权威版本号（0 = 未开始；零分配，供 1000Hz 轮询快速跳过未变化帧）。 */
+  readAuthoritativeVersion(): number {
+    return Atomics.load(this.i32, I_V_A);
   }
 
   /**

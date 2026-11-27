@@ -134,6 +134,8 @@ export interface CalibratorDeps {
   /** 取最新权威帧与版本号 `va`；尚无可用帧时返回 null。
    *  调用点：`correctFromAuthority` 每次被调用时读一次。 */
   readAuth(): { frame: AuthFrame; va: number } | null;
+  /** 可选：只读权威版本号（0 = 未开始），用于 1000Hz 下跳过未变化帧的对象分配。 */
+  readAuthVersion?(): number;
   /** 取当前渲染物理；未就绪（场景未加载/已销毁）时返回 null。
    *  调用点：`correctFromAuthority`、`calibrateVelocity`、`resetTo`、
    *  `applyCollisionCorrection`。 */
@@ -260,6 +262,8 @@ export class AuthorityCalibrator {
   private lastVa = -1;
   private curAuth: AuthSnap | null = null;
   private prevAuthVel: { x: number; y: number; z: number } | null = null;
+  private readonly prevVelScratch = { x: 0, y: 0, z: 0 };
+  private readonly accelScratch = { x: 0, y: 0, z: 0 };
   private prevAuthTimeMs = 0;
   /** 反向同步在途标志：置真后 `correctFromAuthority` 只做追平判定与撤回监视，不再
    *  触发新的兜底同步。 */
@@ -434,25 +438,23 @@ export class AuthorityCalibrator {
   correctFromAuthority(): void {
     const phys = this.deps.getPhys();
     if (!phys) return;
+    const now = performance.now();
+    const inExempt = now < this.teleportExemptUntilMs;
+    if (!inExempt && this.deps.readAuthVersion) {
+      const va = this.deps.readAuthVersion();
+      if (va === 0 || va === this.lastVa) return;
+    }
     const auth = this.deps.readAuth();
     if (!auth) return;
 
     // ── 豁免期（resetTo 之后的 TELEPORT_EXEMPT_MS 窗口）──
     // 不把权威帧的位置/角度写进渲染物理；只刷新权威帧快照供 calibrateVelocity 外推
     // 速度，并把渲染当前状态以 teleport=true 同步给权威，让权威侧在新位置追平。
-    if (performance.now() < this.teleportExemptUntilMs) {
+    if (inExempt) {
       // 记录权威帧快照（供 calibrateVelocity 外推速度），不写渲染物理
       this.lastVa = auth.va;
       const f = auth.frame;
-      this.curAuth = {
-        pos: { ...f.pos },
-        yaw: f.yaw,
-        pitch: f.pitch,
-        vel: { ...f.vel },
-        accel: this.computeAuthAccel(f.vel, f.timeMs),
-        eyeHeight: f.eyeHeight,
-        timeMs: f.timeMs,
-      };
+      this.writeCurAuth(f);
       // 渲染当前状态 → 权威（teleport=true：允许 Worker 丢弃未消费输入增量）
       const st = phys.state() as unknown as SyncPhysState;
       this.emitTeleportSync(st);
@@ -471,21 +473,13 @@ export class AuthorityCalibrator {
     // 的端到端耗时（两者同为 performance.now 基准）。
     if (!this.authFirstFrameLogged) {
       this.authFirstFrameLogged = true;
-      console.info(`[authority] 首个权威帧 @${performance.now().toFixed(0)}ms（va=${auth.va}）`);
+      console.info(`[authority] 首个权威帧 @${now.toFixed(0)}ms（va=${auth.va}）`);
     }
     // 帧龄基准 = 主线程读到这一帧的时刻（同线程时钟）。
     // 不用 frame.timeMs：那是 Worker 的 performance.now，与主线程不同基准。
-    this.authArrivedAtMs = performance.now();
+    this.authArrivedAtMs = now;
     const f = auth.frame;
-    this.curAuth = {
-      pos: { ...f.pos },
-      yaw: f.yaw,
-      pitch: f.pitch,
-      vel: { ...f.vel },
-      accel: this.computeAuthAccel(f.vel, f.timeMs),
-      eyeHeight: f.eyeHeight,
-      timeMs: f.timeMs,
-    };
+    this.writeCurAuth(f);
 
     // 首帧分支（含 clear() 之后）：以权威帧全状态作渲染物理起点
     if (!this.predStarted) {
@@ -500,7 +494,6 @@ export class AuthorityCalibrator {
     const dist = Math.hypot(st.posX - f.pos.x, st.posY - f.pos.y, st.posZ - f.pos.z);
 
     const yawDiff = Math.abs(normalizeAngleDeg(st.yaw - f.yaw));
-    const now = performance.now();
 
     // ── 常规反向重锚 ────────────────────────────────────────────────────
     // 放在 syncInFlight 与冷却早退之前：位置对齐与 yaw 兜底互不影响，而重锚每个渲染
@@ -594,6 +587,36 @@ export class AuthorityCalibrator {
    * 注意：方法名是外部脚本的接口 —— `apps/debug/scripts/jump-apex-verify.mjs`（已随 T-653 移除） 会把它
    * 整体替换成返回零向量的桩函数。
    */
+  private writeCurAuth(f: AuthFrame): void {
+    const accel = this.computeAuthAccel(f.vel, f.timeMs);
+    const cur = this.curAuth;
+    if (!cur) {
+      this.curAuth = {
+        pos: { x: f.pos.x, y: f.pos.y, z: f.pos.z },
+        yaw: f.yaw,
+        pitch: f.pitch,
+        vel: { x: f.vel.x, y: f.vel.y, z: f.vel.z },
+        accel: { x: accel.x, y: accel.y, z: accel.z },
+        eyeHeight: f.eyeHeight,
+        timeMs: f.timeMs,
+      };
+      return;
+    }
+    cur.pos.x = f.pos.x;
+    cur.pos.y = f.pos.y;
+    cur.pos.z = f.pos.z;
+    cur.yaw = f.yaw;
+    cur.pitch = f.pitch;
+    cur.vel.x = f.vel.x;
+    cur.vel.y = f.vel.y;
+    cur.vel.z = f.vel.z;
+    cur.accel.x = accel.x;
+    cur.accel.y = accel.y;
+    cur.accel.z = accel.z;
+    cur.eyeHeight = f.eyeHeight;
+    cur.timeMs = f.timeMs;
+  }
+
   private computeAuthAccel(
     vel: { x: number; y: number; z: number },
     timeMs: number,
@@ -604,19 +627,33 @@ export class AuthorityCalibrator {
     if (suppress) this.accelSuppressFrames--;
     const prev = this.prevAuthVel;
     const prevT = this.prevAuthTimeMs;
-    this.prevAuthVel = { ...vel };
+    const px = prev ? prev.x : 0;
+    const py = prev ? prev.y : 0;
+    const pz = prev ? prev.z : 0;
+    this.prevVelScratch.x = vel.x;
+    this.prevVelScratch.y = vel.y;
+    this.prevVelScratch.z = vel.z;
+    this.prevAuthVel = this.prevVelScratch;
     this.prevAuthTimeMs = timeMs;
-    if (suppress || !prev || prevT <= 0) return { x: 0, y: 0, z: 0 };
+    const out = this.accelScratch;
+    if (suppress || !prev || prevT <= 0) {
+      out.x = 0; out.y = 0; out.z = 0;
+      return out;
+    }
     const dt = (timeMs - prevT) / 1000;
-    if (dt < 0.001 || dt > 0.5) return { x: 0, y: 0, z: 0 };
+    if (dt < 0.001 || dt > 0.5) {
+      out.x = 0; out.y = 0; out.z = 0;
+      return out;
+    }
     // 上下限 ±20000 u/s²：帧间隔最小 0.001s，故该上限等于「1ms 内速度变化 ±20 HU/s」；
     // 超出这一量级的差分来自碰撞瞬间的速度跳变或帧间隔抖动，直接截断以防外推发散。
-    const clamp = (v: number): number => Math.max(-20000, Math.min(20000, v));
-    return {
-      x: clamp((vel.x - prev.x) / dt),
-      y: clamp((vel.y - prev.y) / dt),
-      z: clamp((vel.z - prev.z) / dt),
-    };
+    const ax = (vel.x - px) / dt;
+    const ay = (vel.y - py) / dt;
+    const az = (vel.z - pz) / dt;
+    out.x = ax < -20000 ? -20000 : ax > 20000 ? 20000 : ax;
+    out.y = ay < -20000 ? -20000 : ay > 20000 ? 20000 : ay;
+    out.z = az < -20000 ? -20000 : az > 20000 ? 20000 : az;
+    return out;
   }
 
   /**
@@ -634,43 +671,47 @@ export class AuthorityCalibrator {
    * 物理推进之前；回放模式下跳过）。`now` 必须与 `authArrivedAtMs` 同源，即调用方的
    * rAF 时间戳。
    */
-  calibrateVelocity(now: number): void {
+  calibrateVelocity(now: number, knownOnLadder?: boolean): void {
     const phys = this.deps.getPhys();
     if (!phys || !this.curAuth) return;
-    const st = phys.state() as unknown as SyncPhysState;
-    // 梯上攀爬速度由当前输入与朝向零惯性瞬时决定（ladder_move），不能用延迟的权威速度 + 加速度
-    // 外推去覆盖渲染物理，否则双世界时间差会反复把梯上速度拉成旧方向/零速，导致卡死或脱梯。
-    if (st.onLadder === true) {
-      this.wasOnLadder = true;
-      return;
+    if (knownOnLadder === false && !this.wasOnLadder) {
+      if (now < this.ladderDetachExemptUntilMs) return;
+    } else {
+      const st = phys.state() as unknown as SyncPhysState;
+      // 梯上攀爬速度由当前输入与朝向零惯性瞬时决定（ladder_move），不能用延迟的权威速度 + 加速度
+      // 外推去覆盖渲染物理，否则双世界时间差会反复把梯上速度拉成旧方向/零速，导致卡死或脱梯。
+      if (st.onLadder === true) {
+        this.wasOnLadder = true;
+        return;
+      }
+      // 刚从梯子脱离（含跳离梯面给 270 HU/s 推离速度）：立即把脱离瞬间的位姿与速度同步给权威，
+      // 并开启短暂豁免窗口，防止滞后的权威帧把刚赋予的 270 HU/s 弹出速度覆盖成 0。
+      if (this.wasOnLadder) {
+        this.wasOnLadder = false;
+        this.ladderDetachExemptUntilMs = now + AuthorityCalibrator.LADDER_DETACH_EXEMPT_MS;
+        this.prevAuthVel = null;
+        this.prevAuthTimeMs = 0;
+        this.accelSuppressFrames = 2;
+        this.emitTeleportSync(st);
+        return;
+      }
+      if (now < this.ladderDetachExemptUntilMs) return;
     }
-    // 刚从梯子脱离（含跳离梯面给 270 HU/s 推离速度）：立即把脱离瞬间的位姿与速度同步给权威，
-    // 并开启短暂豁免窗口，防止滞后的权威帧把刚赋予的 270 HU/s 弹出速度覆盖成 0。
-    if (this.wasOnLadder) {
-      this.wasOnLadder = false;
-      this.ladderDetachExemptUntilMs = now + AuthorityCalibrator.LADDER_DETACH_EXEMPT_MS;
-      this.prevAuthVel = null;
-      this.prevAuthTimeMs = 0;
-      this.accelSuppressFrames = 2;
-      this.emitTeleportSync(st);
-      return;
-    }
-    if (now < this.ladderDetachExemptUntilMs) return;
     const a = this.curAuth;
     // 帧龄基准是主线程读到该权威帧的时刻（同线程时钟）。
     // 若改用 a.timeMs（Worker 的 performance.now），两个时钟基准不同，dt 会被一个固定
     // 偏移顶到上限之外，加速度外推随之失效，速度退化为权威帧的原始速度。
     const dt = (now - this.authArrivedAtMs) / 1000;
-    let v = a.vel;
+    let vx = a.vel.x;
+    let vy = a.vel.y;
+    let vz = a.vel.z;
     if (dt > 0 && dt <= 0.1) {
-      v = {
-        x: a.vel.x + a.accel.x * dt,
-        y: a.vel.y + a.accel.y * dt,
-        z: a.vel.z + a.accel.z * dt,
-      };
+      vx += a.accel.x * dt;
+      vy += a.accel.y * dt;
+      vz += a.accel.z * dt;
     }
     // dt<=0（时间戳异常）或 >0.1s（权威停更/暂停恢复）→ 直接用权威速度，不外推防漂移
-    phys.set_velocity(v.x, v.y, v.z);
+    phys.set_velocity(vx, vy, vz);
   }
 
   /**

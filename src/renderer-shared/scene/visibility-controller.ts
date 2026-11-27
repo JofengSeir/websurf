@@ -54,6 +54,8 @@ export interface PvsQuery extends PvsSampler {
   currentClusterId: number;
   update(camPos: THREE.Vector3): void;
   isVisible(clusterId: number): boolean;
+  visibleRow?(): Uint8Array | null;
+  readonly visibleRowVersion?: number;
   /**
    * cluster 的空间范围（`PvsManager` 侧用 leaf AABB 合成）。目前运行期已不再用它做剔除，
    * 保留给诊断/工具脚本读取。
@@ -101,6 +103,11 @@ export interface VisibilityItem {
   /** 世界包围缓存键（geometry.uuid + 16 项 matrixWorld 快照），静态块零重算。 */
   boundsGeom?: string;
   boundsMat?: Float64Array;
+  /** 上次 PVS 判定结果缓存（按 visibleRowVersion 失效，避免同房间每帧扫 clusterIds/triClusters）。 */
+  pvsVisRowVer?: number;
+  pvsVisPvsRef?: PvsQuery;
+  pvsVisResult?: boolean;
+  pvsVisTriFiltered?: boolean;
 }
 
 export interface VisibilityUpdateResult {
@@ -176,6 +183,24 @@ export function isBeyondCullDistanceBox(
   const dy = cameraPos.y - y;
   const dz = cameraPos.z - z;
   return dx * dx + dy * dy + dz * dz > cullDistance * cullDistance;
+}
+
+function anyClusterVisible(
+  ids: readonly number[] | Uint16Array,
+  visRow: Uint8Array | null,
+  pvs: PvsQuery,
+): boolean {
+  if (visRow) {
+    for (let i = 0, n = ids.length; i < n; i++) {
+      const c = ids[i];
+      if (c < 0 || (c < visRow.length && visRow[c] === 1)) return true;
+    }
+    return false;
+  }
+  for (let i = 0, n = ids.length; i < n; i++) {
+    if (pvs.isVisible(ids[i])) return true;
+  }
+  return false;
 }
 
 /** 可见性控制器：`clear()` 后重新 `collect()`，每帧调一次 `update()`。 */
@@ -326,6 +351,7 @@ export class VisibilityController {
       if (Array.isArray(splitClusters) && splitClusters.length > 0) {
         item.clusterIds = splitClusters.slice();
         item.clusterGeom = (item.mesh.geometry as THREE.BufferGeometry | undefined)?.uuid ?? '';
+        item.pvsVisRowVer = -1;
         mapped++;
         continue;
       }
@@ -333,6 +359,7 @@ export class VisibilityController {
       if (typeof splitCluster === 'number') {
         item.clusterIds = [splitCluster];
         item.clusterGeom = (item.mesh.geometry as THREE.BufferGeometry | undefined)?.uuid ?? '';
+        item.pvsVisRowVer = -1;
         mapped++;
         continue;
       }
@@ -359,6 +386,7 @@ export class VisibilityController {
         }
         item.clusterIds = [...set];
         item.clusterGeom = (inst.geometry as THREE.BufferGeometry | undefined)?.uuid ?? '';
+        item.pvsVisRowVer = -1;
         if (item.clusterIds.length > 0) mapped++;
         continue;
       }
@@ -494,6 +522,7 @@ export class VisibilityController {
       }
       item.clusterIds = [...set];
       item.clusterGeom = (item.mesh.geometry as THREE.BufferGeometry | undefined)?.uuid ?? '';
+      item.pvsVisRowVer = -1;
       if (item.clusterIds.length > 0) mapped++;
     }
     if (!quiet && typeof console !== 'undefined') {
@@ -597,6 +626,10 @@ export class VisibilityController {
     let nearTotal = 0;
     let nearVisible = 0;
     const reasons = { pvs: 0, distance: 0 };
+    const visRow = pvsActive && pvsClusterValid && !cullAll && pvs && pvs.visibleRow ? pvs.visibleRow() : null;
+    const rowVer = pvsActive && pvsClusterValid && !cullAll && pvs && typeof pvs.visibleRowVersion === 'number'
+      ? pvs.visibleRowVersion
+      : -1;
     for (const item of this.items) {
       // 用**当前**几何与 matrixWorld 缓存世界包围球/包围盒：静态合并块占绝大多数，
       // 矩阵与几何 uuid 未变时跳过全部矩阵乘法；动态实体移动或换几何时立即原位刷新。
@@ -665,27 +698,46 @@ export class VisibilityController {
         willCull = true;
       } else if (!beyond && pvsActive && pvsClusterValid) {
         if (triFiltered) {
-          const triClusters = (item.mesh.userData.clusterIndex as { clusters?: Uint16Array } | undefined)?.clusters;
-          let anyVisible = item.clusterIds.some((c) => pvs!.isVisible(c));
-          if (!anyVisible && triClusters) {
-            for (let i = 0; i < triClusters.length; i++) {
-              if (pvs!.isVisible(triClusters[i])) {
-                anyVisible = true;
-                break;
-              }
+          if (rowVer >= 0 && item.pvsVisRowVer === rowVer && item.pvsVisPvsRef === pvs && item.pvsVisTriFiltered === true) {
+            willCull = !item.pvsVisResult;
+          } else {
+            const triClusters = (item.mesh.userData.clusterIndex as { clusters?: Uint16Array } | undefined)?.clusters;
+            const anyVisible = anyClusterVisible(item.clusterIds, visRow, pvs!)
+              || (triClusters !== undefined && anyClusterVisible(triClusters, visRow, pvs!));
+            if (rowVer >= 0) {
+              item.pvsVisRowVer = rowVer;
+              item.pvsVisPvsRef = pvs!;
+              item.pvsVisTriFiltered = true;
+              item.pvsVisResult = anyVisible;
             }
+            willCull = !anyVisible;
           }
-          willCull = !anyVisible;
         } else if (isDynamicMoved) {
           // 动态实体离开出生位置后，装载期烘焙的 clusterIds 属于旧房间；改查当前世界中心
           // 所在 cluster，中心落进固体（-1）时放行，避免移动平台/门跨 PVS 门户消失。
           const liveCluster = pvs!.getClusterAt(item.center);
+          const liveVisible = liveCluster < 0
+            ? true
+            : visRow
+              ? (liveCluster < visRow.length && visRow[liveCluster] === 1)
+              : pvs!.isVisible(liveCluster);
           willCull =
             liveCluster >= 0
-            && !pvs!.isVisible(liveCluster)
-            && !item.clusterIds.some((c) => pvs!.isVisible(c));
+            && !liveVisible
+            && !anyClusterVisible(item.clusterIds, visRow, pvs!);
         } else {
-          willCull = !item.clusterIds.some((c) => pvs!.isVisible(c));
+          if (rowVer >= 0 && item.pvsVisRowVer === rowVer && item.pvsVisPvsRef === pvs && item.pvsVisTriFiltered === false) {
+            willCull = !item.pvsVisResult;
+          } else {
+            const anyVisible = anyClusterVisible(item.clusterIds, visRow, pvs!);
+            if (rowVer >= 0) {
+              item.pvsVisRowVer = rowVer;
+              item.pvsVisPvsRef = pvs!;
+              item.pvsVisTriFiltered = false;
+              item.pvsVisResult = anyVisible;
+            }
+            willCull = !anyVisible;
+          }
         }
       }
       let level = LOD_NEAR;

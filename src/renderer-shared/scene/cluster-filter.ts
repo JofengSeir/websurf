@@ -36,6 +36,7 @@ export interface PvsFilterQuery {
    * 单次 15–25 ms；摊平成 `Uint8Array` 后按下标读，配合下面的「块可见签名」跳过可省到 1/3 以下。
    */
   visibleRow?(): Uint8Array | null;
+  readonly visibleRowVersion?: number;
 }
 
 /**
@@ -115,6 +116,9 @@ export interface ClusterIndexStats {
 let lastRow: Uint8Array | null = null;
 /** 行版本号：每次可见行变化 +1（增量块按「上次更新时的版本」判断差分是否连续）。 */
 let rowVersion = 0;
+let lastSeenPvs: PvsFilterQuery | null = null;
+let lastSeenRowVer = -1;
+const clusterRebuildDiag = { rebuilt: 0, skipped: 0, flipped: 0, total: 0, ms: 0, pvsRow: 0 };
 /** 自上次快照以来翻位的 cluster（升序不保证；增量块内部按需二分）。 */
 const pendingChanged: number[] = [];
 /** true = 快照刚建立 / 长度变化，必须全量重建。 */
@@ -125,16 +129,32 @@ let flipEpoch = 0;
 const probeIndex = new Int32Array(0x10000).fill(-1);
 
 /** 更新可见行快照并计算差分。必须在 applyClusterIndex 的每帧开头调用一次。 */
-function refreshRowDiff(row: Uint8Array | null): void {
+function refreshRowDiff(row: Uint8Array | null, pvs: PvsFilterQuery): void {
   if (!row) {
     if (lastRow) lastRow = null;
+    lastSeenPvs = null;
+    lastSeenRowVer = -1;
     pendingChanged.length = 0;
     pendingFull = true;
+    return;
+  }
+  const ver = typeof pvs.visibleRowVersion === 'number' ? pvs.visibleRowVersion : -1;
+  if (
+    ver >= 0 &&
+    pvs === lastSeenPvs &&
+    ver === lastSeenRowVer &&
+    lastRow !== null &&
+    lastRow.length === row.length &&
+    !pendingFull
+  ) {
+    pendingChanged.length = 0;
     return;
   }
   if (!lastRow || lastRow.length !== row.length) {
     lastRow = new Uint8Array(row.length);
     lastRow.set(row);
+    lastSeenPvs = pvs;
+    lastSeenRowVer = ver;
     pendingChanged.length = 0;
     pendingFull = true;
     rowVersion++;
@@ -151,6 +171,8 @@ function refreshRowDiff(row: Uint8Array | null): void {
       changed = true;
     }
   }
+  lastSeenPvs = pvs;
+  lastSeenRowVer = ver;
   pendingFull = false;
   if (changed) rowVersion++;
 }
@@ -655,7 +677,7 @@ export function applyClusterIndex(
   // 无 PVS / 尚未 update 时返回 null，退回原来的 `isVisible` 路径。
   const row = pvs.visibleRow ? pvs.visibleRow() : null;
   // 每帧更新一次可见行快照 + 差分（换房间时真正翻位的 cluster 通常只有几十个）。
-  refreshRowDiff(row);
+  refreshRowDiff(row, pvs);
   const epoch = ++flipEpoch;
   for (const item of items) {
     const st = (item.mesh.userData as { clusterIndex?: ClusterIndexState }).clusterIndex;
@@ -772,14 +794,13 @@ export function applyClusterIndex(
     rebuilt++;
   }
   // 诊断：换房间那一下到底重排了多少块、跳过了多少块、花了多少毫秒（飞行回放调参用）。
-  (globalThis as { __vbspClusterRebuild?: unknown }).__vbspClusterRebuild = {
-    rebuilt,
-    skipped,
-    flipped,
-    total: items.length,
-    ms: (typeof performance !== 'undefined' ? performance.now() : 0) - t0,
-    pvsRow: row ? row.length : 0,
-  };
+  clusterRebuildDiag.rebuilt = rebuilt;
+  clusterRebuildDiag.skipped = skipped;
+  clusterRebuildDiag.flipped = flipped;
+  clusterRebuildDiag.total = items.length;
+  clusterRebuildDiag.ms = (typeof performance !== 'undefined' ? performance.now() : 0) - t0;
+  clusterRebuildDiag.pvsRow = row ? row.length : 0;
+  (globalThis as { __vbspClusterRebuild?: unknown }).__vbspClusterRebuild = clusterRebuildDiag;
   return rebuilt;
 }
 

@@ -90,6 +90,10 @@ export class PvsManager {
   private visibleSet: Set<number> = new Set();
   /** `visibleRow()` 的复用缓冲（见该方法注释：逐三角形 PVS 过滤要按下标读）。 */
   private rowCache: Uint8Array | null = null;
+  /** `rowCache` 版本号与脏标记：仅在可见集或 `__vbspPvsCullAll` 变化时递增/重建。 */
+  private rowVersionNum = 0;
+  private rowDirty = true;
+  private rowBuiltCullAll = false;
   /** 最近一次 `update` 的入参副本（无论该次更新是否生效）。 */
   private lastCheckPos: PvsVec3 = { x: 0, y: 0, z: 0 };
 
@@ -241,7 +245,9 @@ export class PvsManager {
    * @returns true 表示 cluster 已变化且可见集已重算。
    */
   update(pos: PvsVec3): boolean {
-    this.lastCheckPos = { x: pos.x, y: pos.y, z: pos.z };
+    this.lastCheckPos.x = pos.x;
+    this.lastCheckPos.y = pos.y;
+    this.lastCheckPos.z = pos.z;
 
     if (!this.hasPvs) {
       return false;
@@ -274,6 +280,8 @@ export class PvsManager {
 
     this.currentCluster = newCluster;
     this.visibleSet = decoded;
+    this.rowDirty = true;
+    this.rowVersionNum++;
     return true;
   }
 
@@ -370,6 +378,8 @@ export class PvsManager {
     }
     this.currentCluster = clusterId;
     this.visibleSet = decoded;
+    this.rowDirty = true;
+    this.rowVersionNum++;
     return true;
   }
 
@@ -403,6 +413,11 @@ export class PvsManager {
    *
    * 无 PVS 或还没成功 `update` 过时返回 null，调用方应退回保守路径（全部可见）。
    */
+  /** 当前 `visibleRow()` 对应的递增版本号，供消费侧 O(1) 判断可见集是否未变。 */
+  get visibleRowVersion(): number {
+    return this.rowVersionNum;
+  }
+
   visibleRow(): Uint8Array | null {
     if (!this.hasPvs) {
       return null;
@@ -410,6 +425,13 @@ export class PvsManager {
     const cullAll = (globalThis as { __vbspPvsCullAll?: boolean }).__vbspPvsCullAll === true;
     if (!cullAll && this.visibleSet.size === 0) {
       return null;
+    }
+    if (cullAll !== this.rowBuiltCullAll) {
+      this.rowDirty = true;
+      this.rowVersionNum++;
+    }
+    if (!this.rowDirty && this.rowCache && this.rowCache.length === this.clusterCount) {
+      return this.rowCache;
     }
     let row = this.rowCache;
     if (!row || row.length !== this.clusterCount) {
@@ -423,6 +445,8 @@ export class PvsManager {
         if (c >= 0 && c < row.length) row[c] = 1;
       }
     }
+    this.rowDirty = false;
+    this.rowBuiltCullAll = cullAll;
     return row;
   }
 

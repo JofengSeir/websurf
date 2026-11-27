@@ -1091,12 +1091,10 @@ export class RenderSession {
     if (this.visibility.enablePvs && this.clusterIndex && this.clusterIndex.prepared > 0 && this.pvs) {
       if (cullAll) {
         this.solidSeamFrames = 0;
-    this.lastVisMs = 0;
         applyClusterIndex(this.visibility.items, this.pvs, -999);
         this.pvsIndexActive = true;
       } else if (camClusterValid && camCluster >= 0 && !camInSolid) {
         this.solidSeamFrames = 0;
-    this.lastVisMs = 0;
         applyClusterIndex(this.visibility.items, this.pvs, camCluster);
         this.pvsIndexActive = true;
       } else if (this.pvsIndexActive) {

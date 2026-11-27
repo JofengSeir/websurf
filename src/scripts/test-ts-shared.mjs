@@ -1853,6 +1853,160 @@ test('instanced-props: 二进制 Float32Array 展开、天空/空间分桶、透
   assert.equal(disposedTex, true);
 });
 
+test('pvs-manager & visibility-controller: visibleRow 缓存、visibleRowVersion 失效与 __vbspPvsCullAll 切换', () => {
+  // 2 个 cluster：cluster 0 仅可见 {0}，cluster 1 可见 {0, 1}
+  const bits = new Uint8Array([0b01, 0b11]);
+  const pvsData = {
+    rootNode: 0,
+    nodes: [{ normal: [1, 0, 0], dist: 0, children: [-1, -2] }],
+    leaves: [
+      { cluster: 1, mins: [0, -100, -100], maxs: [100, 100, 100], isSolid: false },
+      { cluster: 0, mins: [-100, -100, -100], maxs: [0, 100, 100], isSolid: false },
+    ],
+    faceClusters: [],
+    pvsBitsBase64: Buffer.from(bits).toString('base64'),
+    clusterCount: 2,
+    bytesPerRow: 1,
+  };
+  const pvs = new PvsManager(JSON.stringify(pvsData));
+  assert.equal(pvs.update({ x: -10, y: 0, z: 0 }), true);
+  const v0 = pvs.visibleRowVersion;
+  const rowA = pvs.visibleRow();
+  assert.ok(rowA);
+  assert.equal(rowA[0], 1);
+  assert.equal(rowA[1], 0);
+  // 同一 cluster 再次调用必须复用同一缓冲且版本号不变
+  const rowB = pvs.visibleRow();
+  assert.equal(rowB, rowA);
+  assert.equal(pvs.visibleRowVersion, v0);
+
+  const root = new THREE.Group();
+  const m0 = new THREE.Mesh(new THREE.BoxGeometry(4, 4, 4), new THREE.MeshBasicMaterial());
+  m0.userData.splitClusters = [0];
+  const m1 = new THREE.Mesh(new THREE.BoxGeometry(4, 4, 4), new THREE.MeshBasicMaterial());
+  m1.userData.splitClusters = [1];
+  root.add(m0, m1);
+  root.updateMatrixWorld(true);
+
+  const vis = new VisibilityController();
+  vis.enablePvs = true;
+  vis.collect(root, pvs);
+  vis.setCullDistance(10000, 0);
+
+  // 同 cluster 连跑两帧（第二帧命中 item 级 visibleRowVersion 缓存）
+  vis.update({ position: new THREE.Vector3(-10, 0, 0) }, pvs);
+  assert.equal(m0.visible, true);
+  assert.equal(m1.visible, false);
+  vis.update({ position: new THREE.Vector3(-12, 0, 0) }, pvs);
+  assert.equal(m0.visible, true);
+  assert.equal(m1.visible, false);
+
+  // 切换到 cluster 1：version 递增，缓存失效，m1 变为可见
+  vis.update({ position: new THREE.Vector3(10, 0, 0) }, pvs);
+  assert.ok(pvs.visibleRowVersion > v0);
+  assert.equal(m0.visible, true);
+  assert.equal(m1.visible, true);
+
+  // __vbspPvsCullAll 翻转时触发整剔与恢复
+  const g = globalThis;
+  const prevCullAll = g.__vbspPvsCullAll;
+  try {
+    g.__vbspPvsCullAll = true;
+    vis.update({ position: new THREE.Vector3(10, 0, 0) }, pvs);
+    assert.equal(m0.visible, false);
+    assert.equal(m1.visible, false);
+    g.__vbspPvsCullAll = false;
+    vis.update({ position: new THREE.Vector3(10, 0, 0) }, pvs);
+    assert.equal(m0.visible, true);
+    assert.equal(m1.visible, true);
+  } finally {
+    g.__vbspPvsCullAll = prevCullAll;
+  }
+});
+
+test('authority-calibrator: readAuthVersion 早退与 knownOnLadder=false 跳过 state() 并在离梯时补检', () => {
+  let va = 1;
+  let readAuthCalls = 0;
+  let stateCalls = 0;
+  let setVelCalls = 0;
+  let syncCalls = 0;
+  let onLadder = false;
+  const phys = {
+    state() {
+      stateCalls++;
+      return {
+        posX: 0, posY: 0, posZ: 0, yaw: 0, pitch: 0,
+        velX: 10, velY: 0, velZ: 0, onGround: false, onLadder, eyeHeight: 64,
+      };
+    },
+    set_state() {},
+    set_velocity() { setVelCalls++; },
+  };
+  const cal = new AuthorityCalibrator({
+    readAuth: () => {
+      readAuthCalls++;
+      return {
+        va,
+        frame: {
+          pos: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0,
+          vel: { x: 10, y: 0, z: 0 }, onGround: false, eyeHeight: 64, timeMs: 100,
+        },
+      };
+    },
+    readAuthVersion: () => va,
+    getPhys: () => phys,
+    clearPendingInput: () => {},
+    onSyncRenderState: () => { syncCalls++; },
+  });
+
+  // 首帧 va=1 读一次 readAuth
+  cal.correctFromAuthority();
+  assert.equal(readAuthCalls, 1);
+  // 同一 va 连调 10 次不得再触发 readAuth
+  for (let i = 0; i < 10; i++) cal.correctFromAuthority();
+  assert.equal(readAuthCalls, 1);
+
+  // knownOnLadder=false 时不调用 phys.state()
+  stateCalls = 0;
+  cal.calibrateVelocity(100, false);
+  assert.equal(stateCalls, 0);
+  assert.equal(setVelCalls, 1);
+
+  // 上梯后（knownOnLadder=true）进入梯上分支并置 wasOnLadder
+  onLadder = true;
+  cal.calibrateVelocity(105, true);
+  assert.equal(stateCalls, 1);
+
+  // 刚离梯即使传 knownOnLadder=false，由于 wasOnLadder=true 仍必须读 state() 并触发 teleport 同步
+  onLadder = false;
+  cal.calibrateVelocity(110, false);
+  assert.equal(stateCalls, 2);
+  assert.equal(syncCalls, 1);
+});
+
+test('entity-system: stats() 结构缓存与删/增实体失效保持准确', () => {
+  const { host } = createRecordingHost();
+  const sys = new EntitySystem({ host });
+  sys.load({
+    entities_text: '{\n"classname" "worldspawn"\n}\n{\n"classname" "info_player_start"\n"targetname" "sp1"\n}',
+    volumes: [],
+  });
+  const s1 = sys.stats();
+  assert.equal(s1.entityCount, 3); // worldspawn + info_player_start + player
+  assert.equal(s1.classCounts.info_player_start, 1);
+  // 第二次调用直接命中缓存，classCounts 引用一致且结果相同
+  const s2 = sys.stats();
+  assert.equal(s2.classCounts, s1.classCounts);
+  // 删除实体后缓存失效
+  const sp = sys.entList.findFirstByName('sp1');
+  assert.ok(sp);
+  sys.removeEntity(sp);
+  sys.frame(0.016);
+  const s3 = sys.stats();
+  assert.equal(s3.entityCount, 2);
+  assert.equal(s3.classCounts.info_player_start, undefined);
+});
+
 
 
 

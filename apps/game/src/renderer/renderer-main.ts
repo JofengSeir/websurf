@@ -127,6 +127,10 @@ export class RendererMain {
   private pendingDy = 0;
   /** 键位掩码（覆盖写：每次 `feedInput` 都替换，`tick` 消费后**不清**——按住状态要延续）。 */
   private pendingKeys = 0;
+  private lastKnownOnLadder: boolean | undefined = undefined;
+  private readonly _inputScratch = { keys: 0, dx: 0, dy: 0 };
+  private readonly _planRun = { run: true };
+  private readonly _planSkip = { run: false };
   /** 权威帧校准器（`src/ts-shared/phys/authority-calibrator.ts` 的 `AuthorityCalibrator`）：
    *  本类只做转发，并把读权威帧、取/写主线程物理、清待喂输入、`onSyncRenderState` 注入给它。 */
   private readonly calibrator: AuthorityCalibrator;
@@ -234,6 +238,7 @@ export class RendererMain {
     this.authorityMode = authorityMode;
     this.calibrator = new AuthorityCalibrator({
       readAuth: () => this.shared.readAuthoritative(),
+      readAuthVersion: () => this.shared.readAuthoritativeVersion(),
       getPhys: () => this.predPhys,
       clearPendingInput: () => {
         this.pendingDx = 0;
@@ -250,7 +255,12 @@ export class RendererMain {
       phys: () => this.predPhys,
       shared: this.shared,
       gameplay: () => this.gameplay,
-      input: () => ({ keys: this.pendingKeys, dx: this.pendingDx, dy: this.pendingDy }),
+      input: () => {
+        this._inputScratch.keys = this.pendingKeys;
+        this._inputScratch.dx = this.pendingDx;
+        this._inputScratch.dy = this.pendingDy;
+        return this._inputScratch;
+      },
       clearInputDeltas: () => {
         // 鼠标增量与滚轮跳是一次性的；常规键位掩码保留为按住状态（由下一次 feedInput 覆盖）。
         this.pendingDx = 0;
@@ -259,7 +269,7 @@ export class RendererMain {
       },
       nextRenderSampleIndex: () => this.renderSampleIndex++,
       hooks: {
-        beginFrame: () => ({ run: this.predReady && this.predPhys !== null }),
+        beginFrame: () => (this.predReady && this.predPhys !== null ? this._planRun : this._planSkip),
         beforeTick: (now) => {
           // 单权威主线程（T-D132）：主线程物理即唯一状态，不消费权威帧、不做速度校准——
           // 否则会把不存在的权威帧当成「无帧」反复清校准态，且让呈现线多一层无意义外推。
@@ -285,6 +295,7 @@ export class RendererMain {
           }
         },
         applyCamera: (st) => {
+          this.lastKnownOnLadder = (st as { onLadder?: boolean }).onLadder === true;
           // 固定步长物理（main=tickRate 64tick；worker=预测线 computeRateCap）每步只记录一份
           // 眼位，由 rAF 在前后两份之间插值，避免把 64Hz 的离散位置直接贴到每帧相机上。
           // 相机在 `init()` 之前可能尚未创建（手动构造、单元测试路径），此时跳过即可。
@@ -673,6 +684,7 @@ export class RendererMain {
     this.session?.disposeScene();
     this.predPhys = null;
     this.predReady = false;
+    this.lastKnownOnLadder = undefined;
     this.physicsAccumulator = 0;
     this.snapCamera();
     // T-731/F4：复位物理帧时基（共享呈现循环持有 lastTickMs）。换图不清会带着上一张图的
@@ -763,6 +775,7 @@ export class RendererMain {
       );
     }
     this.predPhys = phys;
+    this.lastKnownOnLadder = undefined;
     // 物理世界就绪后用 `MASK_SOLID` 口径重新截断 env_laser（共享会话持有光束对象）：
     // 零体积线段扫掠只认实体 brush，触发体 / nodraw / 水面天然被忽略。
     this.session?.setLaserPhysicsTrace((s, e) => {
@@ -924,13 +937,14 @@ export class RendererMain {
   /** 用权威帧的速度与加速度把渲染物理速度外推到当前时刻；帧龄按读到该帧的时刻算（`now` 取同一
    *  rAF 时间戳）。实现见 `src/ts-shared/phys/authority-calibrator.ts` 的 `calibrateVelocity`。 */
   private calibrateVelocity(now: number): void {
-    this.calibrator.calibrateVelocity(now);
+    this.calibrator.calibrateVelocity(now, this.lastKnownOnLadder);
   }
 
   /** 显式位置突变：把物理写到指定位置/角度（速度清零、置着地）、清待喂输入、复位校准状态、
    *  开权威豁免窗口，并重启渲染采样流。
    *  本工程内没有调用点（respawn / 传送 / 读点各走自己的路径，见 app.ts 的对应接线）。 */
   resetTo(pos: number[], yawDeg: number): void {
+    this.lastKnownOnLadder = undefined;
     this.calibrator.resetTo(pos, yawDeg);
     // 位置突变 → 采样流不连续：世代 +1（Worker 丢弃旧位置缓存）
     this.bumpSampleEpoch();

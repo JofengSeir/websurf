@@ -276,6 +276,15 @@ export class RendererMain {
   private pendingKeys = 0;
   /** noclip 标记（`setPredictionNoclip` 写入并透传 Rust `set_noclip`）：为真时 `tick` 跳过近平面探测。 */
   private noclipActive = false;
+  /** 最近一次物理状态是否处于梯子上，用于 1000Hz calibrateVelocity 跳过冗余 WASM state() 调用。 */
+  private lastKnownOnLadder: boolean | undefined = undefined;
+  private readonly _inputScratch = { keys: 0, dx: 0, dy: 0 };
+  private readonly _planRun: { run: boolean; dtOverride?: number | null; skipAuthority?: boolean; stepTimebase?: boolean } = {
+    run: true,
+    dtOverride: null,
+    skipAuthority: false,
+  };
+  private readonly _planSkip: { run: boolean; stepTimebase?: boolean } = { run: false, stepTimebase: false };
   /**
    * 主线程「预测呈现」同意循环（共享 `player-presentation`）：dt 时基、输入写共享槽、
    * 权威校准、推进预测物理、消费物理事件、写渲染采样、摆相机、推进实体运行期。
@@ -510,6 +519,7 @@ export class RendererMain {
     // config 由 init() 赋值
     this.calibrator = new AuthorityCalibrator({
       readAuth: () => this.shared.readAuthoritative(),
+      readAuthVersion: () => this.shared.readAuthoritativeVersion(),
       getPhys: () => this.predPhys,
       clearPendingInput: () => {
         this.pendingDx = 0;
@@ -526,7 +536,12 @@ export class RendererMain {
       phys: () => this.predPhys,
       shared: this.shared,
       gameplay: () => this.gameplay,
-      input: () => ({ keys: this.pendingKeys, dx: this.pendingDx, dy: this.pendingDy }),
+      input: () => {
+        this._inputScratch.keys = this.pendingKeys;
+        this._inputScratch.dx = this.pendingDx;
+        this._inputScratch.dy = this.pendingDy;
+        return this._inputScratch;
+      },
       clearInputDeltas: () => {
         // 鼠标增量是一次性的；按键掩码保留为「按住」状态（由下一次 feedInput 覆盖）。
         this.pendingDx = 0;
@@ -540,14 +555,17 @@ export class RendererMain {
           if (!canRun) {
             // 物理未就绪不动时基；单步闸门跳过的帧必须推进时基（与原 `else if (stepGated)` 一致），
             // 否则闸门恢复时会拿到一个异常大的 dt。
-            return { run: false, stepTimebase: this.stepGated };
+            this._planSkip.stepTimebase = this.stepGated;
+            return this._planSkip;
           }
           if (this.stepGated) this.stepQuota--;
           // 录制步长是一次性载荷：只有 replayMode 为真时才会取到（`replayPending`），用掉即清；
           // 取不到就回落墙钟 dt——两条路都要推进物理（录制点挂在物理步上）。
           const dtOverride = this.replayMode ? this.replayDtS : null;
           this.replayDtS = null;
-          return { run: true, dtOverride, skipAuthority: this.replayMode };
+          this._planRun.dtOverride = dtOverride;
+          this._planRun.skipAuthority = this.replayMode;
+          return this._planRun;
         },
         beforeTick: (now, _dt, skipAuthority) => {
           this.diagVelocity('input', now);
@@ -588,12 +606,14 @@ export class RendererMain {
           this.onPhysEvent?.(ev);
         },
         afterState: (st, dt, now) => {
-          // 路径记录 —— 渲染物理线：每个 rAF 物理步一个节点，采样点是脚底（相机 Y 还要再加
-          // eyeHeight）。逐步状态（速度/着地/按键/步长）一并落盘，离线重放才定得到具体 tick。
-          this.pathRecorder.addRender(now, st.posX, st.posY, st.posZ, {
-            vx: st.velX, vy: st.velY, vz: st.velZ, g: st.onGround ? 1 : 0, k: this.pendingKeys, dt,
-            yaw: st.yaw, pitch: st.pitch,
-          });
+          this.lastKnownOnLadder = (st as { onLadder?: boolean }).onLadder === true;
+          // 路径记录 —— 渲染物理线：只在开启录制时落点，避免 1000Hz 下持续分配 PathPoint 与 extra 对象。
+          if (this.pathRecorder.isRecording) {
+            this.pathRecorder.addRender(now, st.posX, st.posY, st.posZ, {
+              vx: st.velX, vy: st.velY, vz: st.velZ, g: st.onGround ? 1 : 0, k: this.pendingKeys, dt,
+              yaw: st.yaw, pitch: st.pitch,
+            });
+          }
         },
         applyCamera: (st) => {
           const cc = this.cameraController;
@@ -789,6 +809,7 @@ export class RendererMain {
     this.pendingDy = 0;
     this.pendingKeys = 0;
     this.noclipActive = false;
+    this.lastKnownOnLadder = undefined;
     // 换图/重建物理后时基清零（共享呈现循环持有 lastTickMs，首帧重新取 1/64 秒）
     this.presentation?.resetTimebase();
     // 速度突降诊断的跨帧基准也清掉，避免换图后第一帧拿旧图的速度做比较
@@ -1697,6 +1718,7 @@ export class RendererMain {
       phys.set_death_y(this.deathY);
     }
     this.predPhys = phys;
+    this.lastKnownOnLadder = undefined;
     // 物理世界就绪后用 `MASK_SOLID` 口径重新截断 env_laser：零体积线段扫掠只认实体 brush，
     // 触发体 / nodraw / 水面天然被忽略（之前用渲染网格 Raycaster 会把梁误截，坡上该有的光线消失）。
     // 光束对象由共享会话持有（载图期装配），这里只把「物理线截断函数」注入给它。
@@ -1976,7 +1998,7 @@ export class RendererMain {
 
   /** 逐帧速度校准（权威速度外推反馈；实现见 ts-shared AuthorityCalibrator）。 */
   private calibrateVelocity(now: number): void {
-    this.calibrator.calibrateVelocity(now);
+    this.calibrator.calibrateVelocity(now, this.lastKnownOnLadder);
   }
 
   /**
@@ -1984,6 +2006,7 @@ export class RendererMain {
    * 清空权威校准状态，防止旧权威帧把突变位置拉回。
    */
   resetTo(pos: number[], yawDeg: number, pitchDeg = 0): void {
+    this.lastKnownOnLadder = undefined;
     this.calibrator.resetTo(pos, yawDeg, pitchDeg);
     // 位置突变：渲染采样流不连续 → 失效代数 +1（Worker 丢弃旧位置缓存）
     this.bumpSampleEpoch();

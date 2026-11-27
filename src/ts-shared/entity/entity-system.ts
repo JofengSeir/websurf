@@ -162,6 +162,13 @@ export class EntitySystem implements EntityRuntime {
   private readonly _touchMaxs: Vec3 = [0, 0, 0];
   private touchStamp = 0;
   private dynamicOutputCount = 0;
+  private readonly boundResolveByName = (name: string): Entity | null => this.entList.findFirstByName(name);
+  private statsStructDirty = true;
+  private cachedEntityCount = -1;
+  private cachedDynOutputs = -1;
+  private cachedClassCounts: Record<string, number> = {};
+  private cachedOutputConnections = 0;
+  private cachedVolumeEntities = 0;
 
   constructor(options: EntitySystemOptions) {
     installEntityClasses();
@@ -224,7 +231,7 @@ export class EntitySystem implements EntityRuntime {
     g_Runtime.eventQueue = this.eventQueue;
     g_Runtime.entList = this.entList;
     g_Runtime.player = this.playerEntity ?? null;
-    g_Runtime.resolveEntityByName = (name) => this.entList.findFirstByName(name);
+    g_Runtime.resolveEntityByName = this.boundResolveByName;
   }
 
   // ── 地图加载 ──
@@ -285,6 +292,7 @@ export class EntitySystem implements EntityRuntime {
     this.touchCandidates = all.filter((e) => e.volumes.length > 0 && hasTouchBehaviour(e));
     this.useCandidates = all.filter((e) => hasUseBehaviour(e));
     this.touchStamp = 0;
+    this.statsStructDirty = true;
   }
 
   /** 卸载地图：保留玩家伪实体，其余状态全部复位。 */
@@ -307,6 +315,7 @@ export class EntitySystem implements EntityRuntime {
     this.touchStamp = 0;
     this.events.length = 0;
     this.dynamicOutputCount = 0;
+    this.statsStructDirty = true;
     globalStates.clear();
     g_Runtime.time = 0;
   }
@@ -378,6 +387,7 @@ export class EntitySystem implements EntityRuntime {
       }
     }
     this.deletion.clear();
+    this.statsStructDirty = true;
   }
 
   /**
@@ -556,19 +566,31 @@ export class EntitySystem implements EntityRuntime {
   }
 
   stats(): EntitySystemStats {
-    const classCounts: Record<string, number> = {};
-    let outputConnections = 0;
-    let volumeEntities = 0;
-    for (const entity of this.entList.entities) {
-      classCounts[entity.classname] = (classCounts[entity.classname] ?? 0) + 1;
-      for (const out of entity.outputs.values()) outputConnections += out.numberOfElements();
-      if (entity.volumes.length > 0) volumeEntities++;
+    if (
+      this.statsStructDirty ||
+      this.cachedEntityCount !== this.entList.count ||
+      this.cachedDynOutputs !== this.dynamicOutputCount
+    ) {
+      const classCounts: Record<string, number> = {};
+      let outputConnections = 0;
+      let volumeEntities = 0;
+      for (const entity of this.entList.entities) {
+        classCounts[entity.classname] = (classCounts[entity.classname] ?? 0) + 1;
+        for (const out of entity.outputs.values()) outputConnections += out.numberOfElements();
+        if (entity.volumes.length > 0) volumeEntities++;
+      }
+      this.cachedClassCounts = classCounts;
+      this.cachedOutputConnections = outputConnections;
+      this.cachedVolumeEntities = volumeEntities;
+      this.cachedEntityCount = this.entList.count;
+      this.cachedDynOutputs = this.dynamicOutputCount;
+      this.statsStructDirty = false;
     }
     return {
       entityCount: this.entList.count,
-      classCounts,
-      outputConnections,
-      volumeEntities,
+      classCounts: this.cachedClassCounts,
+      outputConnections: this.cachedOutputConnections,
+      volumeEntities: this.cachedVolumeEntities,
       pendingEvents: this.eventQueue.pendingCount,
       dynamicOutputs: this.dynamicOutputCount,
       time: g_Runtime.time,

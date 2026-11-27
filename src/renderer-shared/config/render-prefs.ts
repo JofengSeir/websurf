@@ -292,6 +292,10 @@ const FLUSH_MS = 180;
 let cacheKey: string | null = null;
 let cachePrefs: RenderPrefs | null = null;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
+let cachedFpPrefs: RenderPrefs | null = null;
+let cachedFpValue = '';
+let deepLinkSearch: string | null = null;
+let deepLinkCached: RenderPrefs | null = null;
 
 function cacheFor(): RenderPrefs | null {
   return cacheKey === renderPrefsKey() ? cachePrefs : null;
@@ -300,6 +304,7 @@ function cacheFor(): RenderPrefs | null {
 function putCache(p: RenderPrefs): void {
   cacheKey = renderPrefsKey();
   cachePrefs = p;
+  if (p !== cachedFpPrefs) cachedFpPrefs = null;
 }
 
 /** 立刻落盘（迁移这类一次性写入走它，避免「写完就关页面」丢掉）。 */
@@ -339,6 +344,14 @@ if (typeof globalThis.addEventListener === 'function') {
   globalThis.addEventListener('pagehide', flushRenderPrefs);
   globalThis.addEventListener('visibilitychange', () => {
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') flushRenderPrefs();
+  });
+  globalThis.addEventListener('storage', (e) => {
+    const ev = e as { key?: string | null };
+    if (ev.key === null || ev.key === undefined || ev.key === renderPrefsKey()) {
+      cacheKey = null;
+      cachePrefs = null;
+      cachedFpPrefs = null;
+    }
   });
 }
 
@@ -414,9 +427,15 @@ function loadStored(): RenderPrefs {
   const cached = cacheFor();
   if (cached) return cached; // 内存缓存优先：拖动中的最新值不必等落盘
   const raw = readRaw(renderPrefsKey()) as Record<string, unknown> | null;
-  if (raw && raw.version === RENDER_PREFS_VERSION) return normalize(raw);
-  if (raw) console.warn('[render-prefs] 存档版本 ' + String(raw.version) + ' ≠ ' + RENDER_PREFS_VERSION + '，改用默认档');
-  return migrateLegacy() ?? defaultRenderPrefs();
+  let p: RenderPrefs;
+  if (raw && raw.version === RENDER_PREFS_VERSION) {
+    p = normalize(raw);
+  } else {
+    if (raw) console.warn('[render-prefs] 存档版本 ' + String(raw.version) + ' ≠ ' + RENDER_PREFS_VERSION + '，改用默认档');
+    p = migrateLegacy() ?? defaultRenderPrefs();
+  }
+  putCache(p);
+  return p;
 }
 
 /** 深链覆盖的查询参数名：`?prefs=default` 或 `?prefs=<base64(JSON)>`（D1=A）。 */
@@ -440,17 +459,41 @@ function decodeBase64(b64: string): string {
  * 同时喂给三端（`?prefs=default` 或 `?prefs=<base64(JSON)>`），比对各自控制台的生效行 `fp=`。
  */
 function deepLinkPrefs(): RenderPrefs | null {
-  if (typeof location === 'undefined' || typeof atob !== 'function') return null;
+  if (typeof location === 'undefined' || typeof atob !== 'function') {
+    deepLinkActive = false;
+    return null;
+  }
+  const search = location.search;
+  if (search === deepLinkSearch) {
+    deepLinkActive = deepLinkCached !== null;
+    return deepLinkCached;
+  }
+  deepLinkSearch = search;
   let raw: string | null = null;
-  try { raw = new URLSearchParams(location.search).get(RENDER_PREFS_QUERY); } catch { return null; }
-  if (!raw) return null;
-  if (raw === 'default') { deepLinkActive = true; return defaultRenderPrefs(); }
+  try { raw = new URLSearchParams(search).get(RENDER_PREFS_QUERY); } catch {
+    deepLinkCached = null;
+    deepLinkActive = false;
+    return null;
+  }
+  if (!raw) {
+    deepLinkCached = null;
+    deepLinkActive = false;
+    return null;
+  }
+  if (raw === 'default') {
+    deepLinkCached = defaultRenderPrefs();
+    deepLinkActive = true;
+    return deepLinkCached;
+  }
   try {
     const p = normalize(JSON.parse(decodeBase64(raw)) as unknown);
+    deepLinkCached = p;
     deepLinkActive = true;
     return p;
   } catch (err) {
     console.warn('[render-prefs] ?' + RENDER_PREFS_QUERY + '= 解析失败，忽略深链覆盖:', err);
+    deepLinkCached = null;
+    deepLinkActive = false;
     return null;
   }
 }
@@ -498,8 +541,12 @@ export function readRenderPrefs(): RenderPrefs {
     logged = true;
     console.info(describeRenderPrefs(p));
   }
+  if (p !== cachedFpPrefs) {
+    cachedFpValue = renderPrefsFingerprint(p);
+    cachedFpPrefs = p;
+  }
   const g = globalThis as { __vbspRenderPrefsFp?: string; __vbspRenderPrefsSource?: string };
-  g.__vbspRenderPrefsFp = renderPrefsFingerprint(p);
+  g.__vbspRenderPrefsFp = cachedFpValue;
   g.__vbspRenderPrefsSource = deepLinkActive ? 'deep-link' : 'storage';
   return p;
 }
