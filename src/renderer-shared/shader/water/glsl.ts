@@ -41,6 +41,7 @@ export const WATER_VERTEX_HEADER =
       'uniform float vbspWaterDepthGate;',
       'uniform float vbspWaterAlphaFloor;',
       'uniform float vbspWaterAlphaCap;',
+      'uniform float vbspWaterRtDecode;',
       'uniform vec3 vbspWaterBaseColor;',
       'uniform float vbspWaterTintStrength;',
       'uniform float vbspWaterAbsorb;',
@@ -216,7 +217,8 @@ export const WATER_VERTEX_HEADER =
       // 水面材质的 `material.color` 在渲染前会被光照/fullbright 那条路按 lightmap 重设
       // ⇒ 我改 `material.color` 的效果全部被覆盖（这就是"改颜色没反应"的根因，
       // 2026-10-21 用金丝雀测试证实：注入确实控制这些像素，但颜色来自被覆盖后的 diffuse）。
-      'vec3 vbspRefrColor = vbspWaterRefrOn > 0.5 ? vbspRefrShifted : vbspWaterBaseColor;',
+      'vec3 vbspRefrLin = vbspWaterRtDecode > 0.5 ? pow( max( vbspRefrShifted, vec3( 0.0 ) ), vec3( 2.2 ) ) : vbspRefrShifted;',
+      'vec3 vbspRefrColor = vbspWaterRefrOn > 0.5 ? vbspRefrLin : vbspWaterBaseColor;',
       // T-650 v4 B 线（判定与位移解耦）：`vbspLum0` 必须取**未位移**的 vbspRefrBase——
       // 此前用位移后的 vbspRefrShifted：采样点被噪声推出"有几何"区时亮度骤降 ⇒ NoGeom 翻转
       // ⇒ 精致区边缘被误判成采空，蓝板/结构的分界呈锯齿（owner 实测机位 PS，DudvOff 后分界
@@ -357,7 +359,8 @@ export const WATER_VERTEX_HEADER =
       '		vec2 vbspMuv = vbspWaterMirrorUv.xy / max( 1e-4, vbspWaterMirrorUv.w );',
       '		vbspMuv = clamp( vbspMuv, vec2( 0.001 ), vec2( 0.999 ) );',
       '		vbspMuv += vbspSlope * vbspWaterDistort;',
-      '		vec3 vbspMirror = texture2D( vbspWaterMirror, vbspMuv ).rgb * vbspWaterReflTint;',
+      '		vec3 vbspMirrorRaw = texture2D( vbspWaterMirror, vbspMuv ).rgb;',
+      '		vec3 vbspMirror = ( vbspWaterRtDecode > 0.5 ? pow( max( vbspMirrorRaw, vec3( 0.0 ) ), vec3( 2.2 ) ) : vbspMirrorRaw ) * vbspWaterReflTint;',
       // R4（T-650 v2）：反射混合权重上限（亮雾流 0.25、暗雾流保持 0.40）——反射仍在，只限幅。
       '		float vbspMix = clamp( vbspFres * vbspWaterReflStrength, 0.0, vbspWaterReflCap );',
       '		outgoingLight = mix( outgoingLight, vbspMirror, vbspMix );',

@@ -99,6 +99,7 @@ const g = globalThis as {
   __vbspWaterHideAllRefr?: unknown;
   __vbspWaterAlphaFloor?: unknown;
   __vbspWaterAlphaCap?: unknown;
+  __vbspWaterRtDecode?: unknown;
   /** 近处/远处的水面不透明度（缺省 0.10 / 0.45）：近处近乎透明、远处带蓝更像水。 */
   __vbspWaterNearAlpha?: unknown;
   __vbspWaterFarAlpha?: unknown;
@@ -874,10 +875,10 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
     list.push({ name: material.name, thickness: w.waterThickness });
   }
   const baseColor = darkFog ? fog.clone().convertSRGBToLinear() : new THREE.Color(0.12, 0.52, 0.72);
-  const tintDefault = darkFog ? 0.10 : 0;
-  const alphaFloorDefault = darkFog ? 0.08 : 0;
+  const tintDefault = darkFog ? 0.04 : 0;
+  const alphaFloorDefault = darkFog ? 0.05 : 0;
   // 亮色 fog（boreas）保留原来的反射强度/深度 gate；暗色 fog（666）适度压低泛白与反射强度，水下更通透。
-  const reflectDefault = darkFog ? 0.16 : 0.12;
+  const reflectDefault = darkFog ? 0.14 : 0.12;
   const depthGateDefault = darkFog ? 0 : 1;
   material.color.copy(baseColor);
   // 调试：覆盖基色（isolate 判断波纹形状时用明显颜色）
@@ -892,9 +893,9 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
   const lift = darkFog ? 1.0 : Math.max(1, num(g.__vbspWaterLift, 1.35));
   // R3 掠射采样稳定：位移 × att，视线越接近水平越收紧（只动采样坐标，不补偿任何观感量）。
   const grazAtt = darkFog ? 1.0 : Math.min(1, Math.max(0, num(g.__vbspWaterGrazAtt, 0.35)));
-  // R4 反射限幅：混合权重 clamp 上限；暗雾流收紧到 0.22 避免浅水反白，亮雾流保持 0.25。
+  // R4 反射限幅：混合权重 clamp 上限；暗雾流收紧到 0.18 避免浅水反白，亮雾流保持 0.25。
   const reflCap = darkFog
-    ? Math.min(1, Math.max(0, num(g.__vbspWaterReflCap, 0.22)))
+    ? Math.min(1, Math.max(0, num(g.__vbspWaterReflCap, 0.18)))
     : Math.min(1, Math.max(0, num(g.__vbspWaterReflCap, 0.25)));
   // R5 真·打空像素：只在亮雾流启用；回落色缺省 = 本材质 fog 线性值 ×0.25，
   // 装配完成后按「最近下方 beneath 材质的 $fogcolor 原值（按线性使用）」回填。
@@ -936,13 +937,16 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
         ? 0
         : Math.max(0, Math.min(1, num(g.__vbspWaterDepthGate, depthGateDefault))),
     };
-    // 暗色 fog（666）：浅水 alpha 下限 0.08、上限 0.58，近处更通透；
-    // 亮色 fog（boreas）：下限 0、上限 1.0，保持原深度泛蓝观感。
+    // 暗色 fog（666）：浅水 alpha 下限 0.05、上限 0.50，且启用 RT γ2.2 解码消除二次编码泛白；
+    // 亮色 fog（boreas）：下限 0、上限 1.0、RT 不解码，保持原深度泛蓝观感。
     shader.uniforms.vbspWaterAlphaFloor = {
       value: Math.max(0, Math.min(1, num(g.__vbspWaterAlphaFloor, alphaFloorDefault))),
     };
     shader.uniforms.vbspWaterAlphaCap = {
-      value: Math.min(1, Math.max(0.05, num(g.__vbspWaterAlphaCap, darkFog ? 0.58 : 1.0))),
+      value: Math.min(1, Math.max(0.05, num(g.__vbspWaterAlphaCap, darkFog ? 0.50 : 1.0))),
+    };
+    shader.uniforms.vbspWaterRtDecode = {
+      value: num(g.__vbspWaterRtDecode, darkFog ? 1 : 0),
     };
     // 水体色（最终往它收敛）+ 收敛强度
     shader.uniforms.vbspWaterBaseColor = { value: new THREE.Vector3(baseColor.r, baseColor.g, baseColor.b) };
@@ -973,9 +977,9 @@ function injectWater(material: THREE.MeshBasicMaterial, w: WaterExtras): void {
     // 想退回常数膜厚模型：`__vbspWaterUseDepthPass=false`。
     shader.uniforms.vbspWaterUseDepthPass = { value: g.__vbspWaterUseDepthPass === false ? 0 : 1 };
     // 「水底太蓝了，浅一些」：fogMix 上限 + 中段软化曲线。
-    // R1（T-650 v2）：雾罩封顶挂亮雾流 —— 亮雾流 0.30（boreas 不变）；暗雾流压至 0.25 减轻灰白浑浊。
+    // R1（T-650 v2）：雾罩封顶挂亮雾流 —— 亮雾流 0.30（boreas 不变）；暗雾流压至 0.18 减轻灰白浑浊。
     shader.uniforms.vbspWaterFogMax = {
-      value: Math.min(1, Math.max(0, num(g.__vbspWaterFogMax, darkFog ? 0.25 : 0.30))),
+      value: Math.min(1, Math.max(0, num(g.__vbspWaterFogMax, darkFog ? 0.18 : 0.30))),
     };
     // 「稍微白点、近似透明」：水色下限（tp-more 用的是 0）
     shader.uniforms.vbspWaterFogFloor = {
