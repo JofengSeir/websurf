@@ -162,6 +162,10 @@ const {
 const THREE = await import('three');
 
 const { ShmState, SHARED_BUFFER_SIZE, KEY_MASK, keysToMask, maskToKeys } = sharedState;
+const { normalizeDeployId, isStaleDeploy, deployVersionUrl } = await loadTs(
+  'src/ts-shared/app/deploy-freshness.ts',
+  'deploy-freshness',
+);
 
 function near(actual, expected, relTol) {
   return Math.abs(actual - expected) <= Math.abs(expected) * relTol;
@@ -178,6 +182,37 @@ function advance(clock, baseMs, durationMs, tickMs) {
 
 /** 不落地的调度器桩：避免单测启动真实 MessageChannel 泵。 */
 const fakeScheduler = { post() {}, delay() {}, cancel() {}, dispose() {} };
+
+// ── deploy-freshness：静态页部署自检的纯边界 ─────────────────────────────────────
+
+test('deploy-freshness: 部署 id 只接受 r<run>-<sha7>，占位符/畸形值一律忽略', () => {
+  assert.equal(normalizeDeployId(' r325-71eae5a '), 'r325-71eae5a');
+  assert.equal(normalizeDeployId('R325-ABCDEF1'), 'R325-ABCDEF1');
+  assert.equal(normalizeDeployId('__DEPLOY_ID__'), null);
+  assert.equal(normalizeDeployId(''), null);
+  assert.equal(normalizeDeployId(null), null);
+  assert.equal(normalizeDeployId(325), null);
+  assert.equal(normalizeDeployId('r1-abcdef'), null, 'sha 不足 7 位应拒绝');
+  assert.equal(normalizeDeployId('v325-abcdef1'), null, '前缀必须是 r');
+});
+
+test('deploy-freshness: 只有两边的部署 id 都合法且不同才算过期', () => {
+  assert.equal(isStaleDeploy('r325-71eae5a', 'r326-aaaaaaaa'), true);
+  assert.equal(isStaleDeploy('r325-71eae5a', 'r325-71eae5a'), false);
+  assert.equal(isStaleDeploy(null, 'r326-aaaaaaaa'), false);
+  assert.equal(isStaleDeploy('r325-71eae5a', '__DEPLOY_ID__'), false);
+  assert.equal(isStaleDeploy('__DEPLOY_ID__', 'r326-aaaaaaaa'), false);
+});
+
+test('deploy-freshness: version.json 取页面同目录，兼容目录/页面/无扩展名三种 URL', () => {
+  const base = 'https://jofengseir.github.io/websurf';
+  assert.equal(deployVersionUrl(base + '/game/'), base + '/game/version.json');
+  assert.equal(deployVersionUrl(base + '/game/index.html?x=1#y'), base + '/game/version.json');
+  assert.equal(deployVersionUrl(base + '/game'), base + '/game/version.json');
+  assert.equal(deployVersionUrl(base + '/'), base + '/version.json');
+  assert.equal(deployVersionUrl(base + '/index.html'), base + '/version.json');
+  assert.equal(deployVersionUrl(base + '/game/app.js'), base + '/game/version.json');
+});
 
 // ── sim-clock：固定步长累加器 ───────────────────────────────────────────────────
 

@@ -67,6 +67,10 @@ import {
 import type { CustomTeleport } from './world/custom-teleports.js';
 // 物理参数映射（渲染物理 + 输入录制 meta 共用同一份实现）
 import { buildDebugPredictionParams } from './physics/prediction-params.js';
+import { installDeployFreshness } from '../../../src/ts-shared/app/deploy-freshness.js';
+
+// 部署新鲜度自检：线上页面检测到新部署时提示并默认强制刷新；本地占位符下自动 no-op。
+installDeployFreshness();
 
 // ---------------------------------------------------------------------------
 // 全局状态

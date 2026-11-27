@@ -56,6 +56,10 @@ import {
   type AppRuntime,
 } from '../../../src/ts-shared/app/app-runtime.js';
 import { createConfigSync, type ConfigSync } from '../../../src/ts-shared/app/config-sync.js';
+import { installDeployFreshness } from '../../../src/ts-shared/app/deploy-freshness.js';
+
+// 部署新鲜度自检：线上页面检测到新部署时提示并默认强制刷新；本地占位符下自动 no-op。
+installDeployFreshness();
 
 const config: RuntimeConfig = createConfig();
 

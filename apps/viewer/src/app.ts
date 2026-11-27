@@ -52,6 +52,10 @@ import { defaultRule, unionBbox } from './replay/types.js';
 import { readRenderPrefs, writeRenderPrefs, applyRenderPrefs, defaultRenderPrefs, readPrefsPath, prefsPathPatch } from '../../../src/renderer-shared/config/render-prefs.js';
 import { buildRenderPanel, type RenderPanelApi, type RenderPanelValue } from '../../../src/renderer-shared/config/render-panel-ui.js';
 import type { Track } from './replay/types.js';
+import { installDeployFreshness } from '../../../src/ts-shared/app/deploy-freshness.js';
+
+// 部署新鲜度自检：线上页面检测到新部署时提示并默认强制刷新；本地占位符下自动 no-op。
+installDeployFreshness();
 
 const canvas = document.getElementById('game') as HTMLCanvasElement | null;
 if (!canvas) throw new Error('canvas#game 未找到');

@@ -96,6 +96,8 @@ cargo +stable-x86_64-pc-windows-msvc test -p websurf-wasm-core
 
 CI 跑 `.github/workflows/ci-gates.yml`：`cargo test -p websurf-phys`、`cargo test -p websurf-wasm-core`（宿主；缺夹具时相关测试自行跳过；D-134a 起带 `--features phys-debug` 再跑一遍，`verify.mjs rust` 同样两遍）、viewer `check-wasm-api --source-only` 源码契约、`check-render-parity.mjs`、`check-visual-loop.mjs`（三端视觉线契约：输入只入队、视角在计算/呈现循环消费）、`check-shader-anchors.mjs`（校验 `three@0.165.0` 的 `ShaderChunk`/`ShaderLib` 锚点 + 反空洞守卫）、三端 `typecheck`、`test-ts-shared.mjs`（`node:test`：`sim-clock` / `shared-state` / `config-sync` 纯逻辑单测）+ `check-entity-io.mjs`（合成自测 A1–A20；CI 无 `test/maps` 时地图组 SKIP 并 exit 0）+ `check-entity-start-solid.mjs`（Rust ↔ TS 的 `start-solid-cases.json` 跨端单源契约）+ `check-entity-cycles.mjs`（`src/ts-shared/entity` 的 import 有向图无环；反空洞守卫 文件 ≥ 10 / 边 ≥ 20）、三端 wasm 构建 + `check:api` + 共享产物指纹 / 锁、workspace 与导出一致性（`check-lock-consistency.mjs`：唯一根 `Cargo.lock`、三端 `apps/*/Cargo.{toml,lock}` 不得复生、根 workspace members 6 个、wasm-bindgen/serde/serde_json/js-sys 单源；该门禁的 `DEP_GRAPH_EXPORTS`——依赖图偶然带出的 wasm-bindgen 导出——采用**可选登记**：出现必须已登记、消失不报错，绑定 features 推导的差集仍逐名严格比对）/ GLB 一致性（GLB 无地图夹具时 SKIP）；wasm 构建前安装 Binaryen `version_133`（`ci-gates.yml`/`deploy-pages.yml` 用缓存 + 下载 tar 放到 `~/binaryen`，`wasm-opt -Os` 由 `Cargo.toml` 启用）；debug/game 各有一份 wasm+TS 构建冒烟。CI 只随 push `main` 与 PR 跑（推 `dev` 不触发、纯 `*.md` 改动不触发）。
 
+> Pages 部署会给根入口与三端 app 页注入 `websurf-deploy-id`（`r<run>-<sha7>`），并在根目录、`debug/`、`game/`、`viewer/` 各写一份 `version.json`。三端 app 入口统一调用 `src/ts-shared/app/deploy-freshness.ts`：检测到新部署就弹层，默认 10s 后强制刷新（`_ws_refresh` 绕 HTML 缓存）；刷新后仍是旧页则改为提示手动强刷，避免循环。本地构建占位符下自动 no-op。
+
 **提交前**至少跑与改动对应档位的 `npm run verify:*`；**没跑成功的项要在提交信息里写清楚**。
 
 ## 3. 项目记忆（AMH gateway — 当前搁置，规则保留）

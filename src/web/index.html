@@ -208,6 +208,8 @@
     var remoteId = null;
     var stale = false;
     var gateTimer = null;
+    var autoTimer = null;
+    var AUTO_REFRESH_MS = 10000; // 过期提示默认 10s 后自动刷新；点关闭/刷新会取消
 
     function seenId() {
       try { return localStorage.getItem(SEEN_KEY); } catch (e) { return null; }
@@ -240,6 +242,14 @@
       staleTip.hidden = !asStale;
       drawer.classList.add('ws-open');
       armGate();
+      // 过期页面：阅读闸（5s）结束后默认自动刷新一次，不必等用户点按钮；
+      // 用户仍可在 10s 内点「我知道了」/关闭来取消。
+      clearTimeout(autoTimer);
+      if (asStale) {
+        autoTimer = setTimeout(function () {
+          if (drawer.classList.contains('ws-open')) closeDrawer();
+        }, AUTO_REFRESH_MS);
+      }
     }
 
     function tryReloadOnce() {
@@ -248,12 +258,21 @@
         if (sessionStorage.getItem(RELOAD_KEY) === '1') return;
         sessionStorage.setItem(RELOAD_KEY, '1');
       } catch (e) { return; }
-      location.reload();
+      // 加一次性参数，绕开 Pages 对 HTML 的 max-age=600；app 侧 deploy-freshness.ts 同样做法。
+      try {
+        var url = new URL(location.href);
+        url.searchParams.set('_ws_refresh', String(Date.now()));
+        location.replace(url.toString());
+      } catch (e) {
+        location.reload();
+      }
     }
 
     function closeDrawer() {
       if (goBtn.disabled) return;
       clearTimeout(gateTimer);
+      clearTimeout(autoTimer);
+      autoTimer = null;
       drawer.classList.remove('ws-open');
       // 过期路径把「已读」记到远端新 id 上：刷新后不再二弹，本次部署恰好完整读过一次。
       markSeen(remoteId || DEPLOY_ID);
