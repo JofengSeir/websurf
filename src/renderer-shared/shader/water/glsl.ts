@@ -204,7 +204,8 @@ export const WATER_VERTEX_HEADER =
       // R3（T-650 v2）：位移 × att —— 视线越贴近水面（graz→0）位移越收紧，掠射采样
       // 不再飞出水区内容（只动采样坐标，不补偿观感量；暗雾流 grazAtt=1 = 原样）。
       'float vbspGraz = saturate( normalize( cameraPosition - vbspWaterWorld ).y );',
-      'vec2 vbspRefrUv = vbspScreenUv + vbspSlope * ( 0.010 * max( 0.25, vbspWaterRefractAmt ) * mix( 0.35, 1.0, vbspWaterDepthValue ) * mix( vbspWaterGrazAtt, 1.0, vbspGraz ) );',
+      'float vbspRefrScale = mix( 0.010, 0.013, step( 0.5, vbspWaterRtDecode ) );',
+      'vec2 vbspRefrUv = vbspScreenUv + vbspSlope * ( vbspRefrScale * max( 0.25, vbspWaterRefractAmt ) * mix( 0.35, 1.0, vbspWaterDepthValue ) * mix( vbspWaterGrazAtt, 1.0, vbspGraz ) );',
       // 位移采样若落进"没有几何"的区域（RT 背景是黑的），会沿轮廓出现黑边噪点 ⇒
       // 与未位移处比较亮度，明显变暗就回退到未位移样本（常见的 refraction 边缘修正）。
       'vec3 vbspRefrShifted = texture2D( vbspWaterRefr, vbspRefrUv ).rgb;',
@@ -349,8 +350,13 @@ export const WATER_VERTEX_HEADER =
 
 /** 菲涅尔反射与雾色混合，复用 rippleInject 里算出的变量。 */
     export const WATER_ENV_BLOCK = [
-      // 菲涅尔：照 `DrawWater` —— `fNdotV = saturate(dot(eye, n)); fresnel = pow(1 - fNdotV, 5)`
-      '	float vbspFres = pow( clamp( 1.0 - clamp( dot( normalize( vbspWaterN ), normalize( vbspWaterV ) ), 0.0, 1.0 ), 0.0, 1.0 ), 5.0 );',
+      // 菲涅尔：亮雾流保持 `pow(1 - N·V, 5)`；暗雾流线性水使用法线微扰的 Schlick 菲涅尔，增强波纹闪光与液体质感
+      '	vec3 vbspViewW = normalize( cameraPosition - vbspWaterWorld );',
+      '	vec3 vbspWaveWorldN = normalize( vec3( vbspSlope.x * 0.24, 1.0, vbspSlope.y * 0.24 ) );',
+      '	float vbspNdotVWave = clamp( dot( vbspWaveWorldN, vbspViewW ), 0.0, 1.0 );',
+      '	float vbspFres = vbspWaterRtDecode > 0.5',
+      '		? ( 0.04 + 0.96 * pow( 1.0 - vbspNdotVWave, 4.0 ) )',
+      '		: pow( clamp( 1.0 - clamp( dot( normalize( vbspWaterN ), normalize( vbspWaterV ) ), 0.0, 1.0 ), 0.0, 1.0 ), 5.0 );',
       // 源的**无 basetexture 分支**：`fFresnel *= saturate((depth - 0.05) * 20)`
       // —— 水浅（水底近）几乎不反射，水深才成镜面。有了折射 RT 的深度就能照抄。
       '	if ( vbspWaterRefrOn > 0.5 && vbspWaterDepthGate > 0.5 ) { vbspFres *= saturate( ( vbspFogAlpha - 0.05 ) * 20.0 ); }',
