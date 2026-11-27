@@ -8,6 +8,7 @@
 import { InputBridge } from './input/input-bridge.js';
 import { KeyboardInput } from './input/keyboard.js';
 import { shouldConfirmClose } from '../../../src/ts-shared/dom/close-guard.js';
+import { createLoadingOverlay } from '../../../src/ts-shared/dom/loading-overlay.js';
 import { ChatOverlay } from '../../../src/ts-shared/dom/chat-overlay.js';
 import { MouseBuffer } from '../../../src/ts-shared/input/mouse-buffer.js';
 import { PointerLockController } from '../../../src/ts-shared/input/pointer-lock.js';
@@ -2274,7 +2275,9 @@ async function handleBspFile(file: File): Promise<void> {
 	try {
 		await handleLoadBsp(file.name, await file.arrayBuffer());
 	} catch (err) {
-		setError(`BSP 解析失败: ${err instanceof Error ? err.message : String(err)}`);
+		const msg = err instanceof Error ? err.message : String(err);
+		setError(`BSP 解析失败: ${msg}`);
+		loadingOverlay.fail(msg);
 		rendererMain?.disposeScene();
 	}
 }
@@ -2287,17 +2290,31 @@ async function handleBspFile(file: File): Promise<void> {
  * 公共化：导出管线收敛到 ts-shared buildWorldBundle（colliderSource 三档 +
  * 缺失纹理 + 阶段进度回调全部共享）。
  */
+const loadingOverlay = createLoadingOverlay(() => ({
+	overlay: document.getElementById('loadingOverlay'),
+	sub: document.getElementById('loadingSub'),
+	fill: document.getElementById('loadingFill'),
+	stage: document.getElementById('loadingStage'),
+	pct: document.getElementById('loadingPct'),
+	dismissBtn: document.getElementById('loadingDismiss'),
+}));
+
 async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void> {
 	if (!rendererMain || !inputBridge) return;
 	// 换图清空上一张图的聊天提示（倒计时/关卡台词不应跨图残留）。
 	chatOverlay?.clear();
+	loadingOverlay.show(fileName);
+	await new Promise((r) => setTimeout(r, 0));
 	const proc = new BspProcessor(new Uint8Array(bytes)) as BspProcessor & SkyboxProcessorLike; const skyboxFaces = collectSkyboxFaces(proc, (v) => decode_vtf_to_png(v)); const fogParams = fogParamsFromEntities(proc.parse_entities()); const skyCamera = skyCameraFromEntities(proc.parse_entities()); const bundle = await buildWorldBundle(proc, {
 		colliderSource: config.physics.colliderSource ?? 'auto',
 		// T-D135：物理走 WSBW 二进制；线框 overlay 仍读 JSON 的 is_real_face/is_bevel。
 		colliderEncoding: 'both',
 		collectMissingTextures: true,
 		decompressMtz: decompress_mtz,
-		onProgress: (s) => setStatus(s, ''),
+		onProgress: (s) => {
+			setStatus(s, '');
+			loadingOverlay.advance(s);
+		},
 	});
 	renderMetadata(bundle.metadata, fileName); const skyboxTexture = await buildSkyboxCubeTexture(skyboxFaces); console.info('[skybox] faces=' + (skyboxFaces ? skyboxFaces.length : 0) + ' tex=' + !!skyboxTexture);
 
@@ -2332,8 +2349,10 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
 	};
 
 	// 渲染场景（GLB + PVS + spawn；主线程直读本地数据，不再经 Worker scene-data）
+	loadingOverlay.advance('构建渲染场景 (GLB)');
 	const diag = (await rendererMain.loadScene(sceneData)) ?? null;
 	// 主线程物理世界（唯一物理渲染线）
+	loadingOverlay.advance('构建物理世界');
 	rendererMain.buildPredictionWorld({
 		brushBin: bundle.brushBin,
 		triBin: bundle.triBin,
@@ -2419,6 +2438,7 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
 	refreshEnhanceStatusLines();
 	// UI 激活（控件/面板同步/缺失纹理弹窗）
 	await onSceneReadyUi(diag, sceneData);
+	loadingOverlay.finish();
 }
 
 /** 场景元数据面板（文件名 + 统计行；公共化：数据来自 ts-shared WorldMetadata）。 */

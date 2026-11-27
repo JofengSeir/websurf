@@ -132,14 +132,22 @@ export function ensureWasm(): Promise<void> {
   return wasmReady;
 }
 
-export async function loadBspFile(file: File): Promise<BspLoadResult> {
+export async function loadBspFile(file: File, onProgress?: (stage: string) => void): Promise<BspLoadResult> {
   await ensureWasm();
+  const stage = async (s: string): Promise<void> => {
+    if (onProgress) {
+      onProgress(s);
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  };
   // 先让出一帧：解析与导出都在同步段内完成，不给浏览器绘制机会就没有加载反馈
   await new Promise((r) => setTimeout(r, 0));
 
   const t0 = performance.now();
+  await stage('WASM 解析中');
   const proc = new BspProcessor(new Uint8Array(await file.arrayBuffer()));
   const meta = JSON.parse(proc.metadata()) as BspMeta;
+  await stage('解析出生点/传送点/PVS');
   // parse_spawn_points 是借用方法，必须在取走 Bsp 实例的 GLB 导出之前调用
   const spawnJson = proc.parse_spawn_points(); const skyboxFaces = collectSkyboxFaces(proc as BspProcessor & SkyboxProcessorLike, (v) => decode_vtf_to_png(v)); const entitiesJson = proc.parse_entities(); const pvsJson = proc.parse_pvs_data(); const fogParams = fogParamsFromEntities(entitiesJson); const skyCamera = skyCameraFromEntities(entitiesJson);
   // 实体 I/O 必须在 `export_glb*` 之前取（那些导出会消费 BSP 实例）。
@@ -153,10 +161,12 @@ export async function loadBspFile(file: File): Promise<BspLoadResult> {
       console.warn('[bsp] 实体 I/O 导出失败，本图不启用 Source 实体运行期:', e);
     }
   }
+  await stage('加载默认纹理包');
   // 缺失纹理回退（与 game 同款）：装载失败回落 '{}'（无回退表），导出失败回落裸导出
   const defaultsJson = await loadDefaultsJson(decompress_mtz);
   // 回退 VMT 文本表（游戏本体自带材质的原文）：必须在导出前装入；取不到只降级为「缺 VMT」
   await installVmtFallback(proc);
+  await stage('导出 GLB（含 PAKFILE 模型）');
   let glb: Uint8Array;
   try {
     glb = proc.export_glb_with_pakfile_models_with_defaults_and_lights(defaultsJson);

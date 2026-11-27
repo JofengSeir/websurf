@@ -830,6 +830,57 @@
       color: var(--muted); background: none; border: 0; }
     .rp-tags .rp-tag-x:hover { color: var(--accent); }
     .rp-tags input { flex: 1 1 90px; min-width: 60px; }
+
+    /* ── 地图加载进度覆盖层（仪表主题：暖炭实色 + 2px 边角 + 仪表橙结构线，无渐变/无投影）── */
+    #loadingOverlay {
+      display: none; position: absolute; inset: 0; z-index: 30;
+      background: var(--overlay);
+      align-items: center; justify-content: center;
+      padding: 20px;
+    }
+    #loadingOverlay.show { display: flex; }
+    #loadingOverlay .load-card {
+      width: min(420px, 92%); padding: 14px 16px 12px;
+      background: var(--panel); border: 1px solid var(--border-strong);
+      border-radius: var(--r);
+    }
+    #loadingOverlay .load-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding-left: 8px; border-left: 2px solid var(--accent); margin-bottom: 12px;
+    }
+    #loadingOverlay .load-head-text { flex: 1; min-width: 0; }
+    #loadingOverlay .load-title { font-size: 13px; font-weight: 600; color: var(--text); }
+    #loadingOverlay .load-sub {
+      margin-top: 2px; font-size: 11px; color: var(--muted); font-family: var(--mono);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #loadingOverlay .load-pct {
+      flex: none; font-family: var(--mono); font-size: 14px; font-weight: 600;
+      color: var(--accent); font-variant-numeric: tabular-nums;
+    }
+    #loadingOverlay .load-track {
+      height: 5px; overflow: hidden;
+      background: var(--bg); border: 1px solid var(--border); border-radius: var(--r);
+    }
+    #loadingOverlay .load-fill {
+      height: 100%; width: var(--load-pct, 0%);
+      background: var(--accent);
+    }
+    #loadingOverlay .load-meta {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border);
+      font-size: 11px; color: var(--muted); font-family: var(--mono);
+    }
+    #loadingOverlay .load-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+    #loadingOverlay .load-tag { font-size: 10px; letter-spacing: 0.06em; color: var(--muted); }
+    #loadingOverlay .load-dismiss { display: none; padding: 1px 7px; font-size: 11px; }
+    #loadingOverlay.error .load-card { border-color: var(--err); }
+    #loadingOverlay.error .load-head { border-left-color: var(--err); }
+    #loadingOverlay.error .load-fill { background: var(--err); }
+    #loadingOverlay.error .load-title,
+    #loadingOverlay.error .load-pct { color: var(--err); }
+    #loadingOverlay.error .load-sub { white-space: normal; word-break: break-all; color: var(--err); }
+    #loadingOverlay.error .load-dismiss { display: inline-block; }
 </style>
 </head>
 <body>
@@ -1431,6 +1482,25 @@
             <button class="ip-btn" id="interactDrawerClose" title="关闭">×</button>
           </div>
           <div class="idr-body" id="interactDrawerBody"></div>
+        </div>
+        <div id="loadingOverlay">
+          <div class="load-card">
+            <div class="load-head">
+              <div class="load-head-text">
+                <div class="load-title">正在加载地图</div>
+                <div class="load-sub" id="loadingSub">准备中…</div>
+              </div>
+              <span class="load-pct" id="loadingPct">0%</span>
+            </div>
+            <div class="load-track"><div class="load-fill" id="loadingFill"></div></div>
+            <div class="load-meta">
+              <span id="loadingStage">初始化</span>
+              <div class="load-actions">
+                <span class="load-tag" aria-hidden="true">DEBUG</span>
+                <button type="button" id="loadingDismiss" class="load-dismiss">关闭</button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

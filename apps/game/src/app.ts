@@ -34,6 +34,7 @@ import { KeyboardInput } from './input/keyboard.js';
 import { ACTION_LABELS, codeLabel, loadKeymap, type BindableAction } from './input/keymap.js';
 import type { KeyState } from './worker/worker-types.js';
 import { shouldConfirmClose } from '../../../src/ts-shared/dom/close-guard.js';
+import { createLoadingOverlay } from '../../../src/ts-shared/dom/loading-overlay.js';
 import { ChatOverlay } from '../../../src/ts-shared/dom/chat-overlay.js';
 import { MouseBuffer } from '../../../src/ts-shared/input/mouse-buffer.js';
 import { PointerLockController } from '../../../src/ts-shared/input/pointer-lock.js';
@@ -953,152 +954,31 @@ function setStatus(msg: string, cls: 'success' | 'error' | ''): void {
 }
 
 // ---------------------------------------------------------------------------
-// 地图加载进度覆盖层
+// 地图加载进度覆盖层（共享控制器 src/ts-shared/dom/loading-overlay.ts）
 // ---------------------------------------------------------------------------
 
-/** 加载过程阶段 → 进度百分比（解析/导出占大头；GLB 加载与物理构建收尾）。 */
-const LOAD_STAGE_PCT: Record<string, number> = {
-  '正在加载地图': 0,
-  'WASM 解析中': 8,
-  '解析出生点/传送点/PVS': 22,
-  '导出碰撞体': 40,
-  '导出 GLB（含 PAKFILE 模型）': 58,
-  '构建渲染场景 (GLB)': 78,
-  '构建物理世界': 92,
-};
+const loadingOverlay = createLoadingOverlay(() => ({
+  overlay: dom.loadingOverlay,
+  sub: dom.loadingSub,
+  fill: dom.loadingFill,
+  stage: dom.loadingStage,
+  pct: dom.loadingPct,
+}));
 
-let loadingFillEl: HTMLElement | null = null;
-let loadingStageEl: HTMLElement | null = null;
-let loadingPctEl: HTMLElement | null = null;
-let loadingSubEl: HTMLElement | null = null;
-let loadingOverlayEl: HTMLElement | null = null;
-
-/** 平滑补间：目标值 + 动画状态。 */
-const loadingAnim = {
-  /** 当前展示值（0-100，驱动补间）。 */
-  current: 0,
-  /** 目标值（最新阶段百分比）。 */
-  target: 0,
-  /** 阶段进行中的轻微漂移（伪不确定进度，避免视觉卡死）。 */
-  drifting: false,
-  raf: 0,
-};
-
-/** 缓存加载覆盖层 DOM（首次调用时）。 */
-function ensureLoadingEls(): void {
-  if (loadingOverlayEl) return;
-  loadingOverlayEl = dom.loadingOverlay;
-  loadingSubEl = dom.loadingSub;
-  loadingFillEl = dom.loadingFill;
-  loadingStageEl = dom.loadingStage;
-  loadingPctEl = dom.loadingPct;
-}
-
-/** 停止补间动画（隐藏覆盖层时调用，防泄漏）。 */
-function stopLoadingAnim(): void {
-  if (loadingAnim.raf) cancelAnimationFrame(loadingAnim.raf);
-  loadingAnim.raf = 0;
-  loadingAnim.drifting = false;
-}
-
-/**
- * 逐帧推进进度条：朝 target 平滑接近；阶段切换(target 前进)后若目标不变，
- * 在阶段区间内做轻微漂移，营造"仍在处理"的感觉（默认共 ~4ms 采样自然推进）。
- */
-function tickLoading(): void {
-  loadingAnim.raf = 0;
-  let cur = loadingAnim.current;
-  const target = loadingAnim.target;
-  // 朝目标平滑逼近（ease-out 手感；差距大时走得快）
-  const diff = target - cur;
-  if (Math.abs(diff) > 0.1) {
-    cur += diff * (0.12 + 0.02 * Math.abs(diff));
-    if (cur > 0.98 * target && cur < target) cur = target; // 收尾贴合，避免无限趋近
-    loadingAnim.current = cur;
-  } else if (loadingAnim.drifting) {
-    // 阶段进行中的伪前进：在当前阶段区间内缓慢漂移（封顶到下一阶段前）
-    cur = Math.min(cur + 0.15, Math.max(target, 0) + 2);
-    loadingAnim.current = cur;
-  }
-  // 渲染
-  const shown = Math.max(0, Math.min(100, cur));
-  if (loadingFillEl) loadingFillEl.style.setProperty('--load-pct', `${shown}%`);
-  if (loadingPctEl) loadingPctEl.textContent = `${Math.round(shown)}%`;
-  // 只要还在展示且有动画需求就继续
-  if (loadingOverlayEl?.classList.contains('show')) {
-    loadingAnim.raf = requestAnimationFrame(tickLoading);
-  }
-}
-
-/** 显示加载覆盖层（读取地图后退出面板，改为展示进度）。 */
 function showLoading(mapName: string): void {
-  ensureLoadingEls();
-  stopLoadingAnim();
-  loadingAnim.current = 0;
-  loadingAnim.target = 0;
-  if (loadingOverlayEl) {
-    loadingOverlayEl.classList.add('show');
-    // 清掉残留的错误态
-    loadingOverlayEl.classList.remove('error');
-  }
-  // 进度条复位走 CSS 回落值（.load-fill width:var(--load-pct, 0%)）——清除自定义属性即回落 0%
-  if (loadingFillEl) loadingFillEl.style.removeProperty('--load-pct');
-  if (loadingStageEl) loadingStageEl.textContent = '初始化';
-  if (loadingPctEl) loadingPctEl.textContent = '0%';
-  if (loadingSubEl) loadingSubEl.textContent = mapName ? `加载 ${mapName}…` : '加载地图…';
-  loadingAnim.raf = requestAnimationFrame(tickLoading);
+  loadingOverlay.show(mapName);
 }
 
-/** 更新进度（阶段名 + 目标百分比；实际展示经补间平滑）。 */
-function updateLoadingProgress(stage: string, pct: number): void {
-  ensureLoadingEls();
-  loadingAnim.target = Math.max(0, Math.min(100, pct));
-  loadingAnim.drifting = false;
-  if (loadingStageEl) loadingStageEl.textContent = stage;
-}
-
-/** 按阶段名推进进度（映射到全局百分比；阶段名不识别时仅更新文字）。 */
 function advanceLoading(stage: string): void {
-  const pct = LOAD_STAGE_PCT[stage];
-  if (pct !== undefined) {
-    updateLoadingProgress(stage, pct);
-    // 在阶段内做伪确定漂移，直到下个阶段到来（覆盖层动画循环里消费）
-    // 仅在非最后一个已知阶段后允许漂移，避免 92→100 前乱漂
-    loadingAnim.drifting = pct < 92;
-  } else if (loadingStageEl) {
-    loadingStageEl.textContent = stage;
-  }
+  loadingOverlay.advance(stage);
 }
 
-/** 加载完成：进度冲到 100 后延迟隐藏（给玩家收尾缓冲）。 */
 function finishLoading(): void {
-  ensureLoadingEls();
-  loadingAnim.target = 100;
-  loadingAnim.drifting = false;
-  if (loadingStageEl) loadingStageEl.textContent = '完成';
-  // 等补间贴近 100 再隐藏（约 250ms）
-  window.setTimeout(() => hideLoading(), 260);
+  loadingOverlay.finish();
 }
 
-/** 加载失败：覆盖层转错误态并显示原因（不直接消失）。 */
 function failLoading(message: string): void {
-  ensureLoadingEls();
-  stopLoadingAnim();
-  if (loadingOverlayEl) loadingOverlayEl.classList.add('error');
-  if (loadingStageEl) loadingStageEl.textContent = '加载失败';
-  if (loadingSubEl) loadingSubEl.textContent = message;
-  if (loadingFillEl) loadingFillEl.style.setProperty('--load-pct', '100%');
-  if (loadingPctEl) loadingPctEl.textContent = '—';
-}
-
-/** 隐藏加载覆盖层（加载完成或失败）。 */
-function hideLoading(): void {
-  ensureLoadingEls();
-  stopLoadingAnim();
-  if (loadingOverlayEl) {
-    loadingOverlayEl.classList.remove('show');
-    loadingOverlayEl.classList.remove('error');
-  }
+  loadingOverlay.fail(message);
 }
 
 function setError(msg: string): void {

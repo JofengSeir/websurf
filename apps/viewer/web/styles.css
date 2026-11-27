@@ -919,6 +919,75 @@ select.tl-select:focus { border-color: var(--text); }
 #fatal .fdetail { font-size: 12px; color: var(--muted); line-height: 1.8; white-space: pre-wrap; word-break: break-all; }
 #fatal .fdetail code { color: var(--muted); }
 
+/* ── 地图加载进度覆盖层（导演工作台风格：0px 直角 + SMPTE 校准条 + 时间码黄）── */
+#loadingOverlay {
+  display: none; position: fixed; inset: 0; z-index: 8000;
+  background: var(--overlay);
+  align-items: center; justify-content: center;
+  padding: 24px;
+  color: var(--text);
+}
+#loadingOverlay.show { display: flex; }
+#loadingOverlay .load-card {
+  position: relative;
+  width: min(440px, 92vw); padding: 20px 24px 16px;
+  background: var(--panel-trans);
+  border: 1px solid var(--border-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+#loadingOverlay .load-card::before {
+  content: ""; position: absolute; top: 0; left: 18px;
+  width: 56px; height: 3px;
+  background: linear-gradient(90deg,
+    #c8c8c8 0 14.28%, #e6c35c 14.28% 28.56%, #4fb3c4 28.56% 42.84%, #58c25c 42.84% 57.12%,
+    #b06fc4 57.12% 71.4%, #d9564a 71.4% 85.68%, #4a6fd9 85.68% 100%);
+}
+#loadingOverlay .load-head {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 14px;
+}
+#loadingOverlay .load-head-text { flex: 1; min-width: 0; }
+#loadingOverlay .load-title { font-size: 15px; font-weight: 600; color: var(--text); letter-spacing: 0.02em; }
+#loadingOverlay .load-sub {
+  margin-top: 2px; font-size: 12px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#loadingOverlay .load-pct {
+  flex: none; font-family: var(--mono); font-size: 16px; font-weight: 600;
+  color: var(--accent); font-variant-numeric: tabular-nums;
+}
+#loadingOverlay .load-track {
+  position: relative; height: 6px; overflow: hidden;
+  background: var(--bg); border: 1px solid var(--border);
+}
+#loadingOverlay .load-fill {
+  height: 100%; width: var(--load-pct, 0%);
+  background: var(--accent);
+}
+#loadingOverlay .load-meta {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 12px; padding-top: 9px; border-top: 1px solid var(--border);
+  font-size: 11.5px; color: var(--muted); font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+#loadingOverlay .load-stage {
+  display: inline-flex; align-items: center; gap: 7px;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#loadingOverlay .load-dot {
+  width: 6px; height: 6px; background: var(--accent); flex: none;
+}
+#loadingOverlay .load-tag {
+  font-size: 10.5px; letter-spacing: 0.08em; color: var(--muted); flex: none;
+}
+#loadingOverlay.error .load-card { border-color: var(--err); }
+#loadingOverlay.error .load-fill,
+#loadingOverlay.error .load-dot { background: var(--err); }
+#loadingOverlay.error .load-title,
+#loadingOverlay.error .load-pct { color: var(--err); }
+#loadingOverlay.error .load-sub {
+  white-space: normal; word-break: break-all; color: var(--err);
+}
+
 /* ── 演示页（Source `.dem`，`DemoPanel`） ─────────────────────────────
    与「录像」页刻意不同：`.dem` 没有定长位姿，看板是「时间线 + 玩家标注」而非轨迹列表。
    时间线一行一位玩家：有采到位姿则画强调色区间条，否则显示「位姿不可用」的弱化标记。 */

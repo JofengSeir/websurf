@@ -9,7 +9,6 @@
   <!-- 本端标识：渲染档按端隔离（键 vbsp:renderPrefs:viewer），详见 src/renderer-shared/config/render-prefs.ts -->
   <script>globalThis.__VBSP_APP__ = 'viewer';</script>
   <title>WebSurf-viewer — BSP 地图预览与记录 / 录像回放</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='4' width='24' height='24' fill='%23161619'/%3E%3Cpath d='M9 20 L16 9 L23 20 Z' fill='none' stroke='%23e8e8e4' stroke-width='2.2' stroke-linejoin='round'/%3E%3Ccircle cx='16' cy='17' r='2.2' fill='%23e6c35c'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -91,6 +90,24 @@
 
 <!-- 拖拽高亮反馈条：`#dropzone`，拖拽期间由 `apps/viewer/src/ui/hud.ts` 切换 `active` 类 -->
   <div id="dropzone">松开鼠标：.bsp 加载地图、.replay 导入记录、.dem 导入录像</div>
+
+  <!-- 地图加载进度覆盖层（导演工作台风格） -->
+  <div id="loadingOverlay">
+    <div class="load-card">
+      <div class="load-head">
+        <div class="load-head-text">
+          <div class="load-title">正在加载地图</div>
+          <div class="load-sub" id="loadingSub">准备中…</div>
+        </div>
+        <span class="load-pct" id="loadingPct">0%</span>
+      </div>
+      <div class="load-track"><div class="load-fill" id="loadingFill"></div></div>
+      <div class="load-meta">
+        <span class="load-stage"><i class="load-dot" aria-hidden="true"></i><span id="loadingStage">初始化</span></span>
+        <span class="load-tag" aria-hidden="true">SCENE LOAD</span>
+      </div>
+    </div>
+  </div>
 
   <div id="hud">
     <div class="hud-line" id="pose">位姿 —</div>

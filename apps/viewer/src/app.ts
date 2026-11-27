@@ -21,6 +21,7 @@
  */
 
 import { shouldConfirmClose } from '../../../src/ts-shared/dom/close-guard.js';
+import { createLoadingOverlay } from '../../../src/ts-shared/dom/loading-overlay.js';
 import { DEG2RAD } from './core/constants.js'; import { installPoseEntry, cameraPoseOf, feetFromCameraPose } from '../../../src/renderer-shared/camera/pose-entry.js';
 import { ViewerScene } from './core/scene.js';
 import { FlyCam } from './core/fly.js';
@@ -616,6 +617,14 @@ function scheduleMapReload(): void {
   }, 250);
 }
 
+const loadingOverlay = createLoadingOverlay(() => ({
+  overlay: document.getElementById('loadingOverlay'),
+  sub: document.getElementById('loadingSub'),
+  fill: document.getElementById('loadingFill'),
+  stage: document.getElementById('loadingStage'),
+  pct: document.getElementById('loadingPct'),
+}));
+
 async function loadBsp(file: File): Promise<void> {
   lastBspFile = file;
   if (bspLoading) return;
@@ -628,11 +637,17 @@ async function loadBsp(file: File): Promise<void> {
   displayPanelHandle?.sync(); // 顶部「未载入地图」状态行随之收起
   setLoadBusy(true);
   hud.clearGuideError();
+  loadingOverlay.show(file.name);
   const prevStatus = hud.statusText(); // 换图失败后要还原的旧地图摘要
   try {
     hud.setStatus(`正在解析 ${file.name}（主线程 BSP 解析）…`);
-    const result: BspLoadResult = await loadBspFile(file);
+    const result: BspLoadResult = await loadBspFile(file, (stage) => {
+      hud.setStatus(`${file.name} · ${stage}…`);
+      loadingOverlay.advance(stage);
+    });
+    loadingOverlay.advance('构建渲染场景 (GLB)');
     await scene.mountGlb(result.glbBytes, result.skyboxTexture, { fogParams: result.fogParams, skyCamera: result.skyCamera, pvsJson: result.pvsJson, mosaicManifest: result.mosaicManifest, entityIoJson: result.entityIoJson ?? null });
+    loadingOverlay.advance('装配实体与视角');
     setupEntitySystem(result.entityIoJson);
 
     const box = scene.worldBox();
@@ -658,7 +673,9 @@ async function loadBsp(file: File): Promise<void> {
         `${result.spawnPoints.length} 出生点，GLB ${glbKb} KB${initialPoseNote(init)}`,
     );
     hud.hideGuide();
+    loadingOverlay.finish();
   } catch (e) {
+    loadingOverlay.hide();
     const [human, raw] = humanizeBspError(e);
     console.error('[viewer] BSP 加载失败:', e);
     if (!scene.hasModel()) {
