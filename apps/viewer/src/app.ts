@@ -22,6 +22,7 @@
 
 import { shouldConfirmClose } from '../../../src/ts-shared/dom/close-guard.js';
 import { createLoadingOverlay } from '../../../src/ts-shared/dom/loading-overlay.js';
+import { RENDER_REV } from '../../../src/renderer-shared/scene/render-session.js';
 import { DEG2RAD } from './core/constants.js'; import { installPoseEntry, cameraPoseOf, feetFromCameraPose } from '../../../src/renderer-shared/camera/pose-entry.js';
 import { ViewerScene } from './core/scene.js';
 import { FlyCam } from './core/fly.js';
@@ -102,6 +103,27 @@ const dockEl = qs('dock');
 const telemetryEl = qs('telemetry');
 const loadingOverlayEl = qs('loadingOverlay');
 const sidebarToggle = qs<HTMLButtonElement>('sidebarToggle');
+
+const guideBuildRevEl = qs('guideBuildRev');
+const viewerBuildRevBtn = qs<HTMLButtonElement>('viewerBuildRev');
+const viewerBuildRevTextEl = qs('viewerBuildRevText');
+if (guideBuildRevEl) {
+  guideBuildRevEl.textContent = RENDER_REV;
+  guideBuildRevEl.title = RENDER_REV;
+}
+if (viewerBuildRevTextEl) {
+  viewerBuildRevTextEl.textContent = RENDER_REV;
+  viewerBuildRevTextEl.title = RENDER_REV;
+}
+let revCopiedTimer = 0;
+viewerBuildRevBtn?.addEventListener('click', () => {
+  void navigator.clipboard?.writeText(RENDER_REV).catch(() => {});
+  viewerBuildRevBtn.classList.add('copied');
+  window.clearTimeout(revCopiedTimer);
+  revCopiedTimer = window.setTimeout(() => {
+    viewerBuildRevBtn.classList.remove('copied');
+  }, 1200);
+});
 
 sidebarToggle?.addEventListener('click', () => {
   const hidden = sidebarEl?.classList.toggle('hidden') ?? false;

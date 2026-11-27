@@ -16,8 +16,8 @@
  *     侧栏与主按钮更早前已是矩形。菱角语彙改由「零圆角 + 1px/2px 直线」表达。
  *   · 线宽系统：2px 结构线（HUD 铭牌左缘）/ 1px 发丝分隔 / 1px 点线
  *     （小节标题右端 3px 短竖刻度，同 game h4）；
- *   · 档案元素成套：两个 tabpane 档案编号（右上，VW-01 / VW-02，时间码黄）+
- *     页脚署名（右下）；硬件件计数：服务孔 1（侧栏左下）+ 引导卡铰链片的 3 颗螺钉
+ *   · 档案元素成套：四个 tabpane 档案编号（右上，VW-01 ~ VW-04）+
+ *     侧栏统一页脚（#sidebarFoot 展示点击复制的 RENDER_REV）；硬件件计数：服务孔 1（侧栏左下）+ 引导卡铰链片的 3 颗螺钉
  *     （上片 1 + 下片 2，见下方引导卡段）——viewer 为全屏画布 + 浮层布局，硬件件按「每浮层
  *     至多 1 件」适配，不套用 game 单窗口的 ≥2 口径；
  *   · **导演版条纹特色（owner 指定保留并强化，v3 扩展）**：时间轴上下缘
@@ -65,7 +65,7 @@
   --ok: #8cc98f;                         /* 预留令牌：本工程当前无 success 态消费点 */
   /* --accent-hover / --on-accent 为预留令牌：主按钮走场记板白底黑字（--strip-*），无 hover/前景消费点 */
   --err: #e05548;                         /* REC 红：仅错误/危险 */
-  --warn: #e0955c;                       /* 警示橙：与时间码黄分离 */                       /* 刻意与 --accent 同值：时间码黄兼任片场警示色 */
+  --warn: #e0955c;                        /* 警示橙：与时间码黄分离 */
 
   /* 黑白条（场记板 / 遮幅）：亮段 = 场记板白，暗段 = 影调黑 */
   --strip-light: #e8e8e4;
@@ -190,11 +190,14 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
   background: var(--bg); border: 1px solid var(--border-strong);
   z-index: 1; pointer-events: none;
 }
-#tabs { display: flex; gap: 8px; padding: 10px 12px; }
+#tabs {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  padding: 12px 12px 10px; border-bottom: 1px solid var(--border);
+}
 /* 标签 = 状态标签条形态（同 game 标签条：无圆角 1px 边；激活 = 场记板白底黑字） */
 .tab {
   font-family: inherit; font-size: 12.5px; color: var(--muted);
-  padding: 5px 14px; background: none;
+  padding: 5px 4px; text-align: center; background: none;
   border: 1px solid var(--border-strong);
   cursor: pointer;
 }
@@ -211,32 +214,44 @@ code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
 .tabpane {
   position: relative;
   display: none; flex: 1; overflow-y: auto; overscroll-behavior: contain;
-  padding: 10px 12px 14px;
+  padding: 26px 12px 14px;
   /* 槽位只给会滚动的 pane：地图 pane 内容短，常驻槽位是一根不对称死条（owner 实测右侧偏宽）；
      会滚动的 #pane-replay / #pane-demo 在下方单独保留槽位。自绘滚动条见文件尾 webkit 块。 */
 }
 #pane-replay, #pane-demo { scrollbar-gutter: stable; }
 .tabpane.active { display: flex; flex-direction: column; }
 
-/* 档案编号（tabpane 右上，时间码黄等宽 12px）与页脚署名（右下，中性；
-   margin-top:auto 在内容不足时收尾填补空白）——编号/署名不占文档流 */
+/* 档案编号（tabpane 右上，等宽 12px）——不占文档流，顶部 26px 内边距避免压住内容 */
 #pane-map::before { content: "VW-01"; }
 #pane-replay::before { content: "VW-02"; }
 #pane-demo::before { content: "VW-03"; }
+#pane-display::before { content: "VW-04"; }
 .tabpane::before {
   position: absolute; top: 8px; right: 12px;
   font-family: var(--mono); font-size: 12px; color: var(--muted);
   letter-spacing: 0.04em;
 }
-.tabpane::after {
-  content: ""; display: block; margin-top: auto; padding-top: 10px;
+/* 侧栏统一页脚：左侧留出服务孔（bottom:13px left:12px）位，右侧展示点击复制的 RENDER_REV */
+#sidebarFoot {
+  flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  min-height: 31px; padding: 5px 12px 5px 26px;
   border-top: 1px solid var(--border);
-  text-align: right; font-family: var(--mono); font-size: 11px;
-  color: var(--muted); letter-spacing: 0.04em;
+  background: rgba(16, 16, 18, 0.35);
 }
-#pane-map::after { content: "地图面板 · v0.1"; }
-#pane-replay::after { content: "记录面板 · v0.1"; }
-#pane-demo::after { content: "录像面板 · v0.1"; }
+.sb-rev {
+  display: inline-flex; align-items: baseline; gap: 6px; max-width: 100%;
+  padding: 2px 6px; background: transparent; border: 1px solid transparent;
+  cursor: pointer; font-family: var(--mono); font-size: 11px; color: var(--muted);
+}
+.sb-rev:hover { border-color: var(--border-strong); background: rgba(232, 232, 228, 0.06); }
+.sb-rev-k { font-size: 10px; letter-spacing: 0.08em; color: var(--muted); flex: none; }
+.sb-rev-v {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text); font-family: var(--mono); font-size: 11px;
+}
+.sb-rev.copied { border-color: var(--ok); color: var(--ok); }
+.sb-rev.copied .sb-rev-v { color: var(--ok); }
+.sb-rev.copied::after { content: "已复制"; font-size: 10px; color: var(--ok); flex: none; }
 
 /* ── .map-reload：地图页顶部的「更换地图」行（label.filebtn，点击转发到 #bspFile；构造点见 apps/viewer/src/ui/mapinfo.ts）── */
 .map-reload {
@@ -784,6 +799,7 @@ select.tl-select:focus { border-color: var(--text); }
 }
 #guide .production div + div { border-top: 1px solid var(--border-strong); }
 #guide .production b { display: block; margin-top: 4px; color: var(--text); font-family: system-ui, sans-serif; font-size: 20.25px; font-weight: 500; }
+#guide #guideBuildRev { font-family: var(--mono); font-size: 16.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 四格：前三格等宽、操作格略宽（两枚按钮的文案比「01」长，不然会折成三行）。
    实物板上这四格是 SCENE / TAKE / ROLL / DATE，这里换成三步引导 + 操作 */
 #guide .fields {
@@ -860,6 +876,7 @@ select.tl-select:focus { border-color: var(--text); }
   #guide .slate-name span { margin-top: 8px; font-size: 10.25px; letter-spacing: 0.16em; }
   #guide .production div { padding: 10px 10px; font-size: 10.25px; }
   #guide .production b { margin-top: 4px; font-size: 17.25px; }
+  #guide #guideBuildRev { font-size: 13px; }
   #guide .fields { grid-template-columns: 1fr; }
   #guide .field { padding: 14px 11px 16px; }
   #guide .field + .field { border-left: 0; border-top: 1px solid var(--border-strong); }
@@ -1079,9 +1096,9 @@ select.tl-select:focus { border-color: var(--text); }
 .dmp-whoname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 队伍标签（PlayerSample.team → 观察者 / T / CT）：贴在名字后的小方框，与人物名牌的 `.dmp-who-tag` 同语彙 */
 /* 观察标记（T-702）：过半时间在观察 —— 这段位姿是镜头跟着别人，不是本人走位 */
-.dmp-who-observe { margin-left: 4px; padding: 0 4px; border-radius: 3px; font-size: 10px; font-style: normal; color: var(--bg); background: var(--muted); }
+.dmp-who-observe { margin-left: 4px; padding: 0 4px; border-radius: 0; font-size: 10px; font-style: normal; color: var(--bg); background: var(--muted); }
 /* 死亡标记（T-714）：过半时间已死 —— 死亡期间镜头自由观察，同样不是本人走位（与「观」并列） */
-.dmp-who-dead { margin-left: 4px; padding: 0 4px; border-radius: 3px; font-size: 10px; font-style: normal; color: var(--muted); border: 1px solid var(--muted); }
+.dmp-who-dead { margin-left: 4px; padding: 0 4px; border-radius: 0; font-size: 10px; font-style: normal; color: var(--muted); border: 1px solid var(--muted); }
 .dmp-who-team { margin-left: 6px; padding: 0 4px; font-style: normal; font-size: 10px; line-height: 1.5; color: var(--muted); border: 1px solid var(--border-strong); }
 .dmp-whobar { position: relative; display: block; height: 6px; background: rgba(255, 255, 255, 0.06); }
 .dmp-whobar i { position: absolute; top: 0; bottom: 0; background: var(--accent); }
@@ -1234,7 +1251,7 @@ button.dmp-chat-t:hover { color: var(--accent); border-bottom-style: solid; }
 /* 标签式输入（P2-③）：多名字的材质项用它，值仍是逗号分隔串 */
 .rp-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .rp-tags .rp-tag { display: inline-flex; align-items: center; gap: 2px; padding: 1px 4px 1px 6px;
-  border: 1px solid var(--border); border-radius: 3px; font-size: 11px; color: var(--text); background: var(--panel); }
+  border: 1px solid var(--border); border-radius: 0; font-size: 11px; color: var(--text); background: var(--panel); }
 .rp-tags .rp-tag-x { padding: 0 2px; font: inherit; line-height: 1; cursor: pointer;
   color: var(--muted); background: none; border: 0; }
 .rp-tags .rp-tag-x:hover { color: var(--accent); }

@@ -77,6 +77,24 @@
     }
     #topbar .title { font-size: 13px; font-weight: 600; color: var(--accent); margin-right: 12px; white-space: nowrap; border-left: 2px solid var(--accent); padding-left: 8px; }
     #topbar .spacer { flex: 1; }
+    .tb-map {
+      font-family: var(--mono); font-size: 11px; color: var(--muted);
+      max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .tb-rev {
+      display: inline-flex; align-items: baseline; gap: 5px; max-width: 260px;
+      padding: 2px 7px; font-family: var(--mono); font-size: 11px; color: var(--muted);
+      background: var(--bg); border: 1px solid var(--border); border-radius: var(--r);
+    }
+    .tb-rev:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
+    .tb-rev-k { font-size: 10px; letter-spacing: 0.06em; color: var(--muted); flex: none; }
+    .tb-rev-v {
+      min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      color: var(--accent); font-family: var(--mono);
+    }
+    .tb-rev.copied { border-color: var(--ok); }
+    .tb-rev.copied .tb-rev-v { color: var(--ok); }
+    .tb-rev.copied::after { content: "已复制"; font-size: 10px; color: var(--ok); flex: none; }
     #main { flex: 1; display: flex; overflow: hidden; min-height: 0; }
     #sidebar {
       flex: 0 0 300px; width: 300px;
@@ -205,7 +223,6 @@
     .lg-tick { color: #f59e0b; }
     .lg-break { color: #ff2626; }
     .path-legend-note { font-size: 10px; color: var(--muted); }
-    .path-build-tag { font-size: 10px; color: var(--muted); margin-top: 2px; }
     .path-counts { font-size: 11px; color: var(--muted); margin-top: 4px; font-variant-numeric: tabular-nums; }
 
     /* 参数来源徽记（HTML 图例与 JS 写入的行内色共用这套语义：
@@ -825,7 +842,7 @@
       /* 标签式输入（P2-③）：多名字的材质项用它，值仍是逗号分隔串 */
     .rp-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
     .rp-tags .rp-tag { display: inline-flex; align-items: center; gap: 2px; padding: 1px 4px 1px 6px;
-      border: 1px solid var(--border); border-radius: 3px; font-size: 11px; color: var(--text); background: var(--panel); }
+      border: 1px solid var(--border); border-radius: var(--r); font-size: 11px; color: var(--text); background: var(--panel); }
     .rp-tags .rp-tag-x { padding: 0 2px; font: inherit; line-height: 1; cursor: pointer;
       color: var(--muted); background: none; border: 0; }
     .rp-tags .rp-tag-x:hover { color: var(--accent); }
@@ -889,6 +906,10 @@
     <div id="topbar">
       <span class="title">WebSurf</span>
       <span class="spacer"></span>
+      <span class="tb-map" id="topbarMapName">未载入</span>
+      <button type="button" class="tb-rev" id="debugBuildRev" title="构建版本（点击复制）">
+        <span class="tb-rev-k">REV</span><code class="tb-rev-v" id="debugBuildRevText">dev</code>
+      </button>
     </div>
 
     <!-- 主容器 -->
@@ -1088,11 +1109,6 @@
                 <span class="lg-tick">■</span> tick 物理（Worker 权威帧，每新帧）
                 <span class="lg-break">■</span> 硬折角(&gt;20°)<br />
                 <span class="path-legend-note">tick 节点时间戳 = 该帧发布所依据的<b>渲染时钟采样时刻 τ</b>（不是轮询时刻）；权威发布位置即渲染轨迹上的一个采样点 → 偏差梳与垂距都应 ≈0。</span><br />
-              </div>
-
-              <!-- 构建标签：静态文本、无代码读写；本页不校验构建版本，与产物不符时页面不会提示。 -->
-              <div class="ctrl-full path-build-tag" id="pathBuildTag">
-                实现版本 v4 · 节点直连段 + tick 时间戳=渲染时钟 τ + 垂距/偏差梳分列（若这里不是 v4，说明浏览器跑的是旧构建 → Ctrl+Shift+R 强刷）
               </div>
 
               <div class="ctrl-full path-counts" id="pathCounts"

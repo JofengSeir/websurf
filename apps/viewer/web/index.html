@@ -54,8 +54,8 @@
           <div class="colorbar" aria-label="RGB 与 CMYK 色标"><span class="r"></span><span class="g"></span><span class="b"></span><span class="c"></span><span class="m"></span><span class="y"></span><span class="k"></span></div>
           <div class="title-row">
             <div class="slate-name"><strong>WebSurf</strong><span>SCENE SLATE</span></div>
-            <!-- 版本串与三个面板页脚显示的是同一处（见 styles.css 的 pane::after 规则） -->
-            <div class="production"><div>PRODUCTION<b>WebSurf-viewer</b></div><div>VERSION<b>v0.1</b></div></div>
+            <!-- 构建版本来自共享层 RENDER_REV，由 apps/viewer/src/app.ts 写入 -->
+            <div class="production"><div>PRODUCTION<b>WebSurf-viewer</b></div><div>REV<b id="guideBuildRev">dev</b></div></div>
           </div>
           <!-- 四格：实物板印的是 SCENE / TAKE / ROLL / DATE，这张卡里换成三步引导 + 操作 -->
           <div class="fields">
@@ -132,7 +132,7 @@
 
   <div id="topbar">
     <button class="iconbtn" id="helpBtn" type="button" title="操作帮助：键位 / 载入 / 播放基准">?</button>
-    <button class="iconbtn" id="sidebarToggle" type="button" title="显示 / 隐藏右侧面板">面板</button>
+    <button class="iconbtn active" id="sidebarToggle" type="button" title="显示 / 隐藏右侧面板">面板</button>
     <input id="bspFile" type="file" accept=".bsp" />
     <!-- 引导层「导入记录 / 录像」用的隐藏输入：类型由内容判定，不由 accept 决定去向
          （`accept` 只影响系统对话框的默认过滤项）；`routeFile` 见 `apps/viewer/src/app.ts`。
@@ -175,6 +175,11 @@
          `activeTab`/`demoPane` 与 `replay/demopanel.ts` 一直按它存在来写。 -->
     <div class="tabpane" id="pane-demo"></div>
     <div class="tabpane" id="pane-display"></div>
+    <div id="sidebarFoot">
+      <button type="button" class="sb-rev" id="viewerBuildRev" title="构建版本（点击复制）">
+        <span class="sb-rev-k">REV</span><code class="sb-rev-v" id="viewerBuildRevText">dev</code>
+      </button>
+    </div>
   </aside>
 
   <!-- 底部 dock `#dock`：**两个回放会话各占一层**，同一时刻只有一层 `.active` 可见。

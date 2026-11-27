@@ -42,6 +42,7 @@ import { buildWorldBundle } from '../../../src/ts-shared/phys/world-builder.js';
 import { setOptimizeFlags } from '../../../src/renderer-shared/config/optimize-flags.js';
 import type { WorldMetadata } from '../../../src/ts-shared/phys/world-builder.js';
 import { RendererMain, type CullStatsLike, type RenderPhysEvent } from './renderer/renderer-main.js';
+import { RENDER_REV } from '../../../src/renderer-shared/scene/render-session.js';
 // 可选增强插件宿主（默认全关；见 src/ts-shared/enhance/ 与本文件 main() 的装配点）
 import { EnhanceHost } from './enhance/enhance-host.js';
 import { formatTime, GameState } from './game-state.js';
@@ -2316,7 +2317,14 @@ async function handleLoadBsp(fileName: string, bytes: ArrayBuffer): Promise<void
 			loadingOverlay.advance(s);
 		},
 	});
-	renderMetadata(bundle.metadata, fileName); const skyboxTexture = await buildSkyboxCubeTexture(skyboxFaces); console.info('[skybox] faces=' + (skyboxFaces ? skyboxFaces.length : 0) + ' tex=' + !!skyboxTexture);
+	renderMetadata(bundle.metadata, fileName);
+	const topbarMapEl = document.getElementById('topbarMapName');
+	if (topbarMapEl) {
+		const mapLabel = bundle.metadata.mapName || fileName;
+		topbarMapEl.textContent = mapLabel;
+		topbarMapEl.title = mapLabel;
+	}
+	const skyboxTexture = await buildSkyboxCubeTexture(skyboxFaces); console.info('[skybox] faces=' + (skyboxFaces ? skyboxFaces.length : 0) + ' tex=' + !!skyboxTexture);
 
 	const sceneData: SceneDataMessage = {
 		type: 'scene-data',
@@ -3068,6 +3076,22 @@ function pushHealthLog(message: string): void {
   const cnt = document.getElementById('health-count');
   if (cnt) cnt.textContent = String(healthLogLines.length);
 }
+const debugBuildRevBtn = document.getElementById('debugBuildRev') as HTMLButtonElement | null;
+const debugBuildRevTextEl = document.getElementById('debugBuildRevText');
+if (debugBuildRevTextEl) {
+	debugBuildRevTextEl.textContent = RENDER_REV;
+	debugBuildRevTextEl.title = RENDER_REV;
+}
+let debugRevCopiedTimer = 0;
+debugBuildRevBtn?.addEventListener('click', () => {
+	void navigator.clipboard?.writeText(RENDER_REV).catch(() => {});
+	debugBuildRevBtn.classList.add('copied');
+	window.clearTimeout(debugRevCopiedTimer);
+	debugRevCopiedTimer = window.setTimeout(() => {
+		debugBuildRevBtn.classList.remove('copied');
+	}, 1200);
+});
+
 const healthClearBtn = document.getElementById('health-clear');
 healthClearBtn?.addEventListener('click', () => {
   healthLogLines.length = 0;
