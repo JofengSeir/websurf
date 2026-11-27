@@ -20,7 +20,13 @@
  *
  * 本模块只建 DOM 与回写显示：值落到哪、现场怎么施加，由各端传进来的 `RenderPanelApi` 决定。
  */
-import { panelGroupsFor, panelItemsFor, type RenderPanelApp, type RenderPanelItem } from './render-panel-spec.js';
+import {
+  panelGroupsFor,
+  panelItemsFor,
+  type RenderPanelApp,
+  type RenderPanelGroup,
+  type RenderPanelItem,
+} from './render-panel-spec.js';
 
 /** 单项当前值（slider/number = 数值；toggle = 布尔；select/text = 字符串）。 */
 export type RenderPanelValue = number | boolean | string;
@@ -41,6 +47,10 @@ export interface RenderPanelApi {
    * 而不是让用户改了没反应还以为坏了（owner 2026-10-16：面板通路要交代清楚）。
    */
   hasMap?(): boolean;
+  /** 可选：只渲染指定的分组（如 debug 端拆成日常画面与 A/B 排查两个宿主）。 */
+  groups?: readonly RenderPanelGroup[];
+  /** 可选：隐藏逐项的生效提示小字（用于分组顶部已有统一提示时）。 */
+  hideItemNotes?: boolean;
 }
 
 /** `grid` = 行元素直接挂进宿主栅格（debug）；`row` = 每行一个容器（game / viewer）。 */
@@ -436,16 +446,31 @@ function buildToggleRow(item: RenderPanelItem, skin: RenderPanelSkin, api: Rende
   return row;
 }
 
+function groupsFor(api: RenderPanelApi): readonly RenderPanelGroup[] {
+  const all = panelGroupsFor(api.app);
+  if (!api.groups) return all;
+  const allow = new Set(api.groups);
+  return all.filter((g) => allow.has(g));
+}
+
+function itemsFor(api: RenderPanelApi): readonly RenderPanelItem[] {
+  const all = panelItemsFor(api.app);
+  if (!api.groups) return all;
+  const allow = new Set(api.groups);
+  return all.filter((i) => allow.has(i.group));
+}
+
 function buildItem(item: RenderPanelItem, skin: RenderPanelSkin, api: RenderPanelApi, onChange: () => void): HTMLElement[] {
   if (item.kind === 'toggle') return [buildToggleRow(item, skin, api, onChange)];
 
+  const showNote = !api.hideItemNotes && needsNote(item);
   const control = makeControl(item, skin, api, onChange);
   const hasValue = item.kind === 'slider';
   if (skin.variant === 'grid') {
     // debug：label 格 / 控件 / 读数 都是宿主 .ctrl-grid 的直接子元素（与既有行完全同构）
     const out = [makeLabel(item, skin, api, onChange), control];
     if (hasValue) out.push(makeValueCell(item, skin, api, onChange));
-    if (needsNote(item)) out.push(makeNote(item, skin));
+    if (showNote) out.push(makeNote(item, skin));
     return out;
   }
   const row = document.createElement('div');
@@ -453,13 +478,13 @@ function buildItem(item: RenderPanelItem, skin: RenderPanelSkin, api: RenderPane
   row.append(makeLabel(item, skin, api, onChange), control);
   if (hasValue) row.append(makeValueCell(item, skin, api, onChange));
   if (!skin.wrapLabel) row.append(makeReset(item, skin, api, onChange));
-  if (needsNote(item) && skin.noteInRow) row.append(makeNote(item, skin));
-  return skin.noteInRow ? [row] : [row, makeNote(item, skin)];
+  if (showNote && skin.noteInRow) row.append(makeNote(item, skin));
+  return showNote && !skin.noteInRow ? [row, makeNote(item, skin)] : [row];
 }
 
 /** 用当前值回写所有控件显示（构建后与外部改动后都可调）。 */
 export function syncRenderPanel(host: HTMLElement, api: RenderPanelApi): void {
-  for (const item of panelItemsFor(api.app)) {
+  for (const item of itemsFor(api)) {
     const v = api.read(item);
     const id = CSS.escape(renderPanelControlId(item));
     const el = host.querySelector<HTMLInputElement | HTMLSelectElement>('#' + id);
@@ -494,8 +519,8 @@ export function buildRenderPanel(host: HTMLElement, api: RenderPanelApi): { sync
     syncRenderPanel(host, api);
     if (state) state.textContent = api.hasMap?.() ? '' : '当前未载入地图 —— 以下改动会在下次加载地图后生效';
   };
-  for (const group of panelGroupsFor(api.app)) {
-    const items = panelItemsFor(api.app).filter((i) => i.group === group);
+  for (const group of groupsFor(api)) {
+    const items = itemsFor(api).filter((i) => i.group === group);
     if (!items.length) continue;
     const title = document.createElement(skin.groupTag);
     if (skin.groupClass) title.className = skin.groupClass;
@@ -520,7 +545,7 @@ export function buildRenderPanel(host: HTMLElement, api: RenderPanelApi): { sync
   all.textContent = '全部恢复默认';
   all.title = '把本面板所有项恢复为默认值';
   all.addEventListener('click', () => {
-    for (const item of panelItemsFor(api.app)) api.reset(item);
+    for (const item of itemsFor(api)) api.reset(item);
     sync();
   });
   host.append(all);

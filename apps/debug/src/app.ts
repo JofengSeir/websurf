@@ -194,8 +194,6 @@ const dom = {
 	nearProbeDistNum: document.getElementById('nearProbeDistNum') as HTMLInputElement | null,
 	nearRatioRange: document.getElementById('nearRatio') as HTMLInputElement | null,
 	nearRatioNum: document.getElementById('nearRatioNum') as HTMLInputElement | null,
-	ambientIntensityRange: document.getElementById('ambientIntensity') as HTMLInputElement | null,
-	ambientIntensityNum: document.getElementById('ambientIntensityNum') as HTMLInputElement | null,
 	// 物理控制面板（碰撞箱体型控件 + 参数表容器 + 全部复位按钮）
 	hullScale: document.getElementById('hullScale') as HTMLInputElement | null,
 	hullScaleNum: document.getElementById('hullScaleNum') as HTMLInputElement | null,
@@ -256,30 +254,16 @@ function refreshEnhanceStatusLines(): void {
 	if (dom.enhanceStatusLine) {
 		dom.enhanceStatusLine.textContent = `增强插件：${enhanceHost?.describe() ?? '未初始化'}`;
 	}
-	if (dom.enhBrushVisibilityStatus) {
-		const status = enhanceHost?.statusOf('brush-visibility') ?? '';
-		dom.enhBrushVisibilityStatus.textContent = status
-			? `动态 brush 可见性：${status}`
-			: '动态 brush 可见性：未启用（默认关闭）';
-	}
-	if (dom.enhPropAppearanceStatus) {
-		const status = enhanceHost?.statusOf('prop-appearance') ?? '';
-		dom.enhPropAppearanceStatus.textContent = status
-			? `prop 外观层级：${status}`
-			: 'prop 外观层级：未启用（默认关闭）';
-	}
-	if (dom.enhDamageHealthStatus) {
-		const status = enhanceHost?.statusOf('damage-health') ?? '';
-		dom.enhDamageHealthStatus.textContent = status
-			? `运行时伤害/生命：${status}`
-			: '运行时伤害/生命：未启用（默认关闭）';
-	}
-	if (dom.enhFadeScreenStatus) {
-		const status = enhanceHost?.statusOf('fade-screen') ?? '';
-		dom.enhFadeScreenStatus.textContent = status
-			? `运行时屏幕渐变：${status}`
-			: '运行时屏幕渐变：未启用（默认关闭）';
-	}
+	const setPluginLine = (el: HTMLElement | null, id: string, label: string): void => {
+		if (!el) return;
+		const status = enhanceHost?.statusOf(id) ?? '';
+		el.classList.toggle('hidden', !status);
+		el.textContent = status ? `${label}：${status}` : '';
+	};
+	setPluginLine(dom.enhBrushVisibilityStatus, 'brush-visibility', '动态 brush');
+	setPluginLine(dom.enhPropAppearanceStatus, 'prop-appearance', 'prop 外观');
+	setPluginLine(dom.enhDamageHealthStatus, 'damage-health', '伤害 / 生命');
+	setPluginLine(dom.enhFadeScreenStatus, 'fade-screen', '屏幕渐变');
 }
 
 /**
@@ -714,35 +698,35 @@ async function showMissingTextures(missing: string[] | undefined): Promise<void>
 // HUD（主线程本地采样，无 Worker 回传）
 // ---------------------------------------------------------------------------
 
-/** 主 HUD 统计行：位置/速度/onGround/PVS cluster 取自主线程渲染物理；计算/呈现双指标读 simClockStats + localFps（task-95）。 */
+/** 主 HUD 统计行：固定结构行防换行抖动，计算/呈现双指标读 simClockStats + localFps（task-95）。 */
 function updateStatsUI(): void {
 	if (!dom.statsEl) return;
 	const st = rendererMain?.getCurrentState();
 	if (!st) return;
-	const cluster = rendererMain?.getPvsCluster() ?? -1;
 	const lateral = Math.hypot(st.vel.x, st.vel.z);
-	// 相机位姿与物理状态分开给：复现画面要用**相机**的坐标与朝向（脚底坐标 + 物理 yaw
-	// 会差一个眼高和视角回摆，按它复刻永远差一点）。朝向用一度精度，够复刻且不刷屏。
+	const stateLabel = (st as { onLadder?: boolean }).onLadder ? '梯子' : st.onGround ? '地面' : '空中';
 	const cam = rendererMain?.getCameraPose() ?? null;
-	const camText = cam
-		? `<span class="label">相机</span> <span class="v">${cam.pos[0].toFixed(0)},${cam.pos[1].toFixed(0)},${cam.pos[2].toFixed(0)}</span>  ` +
-			`<span class="label">朝向</span> <span class="v">${cam.yawDeg.toFixed(1)},${cam.pitchDeg.toFixed(1)}</span>  `
-		: '';
-	// task-95：双指标「计算 xxxHz / 呈现 xxxfps」；simClockStats 未就绪/回放/单步闸门时计算侧显示 —。
+	const angText = cam ? `${cam.yawDeg.toFixed(1)}, ${cam.pitchDeg.toFixed(1)}` : '—';
+	const camPosText = cam ? `${cam.pos[0].toFixed(0)}, ${cam.pos[1].toFixed(0)}, ${cam.pos[2].toFixed(0)}` : '—';
 	const computeText = formatComputeHudText(rendererMain?.simClockStats ?? null, localFps);
-	const text =
-		`<span class="v">${computeText}</span>  <span class="label">位置</span> <span class="v">${st.pos.x.toFixed(0)},${st.pos.y.toFixed(0)},${st.pos.z.toFixed(0)}</span>  ` +
-		camText +
-		`<span class="label">速度</span> <span class="v">${lateral.toFixed(0)}</span>  <span class="label">状态</span> <span class="v">${(st as { onLadder?: boolean }).onLadder ? '梯子' : st.onGround ? '地面' : '空中'}</span>  <span class="label">cluster</span> <span class="v">${cluster >= 0 ? cluster : '—'}</span>`;
-	dom.statsEl.innerHTML = text;
+	dom.statsEl.innerHTML =
+		`<div class="hud-row"><span class="hud-k">帧率</span><span class="hud-v">${computeText}</span></div>` +
+		`<div class="hud-row"><span class="hud-k">移动</span><span class="hud-v hud-split"><span>${stateLabel} · ${lateral.toFixed(0)} u/s</span><span class="hud-sub">朝向 ${angText}</span></span></div>` +
+		`<div class="hud-row"><span class="hud-k">位置</span><span class="hud-v">${st.pos.x.toFixed(0)}, ${st.pos.y.toFixed(0)}, ${st.pos.z.toFixed(0)}</span></div>` +
+		`<div class="hud-row"><span class="hud-k">相机</span><span class="hud-v">${camPosText}</span></div>`;
 	if (dom.planeInfoEl) {
-		dom.planeInfoEl.textContent = formatPlaneInfo(rendererMain?.getPlaneInfo() ?? null);
+		const show = config.debug.showPlaneInfo;
+		dom.planeInfoEl.classList.toggle('hidden', !show);
+		if (show) {
+			const detail = escapeHtml(formatPlaneInfo(rendererMain?.getPlaneInfo() ?? null));
+			dom.planeInfoEl.innerHTML = `<div class="hud-row"><span class="hud-k">准星</span><span class="hud-plane">${detail}</span></div>`;
+		}
 	}
 }
 
 /** 准星信息格式化（按 PlaneInfo.type 分 mesh / solid / ladder / trigger 四支）。 */
 function formatPlaneInfo(info: PlaneInfo | null): string {
-	if (!info) return '准星 —';
+	if (!info) return '—';
 	const [px, py, pz] = info.point;
 	const dist = info.distance.toFixed(0);
 	switch (info.type) {
@@ -760,7 +744,7 @@ function formatPlaneInfo(info: PlaneInfo | null): string {
 						.join(' ')
 				: '';
 			return (
-				`准星 模型「${info.meshName ?? ''}」 ${dist}HU [${px.toFixed(0)},${py.toFixed(0)},${pz.toFixed(0)}]` +
+				`模型「${info.meshName ?? ''}」 ${dist}HU [${px.toFixed(0)},${py.toFixed(0)},${pz.toFixed(0)}]` +
 				(info.bspFace != null ? ` 面#${info.bspFace}` : '') +
 				(info.sourceTri != null && info.sourceTri >= 0 ? ` tri${info.sourceTri}` : '') +
 				(info.materialName ? ` 材质:${info.materialName}` : '') +
@@ -772,7 +756,7 @@ function formatPlaneInfo(info: PlaneInfo | null): string {
 		case 'ladder': {
 			const n = info.normal ? info.normal.map((v) => v.toFixed(2)).join(',') : '—';
 			return (
-				`准星 ${info.type === 'solid' ? '实体面' : '梯子面'}` +
+				`${info.type === 'solid' ? '实体面' : '梯子面'}` +
 				`#${info.brushIndex} ${dist}HU 法线(${n}) [${px.toFixed(0)},${py.toFixed(0)},${pz.toFixed(0)}]`
 			);
 		}
@@ -780,12 +764,12 @@ function formatPlaneInfo(info: PlaneInfo | null): string {
 			const t = info.triggerTarget ?? '—';
 			const dest = info.triggerDestIdx ?? -1;
 			return (
-				`准星 触发面「${info.triggerClassname ?? 'trigger'}」→${t}(dest#${dest}) ${dist}HU` +
+				`触发面「${info.triggerClassname ?? 'trigger'}」→${t}(dest#${dest}) ${dist}HU` +
 				(info.triggerStartDisabled ? ' [禁用]' : '')
 			);
 		}
 		default:
-			return '准星 —';
+			return '—';
 	}
 }
 
@@ -793,14 +777,15 @@ function formatPlaneInfo(info: PlaneInfo | null): string {
 function updateCullStatsUI(msg: CullStatsLike): void {
 	if (dom.cullStatsEl) {
 		const p = msg.pvs;
+		const distText = Number.isFinite(msg.cullDist) ? msg.cullDist.toFixed(0) : '全加载';
+		const clusterTag = p.cluster >= 0 ? `C#${p.cluster}` : 'C#—';
+		const pvsText = p.totalClusters > 0
+			? `${clusterTag} · ${p.visibleClusters}/${p.totalClusters} (-${p.pvsHidden})`
+			: `${clusterTag} · 未接线`;
 		dom.cullStatsEl.innerHTML =
-			`<span class="label">可见</span> <span class="v">${msg.visible}/${msg.total}</span>  <span class="label">视距</span> <span class="v">${Number.isFinite(msg.cullDist) ? msg.cullDist.toFixed(0) : '全加载'}</span>  ` +
-			`<span class="label">cluster</span> <span class="v">${p.cluster >= 0 ? p.cluster : '—'}</span>  <span class="label">PVS</span> <span class="v">${p.totalClusters > 0 ? `${p.visibleClusters}/${p.totalClusters} 隐藏${p.pvsHidden}` : '未接线'}</span>  ` +
-			`<span class="label">LOD</span> <span class="v">近${p.near}/远${p.far}</span>  ` +
-			// 可见块「凭什么被画」：严格语义下只有 pvs（PVS 判可见）/ distance（仅有距离档）。
-			`<span class="label">凭什么画</span> <span class="v">pvs${msg.reasons?.pvs ?? 0} 距离${msg.reasons?.distance ?? 0}</span>  ` +
-			// 渲染代码版本：排查「现象还在」时先看这里，对不上就是浏览器/Service Worker 还在跑旧包。
-			`<span class="label">rev</span> <span class="v">${msg.rev ?? '—'}</span>`;
+			`<div class="hud-row"><span class="hud-k">渲染</span><span class="hud-v hud-split"><span>可见 ${msg.visible}/${msg.total}</span><span class="hud-sub">视距 ${distText}</span></span></div>` +
+			`<div class="hud-row"><span class="hud-k">PVS</span><span class="hud-v">${pvsText}</span></div>` +
+			`<div class="hud-row"><span class="hud-k">LOD</span><span class="hud-v hud-split"><span>近 ${p.near} / 远 ${p.far}</span><span class="hud-sub">pvs ${msg.reasons?.pvs ?? 0} · 距 ${msg.reasons?.distance ?? 0}</span></span></div>`;
 	}
 	updatePathCountsUI(); // 顺带刷新路径记录点数（~10Hz，够用）
 	updateFlightStatusUI(); // 飞行轨迹状态行同频刷新（录/播状态与进度）
@@ -1318,9 +1303,8 @@ function updateGameStatsUI(): void {
 	const cpLabel = snap.checkpointCount > 0
 		? `${snap.checkpointCount}(${snap.lastCheckpointName})`
 		: '0';
-	const text =
-		`<span class="label">阶段</span> <span class="v">${phaseLabel}</span>  <span class="label">计时</span> <span class="v">${timeLabel}</span>  <span class="label">检查点</span> <span class="v">${escapeHtml(cpLabel)}</span>  <span class="label">死亡</span> <span class="v">${snap.deaths}</span>`;
-	dom.gameStatsEl.innerHTML = text;
+	dom.gameStatsEl.innerHTML =
+		`<div class="hud-row"><span class="hud-k">计时</span><span class="hud-v hud-split"><span>${phaseLabel} · ${timeLabel}</span><span class="hud-sub">CP ${escapeHtml(cpLabel)} · 死 ${snap.deaths}</span></span></div>`;
 	// justDied 闪烁提示（500ms 后恢复）；色值取页面样式的 --err（index.html 的 <style> 块）
 	if (game.consumeJustDied()) {
 		dom.gameStatsEl.style.color = 'var(--err)';
@@ -1536,9 +1520,9 @@ let renderPanelHandle: { sync: () => void } | null = null;
 function setupRenderPanel(): void {
 	const host = document.getElementById('renderPanel');
 	if (!host) return;
-	const api: RenderPanelApi = {
+	const debugHost = document.getElementById('renderDebugPanel');
+	const baseApi: Omit<RenderPanelApi, 'groups' | 'hasMap' | 'hideItemNotes'> = {
 		app: 'debug',
-		hasMap: () => teleportMapName !== '',
 		read(item) {
 			if (item.global) {
 				return Boolean((globalThis as Record<string, unknown>)[item.global]);
@@ -1581,7 +1565,24 @@ function setupRenderPanel(): void {
 			if (item.apply === 'rebuild') scheduleMapReload();
 		},
 	};
-	renderPanelHandle = buildRenderPanel(host, api);
+	const mainHandle = buildRenderPanel(host, {
+		...baseApi,
+		hasMap: () => teleportMapName !== '',
+		groups: ['光照', '材质与法线', '剔除与相机', '雾'],
+	});
+	const debugHandle = debugHost
+		? buildRenderPanel(debugHost, {
+				...baseApi,
+				groups: ['排查·光照', '排查·材质'],
+				hideItemNotes: true,
+			})
+		: null;
+	renderPanelHandle = {
+		sync: () => {
+			mainHandle.sync();
+			debugHandle?.sync();
+		},
+	};
 }
 
 /** 应用准星风格到 DOM（CSS 变量 + 可见性 + 描边/中心点）。 */
@@ -1616,7 +1617,6 @@ function syncPrefsControls(): void {
 	setNum('mouseSens', config.input.sensitivity);
 	setNum('yawBindSpeed', config.input.yawBindSpeed);
 	setNum('pitchLimit', config.input.pitchLimit);
-	setNum('ambientIntensity', config.lighting.ambientIntensity);
 	setNum('cullDistance', config.lod.cullDistance);
 	setChk('showSolids', config.debug.showSolids);
 	setChk('showTriggers', config.debug.showTriggers);
@@ -1634,6 +1634,7 @@ function syncPrefsControls(): void {
 	if (dom.chOutlineChk) dom.chOutlineChk.checked = config.hud.crosshair.outline;
 	if (dom.chDotChk) dom.chDotChk.checked = config.hud.crosshair.dot;
 	if (dom.hudEl) dom.hudEl.style.display = config.hud.visible ? '' : 'none';
+	if (dom.planeInfoEl) dom.planeInfoEl.classList.toggle('hidden', !config.debug.showPlaneInfo);
 }
 
 /** 全部 UI 控件绑定（文件选择/面板/传送点/准星/显示设置）。 */
@@ -2005,13 +2006,6 @@ function bindUI(): void {
 		rendererMain?.setVhvLinear(dom.vhvLinearChk?.checked === true);
 	});
 
-	// 环境光强度（渲染即时生效；lighting 不随 UI 偏好持久化）
-	bindSlider(dom.ambientIntensityRange, dom.ambientIntensityNum, (v) => {
-		applyConfigPatch(config, 'lighting', { ambientIntensity: v });
-		rendererMain?.applyConfigPatch('lighting', { ambientIntensity: v });
-		inputBridge?.sendConfig('lighting', { ambientIntensity: v });
-	}, (v) => Math.round(v * 20) / 20);
-
 	// 缺失纹理确认弹窗关闭（两个入口：确认按钮 / 点击背板）。
 	//
 	// 2026-09-21 修：弹窗是**全屏浮层**（`position: fixed; inset: 0`）⇒ 盖住整个画布，
@@ -2068,6 +2062,7 @@ function bindUI(): void {
 		applyConfigPatch(config, 'debug', { showPlaneInfo: enabled });
 		rendererMain?.applyConfigPatch('debug', { showPlaneInfo: enabled });
 		inputBridge?.sendConfig('debug', { showPlaneInfo: enabled });
+		if (dom.planeInfoEl) dom.planeInfoEl.classList.toggle('hidden', !enabled);
 		saveUiPrefs();
 	});
 

@@ -61,11 +61,12 @@
     }
     button:hover:not(:disabled) { background: transparent; border-color: var(--accent); color: var(--accent); }
     button:disabled, select:disabled, input:disabled, textarea:disabled { opacity: 0.45; cursor: not-allowed; }
-    input[type="file"] { font-size: 11px; color: var(--text); }
+    input[type="file"] { width: 100%; font-size: 11px; color: var(--muted); }
     input[type="file"]::-webkit-file-upload-button {
       background: transparent; color: var(--text); border: 1px solid var(--border-strong);
       padding: 2px 8px; border-radius: var(--r); cursor: pointer;
     }
+    .hidden { display: none !important; }
     :focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; } ::selection { background: var(--accent-weak); color: var(--text); }
     /* 整体布局 */
     #app { display: flex; flex-direction: column; height: 100vh; width: 100vw; }
@@ -241,14 +242,10 @@
     .kv .k { color: var(--muted); }
     .kv .v { color: var(--text); }
 
-    /* 出生点选择 */
-    .spawn-select {
-      width: 100%; padding: 2px 4px;
-      background: var(--bg); color: var(--text);
-      border: 1px solid var(--border); border-radius: var(--r);
-      font-size: 11px;
-      max-height: 200px;
-    }
+    /* 出生点行：下拉框 + 重生按钮同排 */
+    .spawn-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+    .spawn-row .spawn-select { flex: 1; min-width: 0; }
+    .spawn-row button { flex: none; }
 
     /* 自定义传送点：表单与列表（列表行由 apps/debug/src/app.ts 的
        renderCustomTeleports 用 .tp-* 类生成） */
@@ -292,22 +289,41 @@
     .row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
     .row label { color: var(--muted); }
 
-    /* 预览区左上角读数（2026-09-28 起由右上移来）：四个子行由 app.ts 的 updateStatsUI /
-       updateCullStatsUI / updateGameStatsUI 写「标签+数值」span（.label 灰 / .v 亮）；planeInfo 保持纯文本 */
+    /* 预览区左上角读数：固定宽度 + 等宽表格行，防止数值跳动引起换行抖动 */
     #hud {
       position: absolute; top: 8px; left: 8px;
-      display: flex; flex-direction: column; gap: 3px;
+      width: 356px; max-width: calc(100% - 16px);
+      display: flex; flex-direction: column; gap: 0;
       background: var(--panel-trans);
       color: var(--text); padding: 6px 10px; border-radius: var(--r);
       font-size: 11px; font-family: var(--mono);
       pointer-events: none;
       border: 1px solid var(--border); border-left: 2px solid var(--accent);
-      line-height: 1.5;
-      min-width: 180px; max-width: 420px;
+      line-height: 1.55;
       font-variant-numeric: tabular-nums;
     }
-    #hud .label { color: var(--muted); }
-    #hud .v { color: var(--text); }
+    #hud .hud-sec { display: flex; flex-direction: column; gap: 1px; }
+    #hud .hud-sec + .hud-sec {
+      margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border);
+    }
+    #hud .hud-row {
+      display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 8px;
+      align-items: baseline; white-space: nowrap;
+    }
+    #hud .hud-k { color: var(--muted); }
+    #hud .hud-v {
+      color: var(--text); min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    #hud .hud-split {
+      display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+      min-width: 0; white-space: nowrap;
+    }
+    #hud .hud-sub { color: var(--muted); }
+    #hud .hud-plane {
+      white-space: normal; word-break: break-word; line-height: 1.45; color: var(--text);
+    }
+    #hud .hud-sec.hidden { display: none; }
     /* 中心准星：几何与配色全部由 --ch-* 变量驱动，变量由 `apps/debug/src/app.ts` 的 `applyCrosshair` 写入 */
     #crosshair {
       position: absolute; left: 50%; top: 50%;
@@ -828,11 +844,19 @@
     /* 读数列必须装得下数字框：原生行是 50px 列配 56px 的 .param-num，会溢出被侧栏裁掉
        （range 的 min-content 撑着 1fr 不让位，整条栅格比容器宽）。这里让 range 可以收缩、
        数字框填满自己的列，列宽仍是 110 / 1fr / 50，与同面板原生行的控件列保持齐平。 */
-    #renderPanel input[type="range"] { min-width: 0; }
-    /* 读数列：数字与单位同一行右对齐（原生行的 .val 是块级 + text-align:right，
-       数字框撑满整列会把单位挤到下一行） */
-    #renderPanel .val { min-width: 0; display: flex; justify-content: flex-end; align-items: baseline; gap: 2px; }
-    #renderPanel .val input.param-num { width: auto; flex: 0 1 auto; min-width: 0; }
+    .spawn-select {
+      width: 100%; padding: 2px 4px;
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: var(--r);
+      font-size: 11px;
+      max-height: 200px;
+    }
+    .rp-host input[type="range"] { min-width: 0; }
+    .rp-host .val { min-width: 0; display: flex; justify-content: flex-end; align-items: baseline; gap: 2px; }
+    .rp-host .val input.param-num { width: auto; flex: 0 1 auto; min-width: 0; }
+    .rp-host .rp-mapstate { grid-column: 1 / -1; }
+    .rp-host .rp-mapstate:empty { display: none; }
+    .rp-host .rp-reset-all { grid-column: 1 / -1; justify-self: start; margin-top: 6px; font-size: 11px; padding: 2px 8px; }
     /* 输入中的非法值（越界/非数字）：只标色，不改值、不夹取 */
     .ctrl-grid input.rp-invalid { border-color: var(--err, #e5484d); }
     .ctrl-grid input.rp-text {
@@ -919,17 +943,46 @@
         <div id="status" class="status">正在加载 WASM 模块...</div>
         <div id="error" class="error" style="display:none;"></div>
 
-        <!-- 文件输入 -->
-        <details open>
-          <summary>文件输入</summary>
+        <!-- 01 地图与传送 -->
+        <details id="customTeleportDetails" open>
+          <summary>地图与传送</summary>
           <div class="acc-body">
             <input type="file" id="bspFile" accept=".bsp" />
+            <div class="spawn-row">
+              <select id="spawnSelect" class="spawn-select" disabled>
+                <option>（加载 BSP 后填充）</option>
+              </select>
+              <button id="respawnBtn" disabled title="传回当前选中出生点">重生</button>
+            </div>
+            <div class="acc-divider">
+              <div class="acc-section-title">自定义传送点</div>
+              <div class="btn-row">
+                <button id="capturePosBtn" disabled title="保存当前玩家位置为传送点">保存当前位置</button>
+                <button id="addTeleportBtn" disabled title="手动输入坐标添加传送点">手动添加</button>
+              </div>
+              <form id="addTeleportForm" class="tp-form" style="display:none;">
+                <div class="tp-form-grid">
+                  <input id="tpX" class="tp-input" type="number" step="any" placeholder="X" />
+                  <input id="tpY" class="tp-input" type="number" step="any" placeholder="Y" />
+                  <input id="tpZ" class="tp-input" type="number" step="any" placeholder="Z" />
+                </div>
+                <input id="tpName" class="tp-input" type="text" placeholder="名称（可选）" />
+                <input id="tpYaw" class="tp-input" type="number" step="any" placeholder="yaw（可选，留空=保持当前朝向）" />
+                <div class="tp-form-actions">
+                  <button type="submit">添加</button>
+                  <button type="button" id="tpCancel">取消</button>
+                </div>
+              </form>
+              <div id="customTeleportList">
+                尚未添加传送点。保存当前位置或手动输入坐标，一键传送。
+              </div>
+            </div>
           </div>
         </details>
 
-        <!-- 视角与操作 -->
+        <!-- 02 操作与视角 -->
         <details open>
-          <summary>视角与操作</summary>
+          <summary>操作与视角</summary>
           <div class="acc-body">
             <div class="ctrl-grid">
               <label title="鼠标灵敏度（cs-movement 乘数：有效灵敏度 = 灵敏度 × m_yaw 0.022 deg/px）">鼠标灵敏度</label>
@@ -947,244 +1000,72 @@
           </div>
         </details>
 
-        <!-- 画面与光照（全功能）：控件由共享规格表 src/renderer-shared/config/render-panel-spec.ts 生成、
-             绑定点在 apps/debug/src/app.ts 的 setupRenderPanel —— 「渲染与视距」里已有的项（视距/纹理画质/
-             光照模式/环境光/近平面）不在这里重复。 -->
-        <details open>
-          <summary>画面与光照（全功能）</summary>
-          <div class="acc-body">
-            <div class="ctrl-grid" id="renderPanel"></div>
-          </div>
-        </details>
-
-        <!-- 渲染与视距（初始收起：面板默认只展开「文件输入」与「视角与操作」） -->
+        <!-- 03 画面与渲染 -->
         <details>
-          <summary>渲染与视距</summary>
+          <summary>画面与渲染</summary>
           <div class="acc-body">
             <div class="ctrl-grid">
-              <label title="视距剔除距离（HU）：超出此距离的几何体不渲染">视距上限</label>
-              <input type="range" id="cullDistance" min="1000" max="200000" step="1" value="12800" />
-              <div class="val"><input type="number" id="cullDistanceNum" class="param-num" min="1000" max="200000" step="any" value="12800" /></div>
+              <div class="ctrl-full acc-section-title">基础画面</div>
 
-              <!-- 本区不提供 PVS 开关：debug 侧剔除判据只有距离（`apps/debug/src/renderer/lod-manager.ts` 的 `update`），
-                   LodStats.pvsHidden 每轮刷新写 0，故 #cullStats 的「PVS」列不反映隐藏数。 -->
+              <label title="预烘焙 = 每像素采 lightmap + 逐顶点/ambient cube 烘焙光照；纯纹理 = 只上漫反射贴图（每帧光照开销最小，适合排查移动掉帧）">光照模式</label>
+              <div class="ctrl-radio-group ctrl-full">
+                <label class="ctrl-radio" title="采光照图集与烘焙光照"><input type="radio" name="lightingMode" value="baked" checked /><span>预烘焙</span></label>
+                <label class="ctrl-radio" title="只上漫反射贴图（即时生效）"><input type="radio" name="lightingMode" value="texture" /><span>纯纹理</span></label>
+              </div>
 
-              <div class="ctrl-full acc-divider"></div>
-              <div class="ctrl-full acc-section-title">纹理</div>
-
-              <label title="纹理画质：原始 = VTF 解码原图；压缩 = mosaic 字节码还原的低清纹理（切换即时生效，无需重载地图）">纹理画质</label>
+              <label title="纹理画质：原始 = VTF 解码原图；压缩 = mosaic 字节码还原的低清纹理（切换即时生效）">纹理画质</label>
               <div class="ctrl-radio-group ctrl-full">
                 <label class="ctrl-radio"><input type="radio" name="textureQuality" value="original" checked /><span>原始纹理</span></label>
                 <label class="ctrl-radio"><input type="radio" name="textureQuality" value="mini" /><span>压缩低清</span></label>
               </div>
 
-              <div class="ctrl-full acc-divider"></div>
-              <div class="ctrl-full acc-section-title">光照模式</div>
-
-              <label title="预烘焙 = 每像素采 lightmap atlas + 逐顶点/ambient cube 烘焙光照（每帧光照开销更大）；纯纹理 = 只上漫反射贴图（每帧光照开销最小）">光照模式</label>
-              <div class="ctrl-radio-group ctrl-full">
-                <label class="ctrl-radio"><input type="radio" name="lightingMode" value="baked" checked /><span>预烘焙</span></label>
-                <label class="ctrl-radio"><input type="radio" name="lightingMode" value="texture" /><span>纯纹理</span></label>
-              </div>
-              <!-- 说明段：静态文本（该 id 无读取点）；实际切换由单选触发 `apps/debug/src/app.ts` 的监听，再落到 `apps/debug/src/renderer/renderer-main.ts` 的 `setLightingMode`。 -->
-              <p class="hint ctrl-full" id="lightingModeHint">预烘焙：每个像素都采光照图集并算逐顶点/环境盒烘焙光照，画面有明暗关系，代价是每帧光照开销更大。纯纹理：只上漫反射贴图，不采光照图、不算烘焙项，每帧光照开销最小——这就是给「人物移动时渲染速度不要大幅跳变」用的旋钮（实际幅度取决于 GPU / 分辨率 / 地图）。切换即时生效（不重建场景、不打断操作）。</p>
-
               <div class="ctrl-checkbox-row ctrl-full">
                 <input type="checkbox" id="vhvLinearChk" />
-                <label for="vhvLinearChk" title="只作用于 prop 的逐顶点烘焙项（.vhv）。关闭 = 现状：把 vhv 值当线性光，先 pow(v, 2.2) 再乘（暗处更黑、相邻顶点差被放大）；开启 = Source 语义：.vhv 存的是屏幕倍率，直接在伽马空间当乘数用（整体更亮、曲面条带更淡）。即时生效，不改默认档。">vhv 线性（去伽马）</label>
+                <label for="vhvLinearChk" title="只作用于 prop 逐顶点烘焙项（.vhv）：关闭=pow(v,2.2) 线性光；开启=Source 伽马空间直乘（即时生效）">vhv 线性（去伽马）</label>
               </div>
 
-              <!-- 环境光强度（AmbientLight）已移除：地图与 prop 全走 lightmap 注入的 MeshBasicMaterial，
-                   不参与光照计算 ⇒ 该控件对画面无任何作用（owner 2026-10-16 指出，配置字段保留供协议兼容） -->
-
               <div class="ctrl-full acc-divider"></div>
-              <div class="ctrl-full acc-section-title">近平面（防贴墙透视）</div>
+              <div class="ctrl-full acc-section-title">视距与近平面</div>
 
-              <label title="近平面贴墙自适应探测距离：越大越斜的贴墙角度也能探测到（防透视），性能开销略增">探测距离</label>
+              <label title="视距剔除距离（HU）：超出此距离的几何体不渲染">视距上限</label>
+              <input type="range" id="cullDistance" min="1000" max="200000" step="1" value="12800" />
+              <div class="val"><input type="number" id="cullDistanceNum" class="param-num" min="1000" max="200000" step="any" value="12800" /></div>
+
+              <label title="近平面贴墙自适应探测距离：越大越斜的贴墙角度也能探测到（防透视）">贴墙探测距离</label>
               <input type="range" id="nearProbeDist" min="100" max="300" step="1" value="200" />
               <div class="val"><input type="number" id="nearProbeDistNum" class="param-num" min="100" max="300" step="any" value="200" /></div>
 
-              <label title="0 = 自动视锥防穿墙（最高深度精度）；> 0 时按 最近几何距离 × 此系数 额外收缩">收缩系数</label>
+              <label title="0 = 自动视锥防穿墙（最高深度精度）；> 0 时按 最近几何距离 × 此系数 额外收缩">近平面收缩</label>
               <input type="range" id="nearRatio" min="0" max="1" step="0.01" value="0" />
               <div class="val"><input type="number" id="nearRatioNum" class="param-num" min="0" max="1" step="any" value="0" /></div>
             </div>
-          </div>
-        </details>
 
-        <!-- 优化处理（默认全关）：3 个「有画面代价」的帧预算兜底开关。勾选 → apps/debug/src/app.ts 的
-             applyOptimizePatch：写 config.optimize → setOptimizeFlags()（共享模块
-             src/renderer-shared/config/optimize-flags.ts）→ water.ts / post-fx.ts 每帧读 optimizeFlag() 即时生效；
-             同时随 UI 偏好落盘（localStorage vbsp:uiPrefs），刷新后保持。初始收起（与其它区段一致）。 -->
-        <details>
-          <summary>优化处理</summary>
-          <div class="acc-body">
-            <div class="ctrl-grid">
-              <p class="hint ctrl-full">掉槽（帧预算不足）时止损用的兜底开关，<b>默认全关</b>：打开后画质会下降（水面滞后 1 帧 / 当前帧无光晕 / 倒影变糊），只在明显卡顿时再开。勾选即时生效，并随面板偏好保存。</p>
+            <div class="ctrl-grid rp-host acc-divider" id="renderPanel"></div>
+
+            <div class="ctrl-grid acc-divider">
+              <div class="ctrl-full acc-section-title">帧预算兜底（默认全关）</div>
 
               <div class="ctrl-checkbox-row ctrl-full">
                 <input type="checkbox" id="optWaterRtReuse" />
-                <label for="optWaterRtReuse" title="掉槽时本帧跳过水面折射/镜面反射的整场景 RT 渲染，直接复用上一帧结果：省一次全场景重绘，代价是水面倒影/折射滞后 1 帧（快速转身时能看出拖影）。">掉槽时复用上一帧水面反射（画面滞后 1 帧）</label>
+                <label for="optWaterRtReuse" title="掉槽时跳过水面折射/镜面反射的整场景 RT 渲染，复用上一帧结果（画面滞后 1 帧）">复用上一帧水面反射</label>
               </div>
 
               <div class="ctrl-checkbox-row ctrl-full">
                 <input type="checkbox" id="optBloomDirect" />
-                <label for="optBloomDirect" title="掉槽时跳过光晕整条链（亮度提取 / 模糊 / 叠加），主画面直出：省若干次全屏 pass，代价是当前帧没有光晕（高光不发散、光效减弱）。">掉槽时跳过光晕直出（光效减弱）</label>
+                <label for="optBloomDirect" title="掉槽时跳过光晕全屏 pass，主画面直出（高光减弱）">掉槽跳过光晕</label>
               </div>
 
               <div class="ctrl-checkbox-row ctrl-full">
                 <input type="checkbox" id="optMirrorLowRes" />
-                <label for="optMirrorLowRes" title="水面镜面反射 RT 从 1024² 降到 512² 渲染后再拉伸采样：反射 pass 像素量降到 1/4，代价是倒影边缘变糊（近处明显、远景几乎看不出）。">水面镜面反射半分辨率（倒影变糊）</label>
+                <label for="optMirrorLowRes" title="水面镜面反射 RT 从 1024² 降到 512²（像素量 1/4，倒影略糊）">镜面反射半分辨率</label>
               </div>
             </div>
           </div>
         </details>
 
-        <!-- 增强插件（实验，默认全关）：把 BSP 审计发现的「引擎当前缺失、但部分地图依赖」的语义
-             做成可选增强。关闭时不动态 import 插件、不挂实体事件回调（零成本）；勾选 →
-             apps/debug/src/app.ts 的 enhanceHost.setEnabled → 动态 import 并对实体事件生效；
-             随 UI 偏好落盘（localStorage vbsp:enhance），刷新后保持。 -->
+        <!-- 04 物理与体型 -->
         <details>
-          <summary>增强插件（实验）</summary>
-          <div class="acc-body">
-            <div class="ctrl-grid">
-              <p class="hint ctrl-full"><b>默认全关</b>：关闭时不加载插件代码、不订阅实体事件，不影响现有性能；开启后只增加对应事件的消费。每项独立可关，出问题取消勾选即可（不会改动引擎既有链路）。</p>
-
-              <div class="ctrl-checkbox-row ctrl-full">
-                <input type="checkbox" id="enhRuntimeTeleport" />
-                <label for="enhRuntimeTeleport" title="补「StartDisabled=1 的传送触发器在运行期被 Enable 后不生效」的缺口：由 TS 实体层判定接触，经主线程物理 + Worker 权威双端施加传送（含落点朝向）。Rust 静态传送链保持原样；玩家已在落点附近时跳过，避免重复传送。">运行时传送（补 StartDisabled 传送门 Enable 缺口）</label>
-              </div>
-
-              <div class="ctrl-checkbox-row ctrl-full">
-                <input type="checkbox" id="enhBrushVisibility" />
-                <label for="enhBrushVisibility" title="补「brush 实体被脚本 Enable/Disable/Toggle 后在渲染上不消失/不恢复」的缺口：载图时从合并几何的来源表建「实体→区间」索引，收到实体层的 brush 开关事件时只把该实体自己的三角形区间退化为零面积（索引几何改 index；非索引几何把区间顶点塌到同一点），恢复时逐字节写回。只动目标实体区间，不改 draw call、不改其它实体。">动态 brush 可见性（实验）</label>
-              </div>
-
-              <div class="ctrl-full hint" id="enhBrushVisibilityStatus"
-                   title="已隐藏实体数 / 建索引实体数、退化三角与区间数、最后一次 brush 事件（实体下标:true|false）。控制台可用 __vbspEnhance.list() 查看同一状态。">动态 brush 可见性：未启用（默认关闭）</div>
-
-              <div class="ctrl-checkbox-row ctrl-full">
-                <input type="checkbox" id="enhPropAppearance" />
-                <label for="enhPropAppearance" title="补「prop_dynamic* 的 rendermode / renderamt / renderfx / parentname 在 GLB 里丢失」的缺口：导出时写进道具节点 extras，装载期按字段应用——rendermode 10（不渲染）/ EF_NODRAW 直接隐藏，透明类 rendermode 按 renderamt 调材质透明度，parentname 只记父子关系供诊断（当前 brush 平台本身不动，暂不驱动跟随）。skin 需要 GLB 带出多套材质才能切换，本插件只报告数量、不改外观。">prop 外观层级（rendermode / 透明 / 隐藏）</label>
-              </div>
-
-              <div class="ctrl-full hint" id="enhPropAppearanceStatus"
-                   title="已应用外观的 prop 节点数、隐藏数、透明数、被跳过的 skin 数。控制台可用 __vbspEnhance.list() 查看同一状态。">prop 外观层级：未启用（默认关闭）</div>
-
-              <div class="ctrl-checkbox-row ctrl-full">
-                <input type="checkbox" id="enhDamageHealth" />
-                <label for="enhDamageHealth" title="补「trigger_hurt 只发伤害事件、玩家没有生命值模型」的缺口：消费实体层的 entity:damage 事件，维护 HP/护甲并把结果写到下方状态行；HP 归零时按 Source 语义传回本图主出生点并重置。只影响玩家状态与传送，不改物理/渲染链；默认关。">运行时伤害/生命（给玩家补 HP 模型）</label>
-              </div>
-
-              <div class="ctrl-full hint" id="enhDamageHealthStatus"
-                   title="当前 HP/护甲、最近一次伤害、死亡与重生次数。控制台可用 __vbspEnhance.list() 查看同一状态。">运行时伤害/生命：未启用（默认关闭）</div>
-
-              <div class="ctrl-checkbox-row ctrl-full">
-                <input type="checkbox" id="enhFadeScreen" />
-                <label for="enhFadeScreen" title="补「env_fade 触发后屏幕没有淡入淡出」的缺口：消费实体层的 env_fade 事件（rendercolor/renderamt/duration/hold/flags），用一张不拦截鼠标的全屏覆盖层按 Source 时间轴近似呈现（IN 从颜色淡回、OUT 淡到颜色后保持 hold、STAYOUT 不淡出）。默认关：不装载插件、不建覆盖层、无 rAF 循环。">运行时屏幕渐变（过场黑屏/绿屏）</label>
-              </div>
-
-              <div class="ctrl-full hint" id="enhFadeScreenStatus"
-                   title="已消费的渐变次数、最近一次参数、覆盖层状态。控制台可用 __vbspEnhance.list() 查看同一状态。">运行时屏幕渐变：未启用（默认关闭）</div>
-
-              <div class="ctrl-full hint" id="enhanceStatusLine"
-                   title="当前启用的增强插件与运行时统计（传送次数 / 跳过次数）。控制台也可用 __vbspEnhance.status() 查看。">增强插件：全部关闭（零成本）</div>
-            </div>
-          </div>
-        </details>
-
-        <!-- 路径记录：两条物理计算线各记一串「脚底中心点」（PhysWorld 状态的原点 x/y/z；camY = posY + eyeHeight 才是眼睛位置）。
-             采样严格按各自的计算节点、不做定时轮询：渲染物理线取主线程 predPhys（每 rAF 物理步一节点），
-             tick 物理线取 Worker 权威帧（只在权威版本号变化时落点，节点率 = 权威固定步长的倒数，步长由面板 tickRate 交给
-             `src/ts-shared/auth/auth-loop.ts` 的 `AuthLoop.setFixedDt`）。节点之间直连直线段、不插值；相邻节点距离 > JUMP_BREAK（100 HU）处不连线。
-             tick 节点时间戳取「该帧发布所依据的渲染采样时刻 τ」，未投影时回落到轮询时刻。折角着色两档：≤20° 保持琥珀、>20° 染红
-             （`apps/debug/src/renderer/path-recorder.ts` 的 `turnColor`）。导出均为原始节点，带 t 供外部按时间对齐。
-             初始收起：面板默认只展开「文件输入」与「视角与操作」。 -->
-        <details>
-          <summary>路径记录</summary>
-          <div class="acc-body">
-            <div class="ctrl-grid">
-              <div class="ctrl-full path-legend"
-                   title="两条线都记录 PhysWorld 脚底中心点（origin 的 x/y/z），节点之间直连直线段（真实轨迹），跳变 >100 HU（respawn/传送）处自动断开不连线。采样严格按各自的计算节点：渲染物理 = 主线程 predPhys 每个 rAF 物理步一个节点（更新率 = 显示器刷新率）；tick 物理 = Worker 权威帧每来一帧新的（V_A 变化）一个节点（64 档 ≈ 67 节点/秒）。tick 段按折角着色，只有两档：≤20° 保持 tick 线本色（琥珀）、>20° 染红标出硬折角。导出均为原始节点，带 t 供外部按时间对齐。">
-                <span class="lg-render">■</span> 渲染物理（主线程 predPhys，每 rAF）<br />
-                <span class="lg-tick">■</span> tick 物理（Worker 权威帧，每新帧）
-                <span class="lg-break">■</span> 硬折角(&gt;20°)<br />
-                <span class="path-legend-note">tick 节点时间戳 = 该帧发布所依据的<b>渲染时钟采样时刻 τ</b>（不是轮询时刻）；权威发布位置即渲染轨迹上的一个采样点 → 偏差梳与垂距都应 ≈0。</span><br />
-              </div>
-
-              <div class="ctrl-full path-counts" id="pathCounts"
-                   title="两个度量口径不同，勿混用：①垂距 = 每个 tick 点到渲染折线的最短距离（投影钳位到线段；跳变 >100 HU 的段不参与）——对采样相位不敏感，是**验收口径**（面板为 ±250ms 近似窗，阈值 稳态 p95 ≤ 2 HU / max ≤ 10 HU）。②偏差梳 = 每个 tick 点与渲染线【同一时刻】插值位置的差——时间对齐、含切向滞后，会被 respawn/传送放大成数百 HU。">
-                未开始 · 渲染 0 点 / tick 0 点
-              </div>
-
-              <div class="ctrl-full btn-row">
-                <button id="pathToggleBtn">开始记录</button>
-                <button id="pathClearBtn">清除</button>
-                <button id="pathExportJsonBtn">导出 JSON</button>
-                <button id="pathExportCsvBtn">导出 CSV</button>
-              </div>
-
-              <label class="ctrl-check-row">
-                <input type="checkbox" id="pathRenderVisibleChk" checked /> 显示渲染物理线（密，320Hz）
-              </label>
-              <label class="ctrl-check-row">
-                <input type="checkbox" id="pathTickVisibleChk" checked /> 显示 tick 物理线 + 节点（64Hz）
-              </label>
-              <label class="ctrl-check-row"
-                     title="tick 节点方点（每 64Hz 一个）。方点在屏幕上密集时会连成一条'方链'、看起来不是线——此时可单独关掉它，只保留折线本身。">
-                <input type="checkbox" id="pathDotsVisibleChk" checked /> 显示 tick 节点方点
-              </label>
-              <label class="ctrl-check-row"
-                     title="每个 tick 节点画一条洋红短线，连到渲染线在【同一时刻】的插值位置。两个物理计算的差异在 3D 里最难看（tick 段 22 HU 被透视压扁、又被密的渲染线盖住），偏差梳把它变成一根根看得见的短线，且不受相机朝向影响。">
-                <input type="checkbox" id="pathDeviVisibleChk" /> 显示偏差梳（tick→渲染 同时刻连线）
-              </label>
-            </div>
-          </div>
-        </details>
-
-        <!-- 飞行轨迹（noclip 复播）：与上面的「路径记录」是两件事——那个记物理节点（脚底位置，用来对比
-             两条物理线是否一致），这个记**相机**位姿（世界位置 + yaw/pitch）。用途：有些场景坐标很难描述
-             （越界区域、模型背面、贴图拼接处），noclip 飞一遍录下来，导出 JSON，之后原样复播/按时间 seek
-             截图。复播不驱动物理、不吃输入，直接把相机钉到样本上，所以穿过几何也能重放、可反复重来。 -->
-        <details>
-          <summary>飞行轨迹（noclip 复播）</summary>
-          <div class="acc-body">
-            <div class="ctrl-grid">
-              <div class="ctrl-full path-counts" id="flightStatus"
-                   title="录的是相机位姿（世界坐标 + 朝向），采样 100Hz。复播时不推进物理、不读键鼠：相机完全由轨迹决定，因此同一时刻反复 seek 画面一致。">
-                未录 · 0 点
-              </div>
-
-              <div class="ctrl-full btn-row">
-                <button id="flightRecBtn">开始录制</button>
-                <button id="flightPlayBtn">从头复播</button>
-                <button id="flightStopBtn">停止复播</button>
-                <button id="flightClearBtn">清空</button>
-                <button id="flightExportBtn">导出 JSON</button>
-                <button id="flightImportBtn">载入 JSON…</button>
-                <input type="file" id="flightImportInput" accept=".json,application/json" hidden />
-              </div>
-
-              <label title="复播速度倍数（运行中改也即时生效）">复播速度</label>
-              <select id="flightSpeed">
-                <option value="0.25">0.25×</option>
-                <option value="0.5">0.5×</option>
-                <option value="1" selected>1×</option>
-                <option value="2">2×</option>
-                <option value="4">4×</option>
-              </select>
-
-              <label class="ctrl-check-row ctrl-full" title="播到末尾回到开头继续（录制时来回飞一圈的轨迹适合开着看）">
-                <input type="checkbox" id="flightLoopChk" /> 循环复播
-              </label>
-
-              <p class="hint ctrl-full">录制：切到「物理 → Noclip 自由飞行」，按 <b>开始录制</b> 后正常飞（这是相机位姿，不是脚底）。导出 JSON 交给自动化脚本后，用 <code>__vbspFlight.load(text)</code> + <code>seek(毫秒)</code> 就能把任一时刻的画面复现出来；面板的「从头复播」走同一条路。</p>
-            </div>
-          </div>
-        </details>
-
-        <!-- 物理（初始收起：面板默认只展开「文件输入」与「视角与操作」） -->
-        <details>
-          <summary>物理</summary>
+          <summary>物理与体型</summary>
           <div class="acc-body">
             <div class="ctrl-grid">
               <label>物理模式</label>
@@ -1200,18 +1081,11 @@
                 <option value="visual">可视模型网格</option>
                 <option value="phy">模型自带碰撞体(.phy)</option>
               </select>
-              <div class="ctrl-hint">重新加载地图生效</div>
-
-              <div class="ctrl-full btn-row">
-                <button id="respawnBtn" disabled>重生</button>
-              </div>
+              <div class="ctrl-hint">重载生效</div>
             </div>
 
-            <!-- 碰撞箱体积 -->
             <div class="acc-divider">
-              <div class="acc-section-title">
-                碰撞箱体积（CS:S 基准 32×32×72 / 蹲 54，倍率或数值）
-              </div>
+              <div class="acc-section-title">碰撞箱体积（CS:S 基准 32×32×72 / 蹲 54）</div>
               <div class="ctrl-grid">
                 <label title="按倍率缩放（相对默认体型）">倍率</label>
                 <input type="range" id="hullScale" min="0.5" max="2" step="0.05" value="1" />
@@ -1240,76 +1114,110 @@
               </div>
             </div>
 
-            <!-- 移动/力学参数（动态渲染） -->
             <div class="acc-divider">
-              <div class="acc-section-title">
-                力学参数（地速 / 重力 / 加速 / 跳跃等，拖动实时生效）
-              </div>
+              <div class="acc-section-title">力学参数（拖动实时生效）</div>
               <div id="physicsParamList" class="ctrl-grid"></div>
               <div class="param-footer">
                 <button id="resetAllPhysicsBtn">恢复全部默认</button>
                 <span class="src-note">
-                  来源：<span class="src-default">模式默认</span> / <span class="src-manual">手动修改</span>（仅本会话生效，不写入 UI 偏好）
+                  <span class="src-default">默认</span> / <span class="src-manual">手动</span>（仅本会话）
                 </span>
               </div>
             </div>
           </div>
         </details>
 
-        <!-- 出生点 -->
+        <!-- 05 调试线框 -->
         <details>
-          <summary>出生点</summary>
-          <div class="acc-body">
-            <select id="spawnSelect" class="spawn-select" disabled>
-              <option>（加载 BSP 后填充）</option>
-            </select>
-          </div>
-        </details>
-
-        <!-- 自定义传送点 -->
-        <details id="customTeleportDetails">
-          <summary>自定义传送点</summary>
-          <div class="acc-body">
-            <div class="btn-row">
-              <button id="capturePosBtn" disabled title="保存当前玩家位置为传送点">保存当前位置</button>
-              <button id="addTeleportBtn" disabled title="手动输入坐标添加传送点">手动添加</button>
-            </div>
-            <form id="addTeleportForm" class="tp-form" style="display:none;">
-              <div class="tp-form-grid">
-                <input id="tpX" class="tp-input" type="number" step="any" placeholder="X" />
-                <input id="tpY" class="tp-input" type="number" step="any" placeholder="Y" />
-                <input id="tpZ" class="tp-input" type="number" step="any" placeholder="Z" />
-              </div>
-              <input id="tpName" class="tp-input" type="text" placeholder="名称（可选）" />
-              <input id="tpYaw" class="tp-input" type="number" step="any" placeholder="yaw（可选，留空=保持当前朝向）" />
-              <div class="tp-form-actions">
-                <button type="submit">添加</button>
-                <button type="button" id="tpCancel">取消</button>
-              </div>
-            </form>
-            <div id="customTeleportList">
-              尚未添加传送点。保存当前位置或手动输入坐标，一键传送。
-            </div>
-          </div>
-        </details>
-
-        <!-- 准星与 HUD（初始收起：面板默认只展开「文件输入」与「视角与操作」） -->
-        <details>
-          <summary>准星与 HUD</summary>
+          <summary>调试线框</summary>
           <div class="acc-body">
             <div class="ctrl-grid">
+              <div class="ctrl-full acc-section-title">Brush 与 PVS</div>
+
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showSolids" />
+                <label for="showSolids" title="玩家附近碰撞箱线框：地面绿/斜坡黄/墙红">Brush 碰撞</label>
+              </div>
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showBevel" />
+                <label for="showBevel" title="BSP 原生 bevel 辅助碰撞面线框（白），可视距离跟随 brush 可视距离">BSP bevel 辅助面</label>
+              </div>
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showPvsRegions" />
+                <label for="showPvsRegions" title="按 PVS cluster 着色：红=当前簇；彩色=可见簇；暗灰=不可见（开启期间暂停 PVS 剔除）">PVS 区域着色</label>
+              </div>
+              <label title="brush 碰撞线框可视距离（HU）：0 = 全量">Brush 距离</label>
+              <input type="range" id="brushViewDistance" min="0" max="16384" step="64" value="512" />
+              <div class="val"><input type="number" id="brushViewDistanceNum" class="param-num" min="0" max="16384" step="any" value="512" /></div>
+
+              <div class="ctrl-full acc-divider"></div>
+              <div class="ctrl-full acc-section-title">触发器</div>
+
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showTriggers" />
+                <label for="showTriggers" title="传送触发器线框：青=已链接/紫=孤儿/灰=禁用/橙=非玩家">传送触发器</label>
+              </div>
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showPushTriggers" />
+                <label for="showPushTriggers" title="加速板体积线框（绿色，trigger_push）">加速板</label>
+              </div>
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showOtherTriggers" />
+                <label for="showOtherTriggers" title="其它实体 trigger 体积线框（黄色，trigger_multiple 等）">其它 trigger</label>
+              </div>
+              <label title="触发区域线框可视距离（HU）：0 = 全量">触发器距离</label>
+              <input type="range" id="triggerViewDistance" min="0" max="16384" step="64" value="0" />
+              <div class="val"><input type="number" id="triggerViewDistanceNum" class="param-num" min="0" max="16384" step="any" value="0" /></div>
+
+              <div class="ctrl-full acc-divider"></div>
+              <div class="ctrl-full acc-section-title">模型网格</div>
+
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showPhy" />
+                <label for="showPhy" title="模型自带 .phy 碰撞网格线框（橙色）">.phy 碰撞</label>
+              </div>
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showPhyBevel" />
+                <label for="showPhyBevel" title=".phy 凸体生成的 edge bevel 补面线框（品红），可视距离跟随 .phy 距离">.phy 生成补面</label>
+              </div>
+              <label title=".phy 碰撞网格可视距离（HU）：0 = 全量">.phy 距离</label>
+              <input type="range" id="phyViewDistance" min="0" max="16384" step="64" value="4096" />
+              <div class="val"><input type="number" id="phyViewDistanceNum" class="param-num" min="0" max="16384" step="any" value="4096" /></div>
+
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showVis" />
+                <label for="showVis" title="模型可视网格线框（紫色，与显示网格逐位一致）">可视网格</label>
+              </div>
+              <label title="可视网格线框可视距离（HU）">可视网格距离</label>
+              <input type="range" id="visViewDistance" min="128" max="16384" step="64" value="1024" />
+              <div class="val"><input type="number" id="visViewDistanceNum" class="param-num" min="128" max="16384" step="any" value="1024" /></div>
+            </div>
+          </div>
+        </details>
+
+        <!-- 06 HUD 与准星 -->
+        <details>
+          <summary>HUD 与准星</summary>
+          <div class="acc-body">
+            <div class="ctrl-grid">
+              <div class="ctrl-full acc-section-title">HUD</div>
+
               <div class="ctrl-checkbox-row ctrl-full">
                 <input type="checkbox" id="hudVisible" checked />
-                <label for="hudVisible">显示 HUD 信息</label>
+                <label for="hudVisible">显示左上 HUD</label>
               </div>
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="showPlaneInfo" />
+                <label for="showPlaneInfo" title="准星对准模型/实体面/触发面时，在 HUD 底部显示其名称与属性信息">准星射线检测</label>
+              </div>
+
+              <div class="ctrl-full acc-divider"></div>
+              <div class="ctrl-full acc-section-title">准星</div>
+
               <div class="ctrl-checkbox-row ctrl-full">
                 <input type="checkbox" id="showCrosshair" checked />
                 <label for="showCrosshair">显示准星</label>
               </div>
-
-              <div class="ctrl-full acc-divider"></div>
-              <div class="ctrl-full acc-section-title">准星样式</div>
-
               <label title="准星颜色">颜色</label>
               <input type="color" id="chColor" value="#4ade80" />
               <div></div>
@@ -1330,93 +1238,148 @@
                 <input type="checkbox" id="chDot" />
                 <label for="chDot" title="中心圆点">中心点</label>
               </div>
-
-              <div class="ctrl-full acc-divider"></div>
-              <div class="ctrl-full acc-section-title">准星信息</div>
-
-              <div class="ctrl-checkbox-row ctrl-full">
-                <input type="checkbox" id="showPlaneInfo" />
-                <label for="showPlaneInfo" title="准星对准模型/实体面/触发面时，在 HUD 显示其名称与属性信息">启用准星信息</label>
-              </div>
             </div>
           </div>
         </details>
 
-        <!-- 调试线框 -->
+        <!-- 07 渲染排查（A/B） -->
         <details>
-          <summary>调试线框</summary>
+          <summary>渲染排查（A/B）</summary>
+          <div class="acc-body">
+            <p class="hint" style="margin-top:0;margin-bottom:8px;">以下排查项随本端档保存，修改后需重新加载地图。</p>
+            <div class="ctrl-grid rp-host" id="renderDebugPanel"></div>
+          </div>
+        </details>
+
+        <!-- 08 录制与复播 -->
+        <details>
+          <summary>录制与复播</summary>
+          <div class="acc-body">
+            <div class="ctrl-grid">
+              <div class="ctrl-full acc-section-title">物理路径对比（主线程 vs Worker）</div>
+
+              <div class="ctrl-full path-legend"
+                   title="两条线均记录 PhysWorld 脚底中心点，跳变 >100 HU 自动断开。tick 节点时间戳 = 发布所依据的渲染时钟采样时刻 τ。">
+                <span class="lg-render">■</span> 渲染　
+                <span class="lg-tick">■</span> tick　
+                <span class="lg-break">■</span> 折角&gt;20°
+              </div>
+
+              <div class="ctrl-full path-counts" id="pathCounts"
+                   title="垂距 = tick 点到渲染折线最短距离（稳态验收口径）；偏差梳 = tick 点与渲染线同一时刻插值位置差。">
+                未开始 · 渲染 0 点 / tick 0 点
+              </div>
+
+              <div class="ctrl-full btn-row">
+                <button id="pathToggleBtn">开始记录</button>
+                <button id="pathClearBtn">清除</button>
+                <button id="pathExportJsonBtn">导出 JSON</button>
+                <button id="pathExportCsvBtn">导出 CSV</button>
+              </div>
+
+              <label class="ctrl-check-row ctrl-full">
+                <input type="checkbox" id="pathRenderVisibleChk" checked /> 显示渲染物理线
+              </label>
+              <label class="ctrl-check-row ctrl-full">
+                <input type="checkbox" id="pathTickVisibleChk" checked /> 显示 tick 物理线 + 节点
+              </label>
+              <label class="ctrl-check-row ctrl-full" title="关闭后只保留折线本身，避免密集方点连成方链">
+                <input type="checkbox" id="pathDotsVisibleChk" checked /> 显示 tick 节点方点
+              </label>
+              <label class="ctrl-check-row ctrl-full" title="从每个 tick 节点画洋红短线连到渲染线同一时刻的插值位置">
+                <input type="checkbox" id="pathDeviVisibleChk" /> 显示偏差梳
+              </label>
+
+              <div class="ctrl-full acc-divider"></div>
+              <div class="ctrl-full acc-section-title">相机飞行复播（noclip）</div>
+
+              <div class="ctrl-full path-counts" id="flightStatus"
+                   title="100Hz 录制相机位姿（世界坐标 + 朝向）。复播时不推进物理，支持 __vbspFlight.load(text) + seek(ms) 复现画面。">
+                未录 · 0 点
+              </div>
+
+              <div class="ctrl-full btn-row">
+                <button id="flightRecBtn">开始录制</button>
+                <button id="flightPlayBtn">从头复播</button>
+                <button id="flightStopBtn">停止复播</button>
+                <button id="flightClearBtn">清空</button>
+                <button id="flightExportBtn">导出 JSON</button>
+                <button id="flightImportBtn">载入 JSON…</button>
+                <input type="file" id="flightImportInput" accept=".json,application/json" hidden />
+              </div>
+
+              <label title="复播速度倍数（运行中改也即时生效）">复播速度</label>
+              <select id="flightSpeed">
+                <option value="0.25">0.25×</option>
+                <option value="0.5">0.5×</option>
+                <option value="1" selected>1×</option>
+                <option value="2">2×</option>
+                <option value="4">4×</option>
+              </select>
+              <div></div>
+
+              <label class="ctrl-check-row ctrl-full" title="播到末尾回到开头继续">
+                <input type="checkbox" id="flightLoopChk" /> 循环复播
+              </label>
+            </div>
+          </div>
+        </details>
+
+        <!-- 09 实验插件 -->
+        <details>
+          <summary>实验插件</summary>
           <div class="acc-body">
             <div class="ctrl-grid">
               <div class="ctrl-checkbox-row ctrl-full">
-                <input type="checkbox" id="showSolids" />
-                <label for="showSolids" title="玩家附近碰撞箱线框：地面绿/斜坡黄/墙红">显示brush碰撞</label>
+                <input type="checkbox" id="enhRuntimeTeleport" />
+                <label for="enhRuntimeTeleport" title="补 StartDisabled=1 传送门在运行期被 Enable 后不生效的缺口（默认关闭，零成本）">运行时传送</label>
               </div>
-              <div class="ctrl-checkbox-row ctrl-full">
-                <input type="checkbox" id="showPvsRegions" />
-                <label for="showPvsRegions" title="按 PVS cluster 给场景上色：红=你所在的 cluster；彩色=从它可见的其它 cluster（同簇同色）；暗灰=不可见。开启期间不按 PVS 剔除，方便对照。">显示PVS区域</label>
-              </div>
-              <div class="ctrl-checkbox-row ctrl-full">
-                <input type="checkbox" id="showBevel" />
-                <label for="showBevel" title="BSP 原生 bevel 辅助碰撞面线框（白）：编译器为「盒子别卡在棱上」生成的过棱平面，不构成实体表面、只在盒体扩张后的碰撞凸包里补支撑角；可视距离跟随 brush 可视距离">显示bevel辅助面</label>
-              </div>
-              <div class="ctrl-checkbox-row ctrl-full">
-                <input type="checkbox" id="showPhyBevel" />
-                <label for="showPhyBevel" title=".phy 凸体的生成补面线框（品红）：物理侧按 VBSP AddBrushBevels 的判据在解析期补齐的 edge bevel（过棱斜切轴面），也就是让模型尖脊能站的那张面。box bevel（该块的 AABB 面）不画，否则十几块叠起来会糊成一片；可视距离跟随 .phy 可视距离">显示.phy生成补面</label>
-              </div>
-              <label title="brush 碰撞线框显示可视距离（HU）：0 = 全量显示">brush 可视距离</label>
-              <input type="range" id="brushViewDistance" min="0" max="16384" step="64" value="512" />
-              <div class="val"><input type="number" id="brushViewDistanceNum" class="param-num" min="0" max="16384" step="any" value="512" /></div>
 
               <div class="ctrl-checkbox-row ctrl-full">
-                <input type="checkbox" id="showTriggers" />
-                <label for="showTriggers" title="传送触发器线框：青=已链接/紫=孤儿/灰=禁用/橙=非玩家（在地图脚本里负责回卷/传送）">显示传送触发器</label>
+                <input type="checkbox" id="enhBrushVisibility" />
+                <label for="enhBrushVisibility" title="消费实体层的 brush Enable/Disable/Toggle 事件，动态隐藏/恢复对应三角形区间">动态 brush 可见性</label>
               </div>
-              <div class="ctrl-checkbox-row ctrl-full">
-                <input type="checkbox" id="showPushTriggers" />
-                <label for="showPushTriggers" title="加速板体积线框（绿色，trigger_push）：站上去会被「设置速度」的区域">显示加速板区域</label>
-              </div>
-              <div class="ctrl-checkbox-row ctrl-full">
-                <input type="checkbox" id="showOtherTriggers" />
-                <label for="showOtherTriggers" title="其它实体 trigger 体积线框（黄色，trigger_multiple 等）：改名区、开关区等">显示其它触发区</label>
-              </div>
-              <label title="触发区域线框显示可视距离（HU）：0 = 全量显示">触发区域距离</label>
-              <input type="range" id="triggerViewDistance" min="0" max="16384" step="64" value="0" />
-              <div class="val"><input type="number" id="triggerViewDistanceNum" class="param-num" min="0" max="16384" step="any" value="0" /></div>
+              <div class="ctrl-full hint hidden" id="enhBrushVisibilityStatus"></div>
 
               <div class="ctrl-checkbox-row ctrl-full">
-                <input type="checkbox" id="showPhy" />
-                <label for="showPhy" title="模型自带 .phy 碰撞网格线框（橙色）">显示模型phy碰撞</label>
+                <input type="checkbox" id="enhPropAppearance" />
+                <label for="enhPropAppearance" title="按 prop extras 的 rendermode / renderamt / EF_NODRAW 应用隐藏与透明">prop 外观层级</label>
               </div>
-              <label title="phy 碰撞网格显示可视距离（HU）：0 = 全量显示">phy 可视距离</label>
-              <input type="range" id="phyViewDistance" min="0" max="16384" step="64" value="4096" />
-              <div class="val"><input type="number" id="phyViewDistanceNum" class="param-num" min="0" max="16384" step="any" value="4096" /></div>
+              <div class="ctrl-full hint hidden" id="enhPropAppearanceStatus"></div>
 
               <div class="ctrl-checkbox-row ctrl-full">
-                <input type="checkbox" id="showVis" />
-                <label for="showVis" title="模型可视网格线框（紫色，与显示网格逐位一致）">显示模型可视碰撞</label>
+                <input type="checkbox" id="enhDamageHealth" />
+                <label for="enhDamageHealth" title="消费 entity:damage 维护 HP/护甲，归零时传回主出生点">运行时伤害 / 生命</label>
               </div>
-              <label title="可视网格线框显示可视距离（HU）">可视网格距离</label>
-              <input type="range" id="visViewDistance" min="128" max="16384" step="64" value="1024" />
-              <div class="val"><input type="number" id="visViewDistanceNum" class="param-num" min="128" max="16384" step="any" value="1024" /></div>
+              <div class="ctrl-full hint hidden" id="enhDamageHealthStatus"></div>
+
+              <div class="ctrl-checkbox-row ctrl-full">
+                <input type="checkbox" id="enhFadeScreen" />
+                <label for="enhFadeScreen" title="消费 env_fade 事件按 Source 时间轴呈现屏幕淡入淡出">屏幕渐变（env_fade）</label>
+              </div>
+              <div class="ctrl-full hint hidden" id="enhFadeScreenStatus"></div>
+
+              <div class="ctrl-full hint" id="enhanceStatusLine"
+                   title="当前启用的增强插件与运行时统计。控制台可用 __vbspEnhance.status() 查看。">增强插件：全部关闭（零成本）</div>
             </div>
           </div>
         </details>
 
-        <!-- 元数据 -->
+        <!-- 10 诊断与元数据 -->
         <details>
-          <summary>元数据</summary>
+          <summary>诊断与元数据</summary>
           <div class="acc-body">
+            <div class="acc-section-title">地图元数据</div>
             <div id="metadata" class="kv">尚未解析</div>
-          </div>
-        </details>
 
-        <!-- 权威健康：Worker 侧 health-log 消息（`apps/debug/src/app.ts` 的 `handleWorkerMessage`），只保留最近 30 条 -->
-        <details>
-          <summary>权威健康</summary>
-          <div class="acc-body">
-            <div class="row"><label>消息数</label><span id="health-count">0</span>
-              <button type="button" id="health-clear">清空</button></div>
-            <pre id="health-log" class="health-log">（无消息）</pre>
+            <div class="acc-divider">
+              <div class="acc-section-title">权威健康日志（最近 30 条）</div>
+              <div class="row">
+                <label>消息数</label><span id="health-count">0</span>
+                <button type="button" id="health-clear">清空</button>
+              </div>
+              <pre id="health-log" class="health-log">（无消息）</pre>
+            </div>
           </div>
         </details>
       </div>
@@ -1432,10 +1395,21 @@
           <div class="ch-dot"></div>
         </div>
         <div id="hud">
-          <div id="stats">FPS —  位置 —  速度 —</div>
-          <div id="cullStats">可见 —  PVS —  LOD —</div>
-          <div id="gameStats">计时 —  检查点 —</div>
-          <div id="planeInfo">准星 —</div>
+          <div id="stats" class="hud-sec">
+            <div class="hud-row"><span class="hud-k">帧率</span><span class="hud-v">计算 — / 呈现 —</span></div>
+            <div class="hud-row"><span class="hud-k">移动</span><span class="hud-v hud-split"><span>—</span><span class="hud-sub">朝向 —</span></span></div>
+            <div class="hud-row"><span class="hud-k">位置</span><span class="hud-v">—</span></div>
+            <div class="hud-row"><span class="hud-k">相机</span><span class="hud-v">—</span></div>
+          </div>
+          <div id="cullStats" class="hud-sec">
+            <div class="hud-row"><span class="hud-k">渲染</span><span class="hud-v hud-split"><span>可见 —</span><span class="hud-sub">视距 —</span></span></div>
+            <div class="hud-row"><span class="hud-k">PVS</span><span class="hud-v">—</span></div>
+            <div class="hud-row"><span class="hud-k">LOD</span><span class="hud-v">—</span></div>
+          </div>
+          <div id="gameStats" class="hud-sec">
+            <div class="hud-row"><span class="hud-k">计时</span><span class="hud-v hud-split"><span>待开始 · 00:00.000</span><span class="hud-sub">CP 0 · 死 0</span></span></div>
+          </div>
+          <div id="planeInfo" class="hud-sec hidden"></div>
         </div>
         <div id="hints">
           点击画布锁定鼠标 / WASD 移动 / Space 跳跃 / Ctrl 蹲下 / F 使用 / G 关联 / Esc 退出
