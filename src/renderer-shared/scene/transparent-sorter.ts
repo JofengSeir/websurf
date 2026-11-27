@@ -29,11 +29,60 @@ function isFaceBefore(dists: Float64Array, a: number, b: number): boolean {
   return a < b;
 }
 
+const SEP_EPS = 0.25;
+const TOPO_MAX = 256;
+
+/**
+ * 单轴分离判定：判断 A、B 在某一坐标轴上是否严格分离以及相机站在哪一侧。
+ * 返回：-1 = A 在远端（A 应先于 B 绘制），1 = B 在远端（B 应先于 A 绘制），
+ *       2 = 相机严格夹在 A 与 B 之间（互不遮挡），0 = 轴上重叠/共面。
+ */
+function axisOrder(aMin: number, aMax: number, bMin: number, bMax: number, c: number): number {
+  if (aMax <= bMin + SEP_EPS && bMax - aMin > SEP_EPS * 2) {
+    if (c >= bMin - SEP_EPS && c > aMax + SEP_EPS) return -1;
+    if (c <= aMax + SEP_EPS && c < bMin - SEP_EPS) return 1;
+    if (c > aMax + SEP_EPS && c < bMin - SEP_EPS) return 2;
+  } else if (bMax <= aMin + SEP_EPS && aMax - bMin > SEP_EPS * 2) {
+    if (c >= aMin - SEP_EPS && c > bMax + SEP_EPS) return 1;
+    if (c <= bMax + SEP_EPS && c < aMin - SEP_EPS) return -1;
+    if (c > bMax + SEP_EPS && c < aMin - SEP_EPS) return 2;
+  }
+  return 0;
+}
+
+/**
+ * 三维轴对齐分离面定理：若 A 与 B 在某轴严格分离且相机在 B 侧（另一轴不反向分离，
+ * 且相机不被夹在两块之间），则每条同时命中 A 与 B 的视线必先命中 B，A 必须先画。
+ */
+function separatingOrder(
+  aMinX: number, aMaxX: number, aMinY: number, aMaxY: number, aMinZ: number, aMaxZ: number,
+  bMinX: number, bMaxX: number, bMinY: number, bMaxY: number, bMinZ: number, bMaxZ: number,
+  cx: number, cy: number, cz: number,
+): number {
+  const rx = axisOrder(aMinX, aMaxX, bMinX, bMaxX, cx);
+  if (rx === 2) return 0;
+  const ry = axisOrder(aMinY, aMaxY, bMinY, bMaxY, cy);
+  if (ry === 2) return 0;
+  const rz = axisOrder(aMinZ, aMaxZ, bMinZ, bMaxZ, cz);
+  if (rz === 2) return 0;
+  const aBeforeB = rx === -1 || ry === -1 || rz === -1;
+  const bBeforeA = rx === 1 || ry === 1 || rz === 1;
+  if (aBeforeB && !bBeforeA) return -1;
+  if (bBeforeA && !aBeforeB) return 1;
+  return 0;
+}
+
 /** 主根里的半透明块 + 排序用的复用 scratch（原 RenderSession 字段，引用同一批对象）。 */
 export class TransparentSorter {
   private chunks: THREE.Mesh[] = [];
   private readonly sortBox = new THREE.Box3();
   private readonly sortPoint = new THREE.Vector3();
+  private readonly visMeshes: THREE.Mesh[] = [];
+  private visBounds = new Float64Array(0);
+  private topoInDeg = new Int32Array(0);
+  private topoVisited = new Uint8Array(0);
+  private topoAdj = new Uint8Array(0);
+  private topoOrder = new Int32Array(0);
   /** 上次半透明排序时的相机位置与可见集指纹；用于「没动就别排」。 */
   private readonly sortLastPos = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);
   private sortLastHash = 0;
@@ -471,6 +520,8 @@ export class TransparentSorter {
     this.sortLastVisible = visCount;
     this.sortLastHash = visHash;
     this.sortLastPos.copy(cameraPos);
+    const visMeshes = this.visMeshes;
+    visMeshes.length = 0;
     for (const mesh of list) {
       const geom = mesh.geometry;
       if (!geom) continue;
@@ -479,23 +530,120 @@ export class TransparentSorter {
       const local = geom.boundingBox;
       if (!local) {
         mesh.userData.__vbspTransparentDist = 0;
-        continue;
+      } else {
+        box.copy(local).applyMatrix4(mesh.matrixWorld);
+        box.clampPoint(cameraPos, point);
+        mesh.userData.__vbspTransparentDist = point.distanceToSquared(cameraPos);
       }
-      box.copy(local).applyMatrix4(mesh.matrixWorld);
-      box.clampPoint(cameraPos, point);
-      mesh.userData.__vbspTransparentDist = point.distanceToSquared(cameraPos);
       if ((moved || pvsChanged) && (globalThis as { __vbspNoFaceSort?: unknown }).__vbspNoFaceSort !== true) {
         this.sortFaces(mesh, camera, pvs, pvsChanged);
       }
+      visMeshes.push(mesh);
     }
-    list.sort((a, b) => {
+    const n = visMeshes.length;
+    if (n === 0) return;
+    visMeshes.sort((a, b) => {
       const da = (a.userData.__vbspTransparentDist as number | undefined) ?? 0;
       const db = (b.userData.__vbspTransparentDist as number | undefined) ?? 0;
-      return db - da;
+      if (db !== da) return db - da;
+      return a.id - b.id;
     });
-    for (let i = 0; i < list.length; i++) {
-      const base = (list[i].userData.__vbspTransparentBaseOrder as number | undefined) ?? 0;
-      list[i].renderOrder = base + i;
+    if (n > 1 && n <= TOPO_MAX) {
+      if (this.visBounds.length < n * 6) this.visBounds = new Float64Array(n * 6);
+      if (this.topoInDeg.length < n) {
+        this.topoInDeg = new Int32Array(n);
+        this.topoVisited = new Uint8Array(n);
+        this.topoOrder = new Int32Array(n);
+      }
+      if (this.topoAdj.length < n * n) this.topoAdj = new Uint8Array(n * n);
+      const bounds = this.visBounds;
+      for (let i = 0; i < n; i++) {
+        const m = visMeshes[i];
+        const local = m.geometry.boundingBox;
+        const off = i * 6;
+        if (local) {
+          box.copy(local).applyMatrix4(m.matrixWorld);
+          bounds[off] = box.min.x;
+          bounds[off + 1] = box.max.x;
+          bounds[off + 2] = box.min.y;
+          bounds[off + 3] = box.max.y;
+          bounds[off + 4] = box.min.z;
+          bounds[off + 5] = box.max.z;
+        } else {
+          const p = m.position;
+          bounds[off] = p.x; bounds[off + 1] = p.x;
+          bounds[off + 2] = p.y; bounds[off + 3] = p.y;
+          bounds[off + 4] = p.z; bounds[off + 5] = p.z;
+        }
+      }
+      const inDeg = this.topoInDeg;
+      const adj = this.topoAdj;
+      inDeg.fill(0, 0, n);
+      adj.fill(0, 0, n * n);
+      const cx = cameraPos.x;
+      const cy = cameraPos.y;
+      const cz = cameraPos.z;
+      let hasReversal = false;
+      for (let i = 0; i < n; i++) {
+        const ai = i * 6;
+        const aMinX = bounds[ai], aMaxX = bounds[ai + 1];
+        const aMinY = bounds[ai + 2], aMaxY = bounds[ai + 3];
+        const aMinZ = bounds[ai + 4], aMaxZ = bounds[ai + 5];
+        for (let j = i + 1; j < n; j++) {
+          const bj = j * 6;
+          const rel = separatingOrder(
+            aMinX, aMaxX, aMinY, aMaxY, aMinZ, aMaxZ,
+            bounds[bj], bounds[bj + 1], bounds[bj + 2], bounds[bj + 3], bounds[bj + 4], bounds[bj + 5],
+            cx, cy, cz,
+          );
+          if (rel < 0) {
+            adj[i * n + j] = 1;
+            inDeg[j]++;
+          } else if (rel > 0) {
+            adj[j * n + i] = 1;
+            inDeg[i]++;
+            hasReversal = true;
+          }
+        }
+      }
+      if (hasReversal) {
+        const visited = this.topoVisited;
+        const order = this.topoOrder;
+        visited.fill(0, 0, n);
+        for (let k = 0; k < n; k++) {
+          let best = -1;
+          let bestDeg = 0x7fffffff;
+          for (let u = 0; u < n; u++) {
+            if (visited[u]) continue;
+            const d = inDeg[u];
+            if (d === 0) {
+              best = u;
+              break;
+            }
+            if (d < bestDeg) {
+              bestDeg = d;
+              best = u;
+            }
+          }
+          visited[best] = 1;
+          order[k] = best;
+          const row = best * n;
+          for (let v = 0; v < n; v++) {
+            if (adj[row + v]) inDeg[v]--;
+          }
+        }
+        for (let k = 0; k < n; k++) {
+          const m = visMeshes[order[k]];
+          const base = (m.userData.__vbspTransparentBaseOrder as number | undefined) ?? 0;
+          m.renderOrder = base + k;
+        }
+        return;
+      }
+    }
+    for (let i = 0; i < n; i++) {
+      const m = visMeshes[i];
+      const base = (m.userData.__vbspTransparentBaseOrder as number | undefined) ?? 0;
+      m.renderOrder = base + i;
     }
   }
 }

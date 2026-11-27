@@ -617,16 +617,18 @@ export function mergeIntoChunks(collectRoot: THREE.Object3D, opts?: MergeOptions
   if (perfOn) perf.cellAdapt = performance.now() - tCell;
 
   // ③ 分桶：按每个 mesh 的世界包围盒中心归 cell（横跨多 cell 的归中心所在 cell）。
-  //    半透明另起一套更细的 cell 并单独成桶 —— 排序键 z 是「整块包围球中心、块内槽共用」，
-  //    见 OPT_TRANS_CELL_DIV 处的说明。键前缀把两类桶彻底隔开：哪怕半透明细化后的 cell 编号
-  //    与不透明的撞上，也进不到同一个桶。不透明侧的键与产物与改前逐字相同。
+  //    半透明另起一套更细的 cell 并按材质 UUID 隔离 —— three 按 geometry.groups 固定槽序绘制，
+  //    不同半透明材质合并进同一块后无法按相机距离互排，还会放大 AABB 干扰 TransparentSorter；
+  //    拆开不增加 draw call（原多材质槽本来就是各自一次 draw）。不透明侧的键与产物逐字不变。
   const tBucket = perfOn ? performance.now() : 0;
   const cells = new Map<string, OptMeshInfo[]>();
   for (const it of infos) {
     // 面板可关：关掉后半透明与不透明同块（复现「水面被并进大块 ⇒ RT 自采样/放射反射」）。
     const isTrans = opts?.translucentSplit !== false && optIsTranslucent(it.mesh.material);
     const cs = isTrans ? cellSize / OPT_TRANS_CELL_DIV : cellSizeO;
-    const key = (isTrans ? 'T' : 'O') + optCellKey(it.cx, it.cy, it.cz, cs);
+    const key = isTrans
+      ? 'T' + optCellKey(it.cx, it.cy, it.cz, cs) + '|' + (it.mesh.material as THREE.Material).uuid
+      : 'O' + optCellKey(it.cx, it.cy, it.cz, cs);
     let arr = cells.get(key);
     if (!arr) {
       arr = [];

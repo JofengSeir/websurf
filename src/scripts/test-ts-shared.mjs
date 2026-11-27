@@ -63,6 +63,10 @@ const externalThreePlugin = {
   name: 'external-three',
   setup(build) {
     build.onResolve({ filter: /^three$/ }, () => ({ path: threeUrl, external: true }));
+    build.onResolve({ filter: /^three\/examples\/jsm\// }, (args) => ({
+      path: pathToFileURL(path.join(root, 'node_modules', args.path)).href,
+      external: true,
+    }));
   },
 };
 
@@ -130,6 +134,8 @@ const { BloomPostFx } = await loadTsBundle('src/renderer-shared/environment/post
 const { VisibilityController } = await loadTsBundle('src/renderer-shared/scene/visibility-controller.ts', 'visibility-controller');
 const { applyObliqueWaterClip } = await loadTsBundle('src/renderer-shared/shader/water/planar-reflect.ts', 'planar-reflect');
 const { TransparentSorter } = await loadTsBundle('src/renderer-shared/scene/transparent-sorter.ts', 'transparent-sorter');
+const { mergeIntoChunks } = await loadTsBundle('src/renderer-shared/scene/scene-optimizer.ts', 'scene-optimizer');
+const { mergeWaterSurfaces } = await loadTsBundle('src/renderer-shared/scene/water-merge.ts', 'water-merge');
 const { SpriteGlows } = await loadTsBundle('src/renderer-shared/scene/entity-extras/sprites.ts', 'entity-sprites');
 const { Beams } = await loadTsBundle('src/renderer-shared/scene/entity-extras/beams.ts', 'entity-beams');
 const { prepareClusterIndex, applyClusterIndex } = await loadTsBundle('src/renderer-shared/scene/cluster-filter.ts', 'cluster-filter');
@@ -2006,6 +2012,108 @@ test('entity-system: stats() 结构缓存与删/增实体失效保持准确', ()
   assert.equal(s3.entityCount, 2);
   assert.equal(s3.classCounts.info_player_start, undefined);
 });
+
+test('TransparentSorter 分离面拓扑排序：宽水面+分裂玻璃、水下反转、门帘遮挡、异侧不反转', () => {
+  const makeBoxMesh = (minX, minY, minZ, maxX, maxY, maxZ) => {
+    const g = new THREE.BoxGeometry(maxX - minX, maxY - minY, maxZ - minZ);
+    g.translate((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
+    g.computeBoundingBox();
+    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ transparent: true }));
+    m.updateMatrixWorld(true);
+    return m;
+  };
+
+  // 1. 宽水面 y=0 + 上方两块在 x=0 切开的玻璃 y=48
+  const water = makeBoxMesh(-500, 0, -100, 500, 0, 100);
+  const farGlass = makeBoxMesh(-500, 48, -100, 0, 48, 100);
+  const nearGlass = makeBoxMesh(0, 48, -100, 500, 48, 100);
+
+  const root = new THREE.Group();
+  root.add(water, farGlass, nearGlass);
+  const sorter = new TransparentSorter();
+  sorter.collect(root);
+
+  const cam = new THREE.PerspectiveCamera(75, 1, 1, 2000);
+  // 相机在玻璃上方右侧：水面最近点在脚下 (dist² ≈ 94² = 8836)，比远端玻璃 (200²+46² ≈ 42116) 更近，
+  // 但水面在 y=0、玻璃在 y=48、相机在 y=94，水面必须先于两块玻璃绘制。
+  cam.position.set(200, 94, -66);
+  sorter.update(cam, null, -1);
+  assert.ok(water.renderOrder < farGlass.renderOrder, '水面上方视角：水面必须先于远端玻璃绘制');
+  assert.ok(water.renderOrder < nearGlass.renderOrder, '水面上方视角：水面必须先于近端玻璃绘制');
+
+  // 水下视角 (y=-50)：玻璃在 y=48 比水面 y=0 更远，拓扑顺序反转
+  cam.position.set(200, -50, -66);
+  sorter.update(cam, null, -1);
+  assert.ok(farGlass.renderOrder < water.renderOrder, '水下视角：远端玻璃必须先于水面绘制');
+  assert.ok(nearGlass.renderOrder < water.renderOrder, '水下视角：近端玻璃必须先于水面绘制');
+
+  // 2. 门帘 vs 室内玻璃（z 分离）
+  const curtain = makeBoxMesh(-100, 0, -100, 100, 200, -100);
+  const roomGlass = makeBoxMesh(-100, 0, 100, 100, 0, 200);
+  const root2 = new THREE.Group();
+  root2.add(curtain, roomGlass);
+  const sorter2 = new TransparentSorter();
+  sorter2.collect(root2);
+  cam.position.set(0, 120, -400);
+  sorter2.update(cam, null, -1);
+  assert.ok(roomGlass.renderOrder < curtain.renderOrder, '门帘后方玻璃必须先于门帘绘制');
+
+  // 3. 相机严格夹在两块之间：互不遮挡，保持距离降序
+  const leftNear = makeBoxMesh(-150, 0, -50, -50, 100, 50);
+  const rightFar = makeBoxMesh(200, 0, -50, 400, 100, 50);
+  const root3 = new THREE.Group();
+  root3.add(leftNear, rightFar);
+  const sorter3 = new TransparentSorter();
+  sorter3.collect(root3);
+  cam.position.set(0, 50, 0);
+  sorter3.update(cam, null, -1);
+  assert.ok(rightFar.renderOrder < leftNear.renderOrder, '相机在两块之间时保持距离降序');
+});
+
+test('mergeIntoChunks 隔离不同半透明材质，且 mergeWaterSurfaces 支持单材质水面块', () => {
+  const makeQuad = (x0, y0, z0, x1, y1, z1, mat) => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute([
+      x0, y0, z0, x1, y0, z0, x1, y1, z1,
+      x0, y0, z0, x1, y1, z1, x0, y1, z1,
+    ], 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1], 2));
+    const m = new THREE.Mesh(g, mat);
+    m.updateMatrixWorld(true);
+    return m;
+  };
+
+  // 1. 同一 cell 内不同半透明材质不得合并成多材质块；同材质仍可合并
+  const matA = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.5 });
+  const matB = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.5 });
+  const root = new THREE.Group();
+  root.add(
+    makeQuad(0, 0, 0, 10, 10, 0, matA),
+    makeQuad(1, 0, 1, 11, 10, 1, matA),
+    makeQuad(2, 0, 2, 12, 10, 2, matB),
+  );
+  const res = mergeIntoChunks(root, { translucentSplit: true, opaqueTargetCells: 128 });
+  assert.equal(res.chunks.length, 2, '同一 cell 两种半透明材质应拆成 2 个单材质块');
+  for (const ch of res.chunks) {
+    assert.equal(Array.isArray(ch.material), false, '半透明合并块不得为多材质数组');
+  }
+
+  // 2. 单材质水面块（geometry.groups 为空）在 mergeWaterSurfaces 中正常归并
+  const waterMat = new THREE.MeshBasicMaterial({ transparent: true });
+  waterMat.userData.vbsp_water = { fog: [0.1, 0.1, 0.1] };
+  const wRoot = new THREE.Group();
+  wRoot.add(
+    makeQuad(0, 100, 0, 100, 100, 100, waterMat),
+    makeQuad(100, 100, 0, 200, 100, 100, waterMat),
+  );
+  const wStats = mergeWaterSurfaces(wRoot);
+  assert.ok(wStats && wStats.mergedMeshes === 1 && wStats.removedMeshes === 2, '单材质水面应成功归并');
+  assert.equal(wRoot.children.length, 1);
+  const mergedWater = wRoot.children[0];
+  assert.equal(Array.isArray(mergedWater.material), false, '单槽水面归并后应传单个 Material');
+  assert.equal(mergedWater.geometry.attributes.position.count, 12);
+});
+
 
 
 

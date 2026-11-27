@@ -105,6 +105,7 @@ function worldHeightOf(mesh: THREE.Mesh): number {
  *   逐属性按顶点区间切出并重建为无索引几何。
  */
 function extractSlotGeometry(baked: THREE.BufferGeometry, slot: number): THREE.BufferGeometry | null {
+  if (slot === 0 && baked.groups.length === 0) return baked.clone();
   const groups = baked.groups.filter((g) => g.materialIndex === slot);
   if (!groups.length) return null;
   const sub = new THREE.BufferGeometry();
@@ -290,7 +291,10 @@ export function mergeWaterSurfaces(root: THREE.Object3D): WaterMergeStats | null
       mergedGeometry.computeBoundingBox();
 
       // ④ 共享材质实例（不 clone）：水面 shader / 镜面驱动随后只注入这一次。
-      const mergedMesh = new THREE.Mesh(mergedGeometry, first.materials as THREE.Material | THREE.Material[]);
+      // 单材质槽合并几何无 geometry.groups，须传单个 Material（传长度为 1 的数组且无 groups 时 three 不绘制）。
+      const mergedMaterial: THREE.Material | THREE.Material[] =
+        first.materials.length === 1 ? first.materials[0] : first.materials;
+      const mergedMesh = new THREE.Mesh(mergedGeometry, mergedMaterial);
       mergedMesh.name = first.mesh.name || 'water-merged';
       mergedMesh.renderOrder = first.mesh.renderOrder;
       mergedMesh.layers.mask = first.mesh.layers.mask;
